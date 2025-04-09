@@ -8,27 +8,44 @@ import { Plus, ChevronRight, Users, FileText, Settings, Search } from "lucide-re
 import { Input } from "@/components/ui/input";
 import { clientService } from "@/services/client-service";
 import { Client } from "@/models/Client";
+import { useToast } from "@/components/ui/use-toast";
 
 export default function DashboardPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     async function loadClients() {
+      setIsLoading(true);
       try {
-        // Try to get clients from Firestore first
-        const firestoreClients = await clientService.getAllClients();
+        // Try to get clients from Firebase
+        const firebaseClients = await clientService.getAllClients();
+        setClients(firebaseClients);
         
-        if (firestoreClients.length > 0) {
-          setClients(firestoreClients);
-        } else {
-          // Fall back to mock clients if no clients in Firestore
+        if (firebaseClients.length === 0) {
+          // Show message if no clients found
+          toast({
+            title: "No se encontraron clientes",
+            description: "No hay clientes en la base de datos. Se mostrarán datos de ejemplo.",
+            variant: "default",
+          });
+          
+          // Fall back to mock clients if Firebase returns empty
           const mockClients = clientService.getMockClients();
           setClients(mockClients);
         }
       } catch (error) {
         console.error("Error loading clients:", error);
+        
+        // Show error toast
+        toast({
+          title: "Error de conexión",
+          description: "No se pudieron cargar los clientes desde Firebase. Se mostrarán datos de ejemplo.",
+          variant: "destructive",
+        });
+        
         // Fallback to mock clients on error
         const mockClients = clientService.getMockClients();
         setClients(mockClients);
@@ -38,7 +55,7 @@ export default function DashboardPage() {
     }
 
     loadClients();
-  }, []);
+  }, [toast]);
 
   // Filter clients based on search term
   const filteredClients = clients.filter(client => 
@@ -56,10 +73,10 @@ export default function DashboardPage() {
               <Link href="/dashboard" className="text-sm font-medium transition-colors hover:text-primary">
                 Dashboard
               </Link>
-              <Link href="/dashboard/clients" className="text-sm font-medium transition-colors hover:text-primary">
+              <Link href="#" className="text-sm font-medium transition-colors hover:text-primary">
                 Clientes
               </Link>
-              <Link href="/dashboard/settings" className="text-sm font-medium transition-colors hover:text-primary">
+              <Link href="#" className="text-sm font-medium transition-colors hover:text-primary">
                 Configuración
               </Link>
             </nav>
@@ -86,7 +103,31 @@ export default function DashboardPage() {
                 <Settings className="mr-2 h-4 w-4" />
                 Ajustes
               </Button>
-              <Button size="sm">
+              <Button size="sm" onClick={async () => {
+                try {
+                  // This would typically open a modal with a form
+                  // For now, just create a test client directly
+                  const testClient = await clientService.createClient({
+                    name: "Nuevo Cliente " + new Date().toLocaleTimeString(),
+                    rfc: "TEST" + Math.floor(Math.random() * 10000) + "XYZ",
+                    email: "test@ejemplo.com"
+                  });
+                  
+                  setClients(prev => [...prev, testClient]);
+                  
+                  toast({
+                    title: "Cliente creado",
+                    description: `${testClient.name} ha sido añadido correctamente.`,
+                  });
+                } catch (error) {
+                  console.error("Error creating client:", error);
+                  toast({
+                    title: "Error",
+                    description: "No se pudo crear el cliente.",
+                    variant: "destructive",
+                  });
+                }
+              }}>
                 <Plus className="mr-2 h-4 w-4" />
                 Nuevo Cliente
               </Button>
@@ -146,11 +187,9 @@ export default function DashboardPage() {
                 )}
               </CardContent>
               <CardFooter>
-                {clients.length > 0 && (
-                  <div className="text-sm text-gray-500">
-                    {filteredClients.length} de {clients.length} clientes
-                  </div>
-                )}
+                <div className="text-sm text-gray-500">
+                  {filteredClients.length} de {clients.length} clientes
+                </div>
               </CardFooter>
             </Card>
           </div>
