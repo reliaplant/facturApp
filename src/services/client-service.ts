@@ -22,17 +22,20 @@ export const clientService = {
     try {
       const clientId = `client_${Date.now()}`;
       
+      // Create a base client object with required fields
       const newClient: Client = {
         id: clientId,
         name: clientData.name,
         rfc: clientData.rfc,
-        curp: clientData.curp,
-        email: clientData.email,
-        phone: clientData.phone,
         isActive: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
+      
+      // Only add optional fields if they exist
+      if (clientData.email) newClient.email = clientData.email;
+      if (clientData.phone) newClient.phone = clientData.phone;
+      if (clientData.curp) newClient.curp = clientData.curp;
       
       await setDoc(doc(db, 'clients', clientId), newClient);
       

@@ -72,6 +72,22 @@ export interface Invoice {
   createdAt: string;        // Fecha de creación en el sistema
   updatedAt: string;        // Fecha de última actualización
   xmlContent?: string;      // Contenido XML de la factura (podría almacenarse en otro lugar)
+  
+  // Deductibility fields
+  isDeductible?: boolean;
+  deductibilityType?: 'full' | 'partial' | 'fixed' | 'none';
+  deductiblePercentage?: number;
+  deductibleAmount?: number;
+  deductibilityNotes?: string;
+  
+  // Campos adicionales de deducibilidad
+  deductionMonth?: number;          // Mes de deducción (mes en que se realizó el pago)
+  deductibleTaxedAmount?: number;   // Gravado (lo que se deduce)
+  deductibleVAT?: number;           // IVA deducible
+  deductibleRateZero?: number;      // Tasa 0
+  deductibleExempt?: number;        // Exento
+  deductibleTotal?: number;         // Total deducible (gravado + IVA + exento)
+  deductibleDifference?: number;    // Diferencia entre total deducible y total de la factura
 }
 
 /**

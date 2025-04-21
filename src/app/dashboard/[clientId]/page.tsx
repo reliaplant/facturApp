@@ -18,6 +18,7 @@ import { processCFDIFiles } from "@/services/cfdi-parser";
 import { v4 as uuidv4 } from "uuid";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { TaxDeclarationsTable } from "@/components/tax-declarations-table";
+import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { getMonthName } from "@/models/TaxDeclaration";
 import { Client } from "@/models/Client";
 import { clientService } from "@/services/client-service";
@@ -377,8 +378,8 @@ export default function ClientDashboard() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="overflow-x-auto">
                 <TabsTrigger value="fiscal">Cédula Fiscal</TabsTrigger>
-                <TabsTrigger value="incomes">Facturas Recibidas</TabsTrigger>
-                <TabsTrigger value="expenses">Facturas Emitidas</TabsTrigger>
+                <TabsTrigger value="incomes">Facturas Emitidas</TabsTrigger>
+                <TabsTrigger value="expenses">Facturas Recibidas</TabsTrigger>
                 <TabsTrigger value="declaraciones">Declaraciones</TabsTrigger>
                 <TabsTrigger value="pagos">Pagos</TabsTrigger>
                 <TabsTrigger value="info">Info</TabsTrigger>
@@ -386,6 +387,8 @@ export default function ClientDashboard() {
                 <TabsTrigger value="cuestionario">Cuestionario</TabsTrigger>
                 <TabsTrigger value="activos">Activos</TabsTrigger>
                 <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
+                <TabsTrigger value="ccf">CCF</TabsTrigger>
+                <TabsTrigger value="opinion">Opinion</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-2">
@@ -440,7 +443,11 @@ export default function ClientDashboard() {
         {/* Contenido de las tabs - Ahora dentro de un componente Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="fiscal">
-            <FiscalSummary year={selectedYear} invoices={invoices} />
+            <FiscalSummary 
+              clientId={Array.isArray(params.clientId) ? params.clientId[0] : params.clientId}
+              year={selectedYear}
+              invoices={invoices}
+            />
           </TabsContent>
 
           <TabsContent value="incomes">
@@ -798,12 +805,9 @@ export default function ClientDashboard() {
           </TabsContent>
 
           <TabsContent value="activos">
-            <Card>
-              <CardHeader>
-                <CardTitle>Activos</CardTitle>
-              </CardHeader>
+            <Card className="pt-4">
               <CardContent>
-                <p>Control de activos y bienes del cliente.</p>
+                <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
               </CardContent>
             </Card>
           </TabsContent>
@@ -818,7 +822,28 @@ export default function ClientDashboard() {
               </CardContent>
             </Card>
           </TabsContent>
+          <TabsContent value="ccf">
+            <Card>
+              <CardHeader>
+                <CardTitle>CSF</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p>Resumen y panel de control principal del cliente.</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="opinion">
+            <Card>
+              <CardHeader>
+                <CardTitle>Opinion</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p>Resumen y panel de control principal del cliente.</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
         </Tabs>
+        
       </main>
     </div>
   );

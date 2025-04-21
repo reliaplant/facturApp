@@ -9,44 +9,48 @@ import { Input } from "@/components/ui/input";
 import { clientService } from "@/services/client-service";
 import { Client } from "@/models/Client";
 import { useToast } from "@/components/ui/use-toast";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 export default function DashboardPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [newClient, setNewClient] = useState({
+    name: "",
+    rfc: "",
+    email: ""
+  });
+  const [isCreating, setIsCreating] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
     async function loadClients() {
       setIsLoading(true);
       try {
-        // Try to get clients from Firebase
         const firebaseClients = await clientService.getAllClients();
         setClients(firebaseClients);
-        
+
         if (firebaseClients.length === 0) {
-          // Show message if no clients found
           toast({
             title: "No se encontraron clientes",
             description: "No hay clientes en la base de datos. Se mostrarán datos de ejemplo.",
             variant: "default",
           });
-          
-          // Fall back to mock clients if Firebase returns empty
+
           const mockClients = clientService.getMockClients();
           setClients(mockClients);
         }
       } catch (error) {
         console.error("Error loading clients:", error);
-        
-        // Show error toast
+
         toast({
           title: "Error de conexión",
           description: "No se pudieron cargar los clientes desde Firebase. Se mostrarán datos de ejemplo.",
           variant: "destructive",
         });
-        
-        // Fallback to mock clients on error
+
         const mockClients = clientService.getMockClients();
         setClients(mockClients);
       } finally {
@@ -57,11 +61,65 @@ export default function DashboardPage() {
     loadClients();
   }, [toast]);
 
-  // Filter clients based on search term
   const filteredClients = clients.filter(client => 
     client.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     client.rfc.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const handleCreateClient = async () => {
+    if (!newClient.name || !newClient.rfc) {
+      toast({
+        title: "Campos requeridos",
+        description: "El nombre y RFC son obligatorios.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreating(true);
+    try {
+      // Create the client data object with proper typing
+      const clientData: {
+        name: string;
+        rfc: string;
+        email?: string;
+      } = {
+        name: newClient.name,
+        rfc: newClient.rfc,
+      };
+      
+      // Only add email if it's not empty
+      if (newClient.email && newClient.email.trim() !== '') {
+        clientData.email = newClient.email;
+      }
+      
+      const testClient = await clientService.createClient(clientData);
+      
+      setClients(prev => [...prev, testClient]);
+      
+      toast({
+        title: "Cliente creado",
+        description: `${testClient.name} ha sido añadido correctamente.`,
+      });
+
+      // Reset form and close dialog
+      setNewClient({
+        name: "",
+        rfc: "",
+        email: ""
+      });
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error("Error creating client:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo crear el cliente. Revise los datos e intente nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreating(false);
+    }
+  };
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -103,34 +161,71 @@ export default function DashboardPage() {
                 <Settings className="mr-2 h-4 w-4" />
                 Ajustes
               </Button>
-              <Button size="sm" onClick={async () => {
-                try {
-                  // This would typically open a modal with a form
-                  // For now, just create a test client directly
-                  const testClient = await clientService.createClient({
-                    name: "Nuevo Cliente " + new Date().toLocaleTimeString(),
-                    rfc: "TEST" + Math.floor(Math.random() * 10000) + "XYZ",
-                    email: "test@ejemplo.com"
-                  });
-                  
-                  setClients(prev => [...prev, testClient]);
-                  
-                  toast({
-                    title: "Cliente creado",
-                    description: `${testClient.name} ha sido añadido correctamente.`,
-                  });
-                } catch (error) {
-                  console.error("Error creating client:", error);
-                  toast({
-                    title: "Error",
-                    description: "No se pudo crear el cliente.",
-                    variant: "destructive",
-                  });
-                }
-              }}>
-                <Plus className="mr-2 h-4 w-4" />
-                Nuevo Cliente
-              </Button>
+              
+              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <Plus className="mr-2 h-4 w-4" />
+                    Nuevo Cliente
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Crear Nuevo Cliente</DialogTitle>
+                    <DialogDescription>
+                      Ingrese los datos básicos del cliente. Podrá completar más información después.
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="name" className="text-right">
+                        Nombre*
+                      </Label>
+                      <Input
+                        id="name"
+                        value={newClient.name}
+                        onChange={(e) => setNewClient({...newClient, name: e.target.value})}
+                        className="col-span-3"
+                        placeholder="Nombre completo o razón social"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="rfc" className="text-right">
+                        RFC*
+                      </Label>
+                      <Input
+                        id="rfc"
+                        value={newClient.rfc}
+                        onChange={(e) => setNewClient({...newClient, rfc: e.target.value.toUpperCase()})}
+                        className="col-span-3"
+                        placeholder="XXXX000000XXX"
+                      />
+                    </div>
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="email" className="text-right">
+                        Email
+                      </Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={newClient.email}
+                        onChange={(e) => setNewClient({...newClient, email: e.target.value})}
+                        className="col-span-3"
+                        placeholder="correo@ejemplo.com"
+                      />
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button 
+                      type="submit" 
+                      onClick={handleCreateClient}
+                      disabled={isCreating || !newClient.name || !newClient.rfc}
+                    >
+                      {isCreating ? "Creando..." : "Crear cliente"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
           
