@@ -9,7 +9,6 @@ import { Badge } from "@/components/ui/badge";
 import { Invoice } from "@/models/Invoice";
 import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
 
@@ -54,7 +53,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     isDeducible: (invoice: Invoice) => invoice.mesDeduccion && !invoice.estaCancelado,
     isPaymentComplement: (invoice: Invoice) => invoice.tipoDeComprobante === 'P',
     isPUEPayment: (invoice: Invoice) => invoice.metodoPago === 'PUE',
-    isAnnualDeduction: (invoice: Invoice) => invoice.usoCFDI?.startsWith('D'),
+    isAnnualDeduction: (invoice: Invoice) => invoice.anual || invoice.usoCFDI?.startsWith('D'),
     isNonDeductible: (invoice: Invoice) => invoice.usoCFDI === 'S01',
     isPaidWithComplement: (invoice: Invoice) => 
       (!!invoice.pagadoConComplementos && invoice.pagadoConComplementos.length > 0) ||
@@ -69,19 +68,20 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
       invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice),
   }), [invoices]);
 
-  // Update the utility function to calculate gravadoIVA and gravadoISR with better edge case handling
+  // Update the utility function to calculate gravadoIVA and gravadoISR with special handling for annual invoices
   const calculateGravados = useCallback((invoice: Invoice) => {
     if (!invoiceHelpers.isDeducible(invoice)) {
       return { gravadoIVA: 0, gravadoISR: 0 };
     }
     
-    // Get IVA value from trasladado field
+    // If it's an annual deduction (tipo D), always return 0 for both values
+    if (invoice.anual || invoice.usoCFDI?.startsWith('D')) {
+      return { gravadoIVA: 0, gravadoISR: 0 };
+    }
+    
+    // For regular deductible invoices, calculate normally
     const ivaValue = invoice.impuestoTrasladado || 0;
-    
-    // For ISR, calculate based on IVA ÷ 0.16, fallback to subtotal if no IVA exists
     const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
-    
-    // For IVA, always calculated as 16% of gravadoISR
     const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
     
     return { gravadoIVA, gravadoISR };
@@ -186,14 +186,16 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
       updatedInvoice = {
         ...updatedInvoice,
         gravadoISR,
-        gravadoIVA
+        gravadoIVA,
+        gravadoModificado: false // Reset modification flag when month changes
       };
     } else {
       // If not deductible, set gravado values to 0
       updatedInvoice = {
         ...updatedInvoice,
         gravadoISR: 0,
-        gravadoIVA: 0
+        gravadoIVA: 0,
+        gravadoModificado: false // Reset modification flag when not deductible
       };
     }
     
@@ -239,51 +241,101 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           invoice.mesDeduccion !== undefined || 
           updatedInvoices[invoice.id]?.mesDeduccion !== undefined) return;
       
-      // Check if this invoice has payment complements
-      const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
+      // Check if this is a type D invoice (annual deduction)
+      const isAnnualType = invoice.usoCFDI?.startsWith('D');
       
-      if (paymentDates?.length) {
-        // Use the earliest payment date's month
-        const earliestMonth = Math.min(...paymentDates.map(d => d.getMonth() + 1));
-        const baseInvoice = {
-          ...invoice,
-          mesDeduccion: earliestMonth,
-          esDeducible: true,
-          pagado: true
-        };
+      if (isAnnualType) {
+        // For type D invoices, apply special rules
+        if (invoice.metodoPago === 'PUE' && invoice.formaPago === '03') {
+          // PUE (Pago en una sola exhibición) + 03 (Transfer) = Automatically deducible, mark as annual
+          const invoiceMonth = new Date(invoice.fecha).getMonth() + 1;
+          const baseInvoice = {
+            ...invoice,
+            mesDeduccion: invoiceMonth, // Use invoice month as payment month
+            esDeducible: true,          // Mark as deducible
+            anual: true                 // Mark as annual
+          };
+          
+          const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+        } 
+        else if (invoice.formaPago === '01') {
+          // If payment form is 01 (Cash), type D is NEVER deducible
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: undefined,
+            esDeducible: false,
+            anual: true // Still mark as annual type for reference
+          };
+        }
+        else if (invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice)) {
+          // PPD without complement - not deducible yet
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: undefined,
+            esDeducible: false,
+            anual: true // Still mark as annual type for reference
+          };
+        }
+        else {
+          // Default for other cases - keep as annual but wait for user decision
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: undefined,
+            esDeducible: false,
+            anual: true
+          };
+        }
+      }
+      // For non-type D invoices, continue with existing logic
+      else {
+        // Check if this invoice has payment complements
+        const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
         
-        const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-        updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
-      } 
-      // Handle special cases
-      else if (invoiceHelpers.isNonDeductible(invoice)) {
-        updates[invoice.id] = {
-          ...invoice,
-          mesDeduccion: undefined,
-          esDeducible: false
-        };
-      } else if (invoiceHelpers.isAnnualDeduction(invoice)) {
-        updates[invoice.id] = {
-          ...invoice,
-          mesDeduccion: 13, // Annual
-          esDeducible: true
-        };
-      } else if (invoiceHelpers.isPUEPayment(invoice)) {
-        const invoiceMonth = new Date(invoice.fecha).getMonth() + 1;
-        const baseInvoice = {
-          ...invoice,
-          mesDeduccion: invoiceMonth,
-          esDeducible: true
-        };
-        
-        const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-        updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
-      } else if (invoice.metodoPago === 'PPD') {
-        updates[invoice.id] = {
-          ...invoice,
-          mesDeduccion: undefined,
-          esDeducible: false
-        };
+        if (paymentDates?.length) {
+          // Use the earliest payment date's month
+          const earliestMonth = Math.min(...paymentDates.map(d => d.getMonth() + 1));
+          const baseInvoice = {
+            ...invoice,
+            mesDeduccion: earliestMonth,
+            esDeducible: true,
+            pagado: true
+          };
+          
+          const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+        } 
+        // Handle special cases
+        else if (invoiceHelpers.isNonDeductible(invoice)) {
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: undefined,
+            esDeducible: false
+          };
+        } else if (invoiceHelpers.isAnnualDeduction(invoice)) {
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: 13, // Annual
+            esDeducible: true, // Always mark them as deductible
+            anual: true // Set the new anual field
+          };
+        } else if (invoiceHelpers.isPUEPayment(invoice)) {
+          const invoiceMonth = new Date(invoice.fecha).getMonth() + 1;
+          const baseInvoice = {
+            ...invoice,
+            mesDeduccion: invoiceMonth,
+            esDeducible: true
+          };
+          
+          const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+        } else if (invoice.metodoPago === 'PPD') {
+          updates[invoice.id] = {
+            ...invoice,
+            mesDeduccion: undefined,
+            esDeducible: false
+          };
+        }
       }
     });
     
@@ -294,10 +346,56 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     }
   }, [invoices, year, updatedInvoices, calculateGravados, invoiceHelpers]);
 
+  // Add a new handler for toggling deductible status
+  const handleToggleDeductible = useCallback((e: React.MouseEvent, invoice: Invoice) => {
+    e.stopPropagation();
+    
+    if (invoice.locked || invoiceHelpers.isPaymentComplement(invoice) || invoice.usoCFDI === 'S01') {
+      return; // Don't allow toggling for locked, complement, or S01 invoices
+    }
+    
+    const isCurrentlyDeducible = invoice.esDeducible;
+    const isAnnualType = invoiceHelpers.isAnnualDeduction(invoice);
+    
+    if (isCurrentlyDeducible) {
+      // Si es actualmente deducible, marcarlo como no deducible
+      handleUpdateInvoice({
+        ...invoice,
+        esDeducible: false,
+        // Keep mesDeduccion as is - don't change it
+        gravadoISR: 0,
+        gravadoIVA: 0,
+        gravadoModificado: false,
+        // Mantenemos la bandera anual incluso si no es deducible
+        anual: isAnnualType ? true : invoice.anual
+      });
+    } else {
+      // Si no es deducible, marcarlo como deducible
+      const currentMonth = isAnnualType ? 13 : (invoice.mesDeduccion || new Date().getMonth() + 1);
+      
+      const updatedInvoice = {
+        ...invoice,
+        esDeducible: true,
+        mesDeduccion: currentMonth,
+        anual: isAnnualType ? true : invoice.anual
+      };
+      
+      const { gravadoISR, gravadoIVA } = calculateGravados(updatedInvoice);
+      handleUpdateInvoice({
+        ...updatedInvoice,
+        gravadoISR,
+        gravadoIVA,
+        gravadoModificado: false
+      });
+    }
+  }, [handleUpdateInvoice, calculateGravados, invoiceHelpers]);
+
   // Render helper function for invoice row - simplifies the render logic
   const renderInvoiceRow = useCallback((invoice: Invoice, index: number) => {
     const isS01 = invoice.usoCFDI === 'S01';
     const isComplement = invoiceHelpers.isPaymentComplement(invoice);
+    const isAnnualDeduction = invoice.usoCFDI?.startsWith('D');
+    const needsComplement = invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice);
     
     return (
       <tr
@@ -309,7 +407,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
                   ${isComplement ? '!bg-blue-50 dark:bg-blue-900 text-blue-600' : ''}
                   ${highlightedPaymentComplements.includes(invoice.uuid) ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}`}
       >
-        {/* Lock Button */}
+        {/* Lock Button - Updated styling */}
         <td className="px-2 py-1 align-middle text-center">
           {isS01 || isComplement ? (
             <span className="h-7 w-7 block"></span>
@@ -317,13 +415,13 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className={`h-7 w-7 ${!invoice.locked ? 'bg-red-50 hover:bg-red-100' : ''}`}
               onClick={(e) => handleLockToggle(e, invoice)}
               disabled={invoice.estaCancelado}
             >
               {invoice.locked ? 
-                <Lock className="h-4 w-4 text-amber-600" /> : 
-                <Unlock className="h-4 w-4 text-gray-400" />}
+                <Lock className="h-4 w-4 text-gray-400" /> : 
+                <Unlock className="h-4 w-4 text-red-500" />}
             </Button>
           )}
         </td>
@@ -428,7 +526,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           }
         </td>
         
-        {/* Mes Pago */}
+        {/* Mes Pago - update to show red text when no complement */}
         <td className="px-2 py-1 align-middle text-center">
           {isComplement || isS01 ? (
             <span></span>
@@ -440,17 +538,21 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
                 onClick={(e) => e.stopPropagation()}
                 disabled={invoice.locked}
               >
-                <SelectTrigger className="h-7 w-24 text-xs mx-auto">
+                <SelectTrigger className={`h-7 w-24 text-xs mx-auto ${needsComplement ? 'text-red-500' : ''}`}>
                   <SelectValue placeholder="-" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">-</SelectItem>
                   {Array.from({ length: 12 }, (_, i) => {
                     const monthNum = i+1;
-                    const needsWarning = invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice);
                     return (
-                      <SelectItem key={monthNum} value={monthNum.toString()}>
-                        {dateUtils.getMonthAbbreviation(monthNum)}{needsWarning ? " (Sin CP)" : ""}
+                      <SelectItem 
+                        key={monthNum} 
+                        value={monthNum.toString()}
+                        className={needsComplement ? 'text-red-500' : ''}
+                      >
+                        {dateUtils.getMonthAbbreviation(monthNum)}
+                        {needsComplement ? " (Sin CP)" : ""}
                       </SelectItem>
                     );
                   })}
@@ -460,136 +562,157 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           )}
         </td>
         
-        {/* Deducible Status */}
+        {/* Deducible Status with special handling for annual deductions */}
         <td className="px-2 py-1 align-middle text-center">
           {isComplement || isS01 ? (
             <span></span>
           ) : (
-            <Badge variant="outline" className={`
-              ${invoice.esDeducible ? 'bg-green-50 text-green-700 border-green-300' : 'bg-red-50 text-red-700 border-red-300'}
-            `}>
-              {invoice.esDeducible ? 'Sí' : 'No'}
+            <Badge 
+              variant="outline" 
+              className={`
+                cursor-pointer hover:opacity-80 transition-opacity
+                ${(isAnnualDeduction && invoice.esDeducible)
+                  ? 'bg-purple-50 text-purple-700 border-purple-300' // Tipo D y deducible -> morado
+                  : invoice.esDeducible 
+                    ? 'bg-green-50 text-green-700 border-green-300' // No tipo D y deducible -> verde
+                    : 'bg-red-50 text-red-700 border-red-300' // No deducible -> rojo (incluso si es tipo D)
+                }
+              `}
+              onClick={(e) => handleToggleDeductible(e, invoice)}
+            >
+              {(isAnnualDeduction && invoice.esDeducible)
+                ? 'Anual' 
+                : invoice.esDeducible 
+                  ? 'Sí' 
+                  : 'No'
+              }
             </Badge>
           )}
         </td>
         
-        {/* Gravado ISR */}
+        {/* Gravado ISR - update to show zeros for annual deductions */}
         <td 
           className="px-2 py-1 align-middle text-right cursor-pointer"
           onDoubleClick={() => !isS01 && handleGravadoDoubleClick(invoice)}
         >
           {isComplement || isS01
             ? <span></span>
-            : <>${
-              invoiceHelpers.isDeducible(invoice) 
-              ? invoice.gravadoISR || 0
-              : '0.00'
-              }</>
+            : (isAnnualDeduction && invoice.esDeducible)
+              ? <span className="text-gray-400">$0.00 (Anual)</span>
+              : <span>
+                  ${invoiceHelpers.isDeducible(invoice) 
+                    ? invoice.gravadoISR || 0
+                    : '0.00'
+                  }
+                  {invoice.gravadoModificado && <span className="text-blue-500 ml-1 text-xs">(Mod)</span>}
+                </span>
           }
         </td>
 
-        {/* Gravado IVA */}
+        {/* Gravado IVA - update to show zeros for annual deductions */}
         <td 
           className="px-2 py-1 align-middle text-right cursor-pointer"
           onDoubleClick={() => !isS01 && handleGravadoDoubleClick(invoice)}
         >
           {isComplement || isS01
             ? <span></span>
-            : <>${
-              invoiceHelpers.isDeducible(invoice)
-              ? invoice.gravadoIVA || 0
-              : '0.00'
-              }</>
+            : (isAnnualDeduction && invoice.esDeducible)
+              ? <span className="text-gray-400">$0.00 (Anual)</span>
+              : <span>
+                  ${invoiceHelpers.isDeducible(invoice)
+                    ? invoice.gravadoIVA || 0
+                    : '0.00'
+                  }
+                  {invoice.gravadoModificado && <span className="text-blue-500 ml-1 text-xs">(Mod)</span>}
+                </span>
           }
         </td>
       </tr>
     );
-  }, [dateUtils, handleGravadoDoubleClick, handleInvoiceClick, handleLockToggle, handleMonthSelect, highlightedPaymentComplements, invoiceHelpers]);
+  }, [dateUtils, handleGravadoDoubleClick, handleInvoiceClick, handleLockToggle, handleMonthSelect, highlightedPaymentComplements, invoiceHelpers, handleToggleDeductible]);
 
   return (
-    <TooltipProvider>
-      <div className="space-y-2">
-        <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border">
-          {/* Header */}
-          <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
-            <h2 className="text-base font-medium whitespace-nowrap">Facturas Recibidas {year}</h2>
-            <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
-                Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-              </Badge>
-              {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Gastos_${year}.xlsx`} />}
-            </div>
-          </div>
-
-          {/* Table */}
-          <div className="relative">
-            <div className="max-h-[70vh] overflow-y-auto">
-              <table className="w-full text-xs relative">
-                <thead className="sticky top-0 z-20">
-                  <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Emisor</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Categoría</th>
-                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">SubTotal</th>
-                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Impuestos</th>
-                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Total</th>
-                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Mes Pago</th>
-                    <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
-                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado ISR</th>
-                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
-                  </tr>
-                </thead>
-                <tbody className="mt-1">
-                  {sortedMonths.length > 0 ? (
-                    sortedMonths.map((month) => (
-                      <React.Fragment key={month}>
-                        <tr className="bg-gray-200 dark:bg-gray-700">
-                          <td colSpan={13} className="px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
-                        </tr>
-                        
-                        {invoicesByMonth[month].map(renderInvoiceRow)}
-                        
-                        {/* Monthly Totals */}
-                        <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
-                          <td colSpan={13} className="px-2 py-1.5 text-right text-gray-500">
-                            Total Deducible: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
-                            IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      </React.Fragment>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={13} className="px-2 py-4 text-center text-gray-500 text-xs">
-                        No se encontraron facturas CFDI recibidas para el año {year} con los filtros actuales
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+    <div className="space-y-2">
+      <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border">
+        {/* Header */}
+        <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-medium whitespace-nowrap">Facturas Recibidas {year}</h2>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+              Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+            </Badge>
+            {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Gastos_${year}.xlsx`} />}
           </div>
         </div>
 
-        {/* Modals */}
-        <InvoicePreviewModal
-          invoice={selectedInvoice}
-          isOpen={isModalOpen}
-          onClose={() => setIsModalOpen(false)}
-          onUpdate={handleUpdateInvoice}
-        />
-        
-        <InvoiceDeductibilityEditor
-          invoice={invoiceForDeductibility}
-          isOpen={isDeductibilityEditorOpen}
-          onClose={() => setIsDeductibilityEditorOpen(false)}
-          onSave={handleUpdateInvoice}
-        />
+        {/* Table */}
+        <div className="relative">
+          <div className="max-h-[70vh] overflow-y-auto">
+            <table className="w-full text-xs relative">
+              <thead className="sticky top-0 z-20">
+                <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Emisor</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Categoría</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">SubTotal</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Impuestos</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Total</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Mes Pago</th>
+                  <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado ISR</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
+                </tr>
+              </thead>
+              <tbody className="mt-1">
+                {sortedMonths.length > 0 ? (
+                  sortedMonths.map((month) => (
+                    <React.Fragment key={month}>
+                      <tr className="bg-gray-200 dark:bg-gray-700">
+                        <td colSpan={13} className="px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
+                      </tr>
+                      
+                      {invoicesByMonth[month].map(renderInvoiceRow)}
+                      
+                      {/* Monthly Totals */}
+                      <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
+                        <td colSpan={13} className="px-2 py-1.5 text-right text-gray-500">
+                          Total Deducible: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
+                          IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    </React.Fragment>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={13} className="px-2 py-4 text-center text-gray-500 text-xs">
+                      No se encontraron facturas CFDI recibidas para el año {year} con los filtros actuales
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
-    </TooltipProvider>
+
+      {/* Modals */}
+      <InvoicePreviewModal
+        invoice={selectedInvoice}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onUpdate={handleUpdateInvoice}
+      />
+      
+      <InvoiceDeductibilityEditor
+        invoice={invoiceForDeductibility}
+        isOpen={isDeductibilityEditorOpen}
+        onClose={() => setIsDeductibilityEditorOpen(false)}
+        onSave={handleUpdateInvoice}
+      />
+    </div>
   );
 }
 

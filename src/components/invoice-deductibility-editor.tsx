@@ -27,7 +27,8 @@ export function InvoiceDeductibilityEditor({
     esDeducible: false,
     mesDeduccion: "none",
     gravadoISR: 0,
-    gravadoIVA: 0
+    gravadoIVA: 0,
+    gravadoModificado: false
   });
 
   // Calculate proper gravado values
@@ -54,7 +55,8 @@ export function InvoiceDeductibilityEditor({
         esDeducible: invoice.esDeducible || false,
         mesDeduccion: invoice.mesDeduccion?.toString() || "none",
         gravadoISR: invoice.gravadoISR || gravadoISR,
-        gravadoIVA: invoice.gravadoIVA || gravadoIVA
+        gravadoIVA: invoice.gravadoIVA || gravadoIVA,
+        gravadoModificado: invoice.gravadoModificado || false
       });
     }
   }, [invoice]);
@@ -67,7 +69,8 @@ export function InvoiceDeductibilityEditor({
       esDeducible: formData.esDeducible,
       mesDeduccion: formData.mesDeduccion === "none" ? undefined : parseInt(formData.mesDeduccion),
       gravadoISR: formData.esDeducible ? formData.gravadoISR : 0,
-      gravadoIVA: formData.esDeducible ? formData.gravadoIVA : 0
+      gravadoIVA: formData.esDeducible ? formData.gravadoIVA : 0,
+      gravadoModificado: formData.gravadoModificado
     };
     
     onSave(updatedInvoice);
@@ -83,7 +86,8 @@ export function InvoiceDeductibilityEditor({
     setFormData({
       ...formData,
       gravadoISR,
-      gravadoIVA
+      gravadoIVA,
+      gravadoModificado: false // Reset the flag when values are reset
     });
   };
 
@@ -166,10 +170,16 @@ export function InvoiceDeductibilityEditor({
                   onChange={(e) => {
                     const newISR = parseFloat(e.target.value) || 0;
                     const newIVA = Math.round(newISR * 0.16 * 100) / 100;
+                    
+                    // Check if value actually changed from calculated value
+                    const { gravadoISR: calculatedISR } = calculateGravados(invoice!);
+                    const isModified = Math.abs(newISR - calculatedISR) > 0.01; // Allow small rounding differences
+                    
                     setFormData({
                       ...formData,
                       gravadoISR: newISR,
-                      gravadoIVA: newIVA
+                      gravadoIVA: newIVA,
+                      gravadoModificado: isModified
                     });
                   }}
                 />

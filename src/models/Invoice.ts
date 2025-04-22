@@ -39,13 +39,13 @@ export interface Invoice {
   total: number; // Total (con impuestos)
   estaCancelado: boolean; // Indica si la factura está cancelada
   fechaCancelación?: string;
-  Gravado?: number; // Mes de deducción (mes en que se realizó el pago)
   Tasa0?: number; // Mes de deducción (mes en que se realizó el pago)
   Exento?: number; // Mes de deducción (mes en que se realizó el pago)
   mesDeduccion?: number; // Mes de deducción (mes en que se realizó el pago)
   esDeducible?: boolean; // Tambien aplica para es gravable en el caso de CFDIs emitidos
-  tipoDeducibilidad?: string; // Tipo de deducibilidad (added as optional)
   gravadoISR?: number; // Add this field to replace montoDeducible
+  gravadoIVA?: number; // Add a new field for the "Gravado IVA" column
+  gravadoModificado?: boolean; // Flag to indicate if gravado values were manually modified
   locked?: boolean; // Indica si la factura está bloqueada para edición
   notasDeducibilidad?: string;
   
@@ -58,6 +58,5 @@ export interface Invoice {
   noCertificado?: string; // Número de certificado
 
   // Add a new field for the "Gravado IVA" column
-  gravadoIVA?: number;
 }
 

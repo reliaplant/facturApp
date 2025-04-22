@@ -193,6 +193,48 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         // Ignorar errores en procesamiento de documentos relacionados
       }
       
+      // Check for cancellation date - new code
+      let fechaCancelacion: string | undefined = undefined;
+      try {
+        // Check for cancellation in different potential places
+        const complemento = comprobante['cfdi:Complemento'] || comprobante.Complemento || {};
+        
+        // Check in cancellation node
+        const cancelacion = complemento['cancelacion:Cancelacion'] || 
+                           complemento['cancelacioncfdi:Cancelacion'] || 
+                           complemento.Cancelacion;
+        
+        if (cancelacion && cancelacion.FechaCancelacion) {
+          fechaCancelacion = cancelacion.FechaCancelacion;
+        }
+        
+        // Check for cancellation status in the invoice status attributes
+        if (comprobante.EstadoComprobante && (
+            comprobante.EstadoComprobante.toUpperCase() === 'CANCELADO' || 
+            comprobante.EstadoComprobante.toUpperCase() === 'CANCELLED')) {
+          // If we know it's cancelled but don't have a date, use the timestamp from the digital stamp
+          if (!fechaCancelacion && timbreFiscal && timbreFiscal.FechaTimbrado) {
+            fechaCancelacion = timbreFiscal.FechaTimbrado;
+          }
+        }
+        
+        // Check for cancellation date attribute directly on comprobante (newer CFDIs)
+        if (comprobante.FechaCancelacion) {
+          fechaCancelacion = comprobante.FechaCancelacion;
+        }
+      } catch (error) {
+        // Ignore errors in cancellation processing
+      }
+      
+      // Check if the invoice is cancelled based on the data found
+      const estaCancelado = !!fechaCancelacion || 
+                         (comprobante.EstadoComprobante && 
+                          comprobante.EstadoComprobante.toUpperCase() === 'CANCELADO');
+      
+      // Determine if it's an annual deduction based on usoCFDI
+      const usoCFDI = receptor.UsoCFDI || 'G03';
+      const isAnnual = usoCFDI.startsWith('D');
+      
       // Crear objeto factura con solo los campos definidos en la interfaz
       const invoice: Invoice = {
         id: uuidv4(),
@@ -207,7 +249,8 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         nombreReceptor: receptor.Nombre || '',
         domicilioFiscalReceptor: receptor.DomicilioFiscalReceptor || undefined,
         regimenFiscalReceptor: receptor.RegimenFiscalReceptor || undefined,
-        usoCFDI: receptor.UsoCFDI || 'G03',
+        usoCFDI,
+        anual: isAnnual, // Set the anual field based on usoCFDI
         rfcEmisor,
         nombreEmisor: emisor.Nombre || '',
         lugarExpedicion: comprobante.LugarExpedicion || undefined,
@@ -229,14 +272,13 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         isrRetenido: isrRetenido || undefined,
         descuento,
         total,
-        estaCancelado: false,
-        Gravado: gravado || undefined,
+        estaCancelado,
+        fechaCancelación: fechaCancelacion, // Add the cancellation date if found
         Tasa0: tasa0 || undefined, 
         Exento: exento || undefined,
         noCertificado: comprobante.NoCertificado || undefined,
         ejercicioFiscal,
         esDeducible: false,
-        tipoDeducibilidad: 'none',
         docsRelacionadoComplementoPago: docsRelacionados
       };
       
