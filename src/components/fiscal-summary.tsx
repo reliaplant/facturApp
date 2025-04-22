@@ -5,7 +5,7 @@ import { Invoice } from "@/models/Invoice";
 import { es } from "date-fns/locale";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { TaxDeclaration, calculateDueDate } from "@/models/TaxDeclaration";
+import { TaxDeclaration, calculateDueDate } from "@/models/declaracion";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FixedAssetService } from "@/services/fixed-asset-service";
 
@@ -62,10 +62,9 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
       if (savedInvoices) {
         const parsed = JSON.parse(savedInvoices);
         setUpdatedInvoices(parsed);
-        console.log(`FiscalSummary - Cargamos ${Object.keys(parsed).length} facturas actualizadas del localStorage`);
       }
     } catch (error) {
-      console.error("Error al cargar facturas actualizadas en FiscalSummary:", error);
+      // Error al cargar facturas actualizadas
     }
   }, [year]);
   
@@ -73,8 +72,6 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
   useEffect(() => {
     const loadDepreciations = async () => {
       try {
-        console.log("🔍 Cargando depreciaciones para cliente:", clientId, "año:", year);
-        
         const depreciationsByMonth: Record<number, number> = {};
         
         // Para cada mes, obtener todas las depreciaciones correspondientes
@@ -92,16 +89,13 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
             
             depreciationsByMonth[month] = depreciation;
           } catch (error) {
-            console.error(`Error cargando depreciación para ${startDate}:`, error);
             depreciationsByMonth[month] = 0;
           }
         }
         
-        console.log("Depreciaciones por mes cargadas");
         setMonthlyDepreciations(depreciationsByMonth);
         
       } catch (error) {
-        console.error("Error al cargar depreciaciones mensuales:", error);
         const emptyDepreciations: Record<number, number> = {};
         for (let i = 0; i < 12; i++) {
           emptyDepreciations[i] = 0;
@@ -113,7 +107,7 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
     if (clientId) {
       loadDepreciations();
     }
-  }, [year, clientId]); // Quitar fixedAssetService para evitar el loop
+  }, [year, clientId]);
   
   // Combinar las facturas originales con las actualizadas
   const mergedInvoices = invoices.map(invoice => 
@@ -122,14 +116,14 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
   
   // Filtrar facturas por año
   const yearInvoices = mergedInvoices.filter(
-    inv => new Date(inv.date).getFullYear() === year && !inv.isCancelled
+    inv => new Date(inv.fecha).getFullYear() === year && !inv.estaCancelado
   );
 
   // Facturas de ingresos (recibidas)
-  const incomeInvoices = yearInvoices.filter(inv => inv.cfdiType === 'I');
+  const incomeInvoices = yearInvoices.filter(inv => inv.tipoDeComprobante === 'I');
   
   // Facturas de gastos (emitidas)
-  const expenseInvoices = yearInvoices.filter(inv => inv.cfdiType === 'E');
+  const expenseInvoices = yearInvoices.filter(inv => inv.tipoDeComprobante === 'E');
   
   // Calcular datos por mes y almacenarlos en el estado
   useEffect(() => {
@@ -143,30 +137,31 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
   const calculateMonthlyData = (month: number, incomeInvoices: Invoice[], expenseInvoices: Invoice[]): MonthlyFiscalData => {
     // Filtrar facturas por mes
     const monthIncomeInvoices = incomeInvoices.filter(
-      inv => new Date(inv.date).getMonth() === month
+      inv => new Date(inv.fecha).getMonth() === month
     );
     
     const monthExpenseInvoices = expenseInvoices.filter(
-      inv => new Date(inv.date).getMonth() === month
+      inv => new Date(inv.fecha).getMonth() === month
     );
     
     // Calcular totales del mes - usando subtotal para ingresos
-    const incomeAmount = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+    const incomeAmount = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.subTotal || 0), 0);
     
     // Calcular gastos deducibles: solo incluir facturas marcadas como deducibles y usar el monto deducible apropiado
     const expenseAmount = monthExpenseInvoices.reduce((sum, inv) => {
-      if (!inv.isDeductible) return sum; // No es deducible
+      if (!inv.esDeducible) return sum; // No es deducible
       
       // Determinar el monto deducible basado en el tipo de deducibilidad
       let deductibleAmount = 0;
+      const deductibilityType = inv.tipoDeducibilidad;
       
-      if (inv.deductibilityType === 'fixed' && inv.deductibleAmount) {
+      if (deductibilityType === 'fixed' && inv.montoDeducible) {
         // Monto fijo especificado
-        deductibleAmount = inv.deductibleAmount;
-      } else if (inv.deductibilityType === 'partial' && inv.deductiblePercentage) {
+        deductibleAmount = inv.montoDeducible;
+      } else if (deductibilityType === 'partial' && inv.porcentajeDeducible) {
         // Porcentaje del total
-        deductibleAmount = (inv.total || 0) * (inv.deductiblePercentage / 100);
-      } else if (inv.deductibilityType === 'full') {
+        deductibleAmount = (inv.total || 0) * (inv.porcentajeDeducible / 100);
+      } else if (deductibilityType === 'full') {
         // 100% deducible
         deductibleAmount = inv.total || 0;
       }
@@ -175,33 +170,34 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
     }, 0);
     
     // Calcular IVA cobrado, pagado y retenido
-    const ivaCollected = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.tax || 0), 0);
+    const ivaCollected = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.impuestoTrasladado || 0), 0);
     
     // Solo incluir IVA pagado de facturas deducibles
     const ivaPaid = monthExpenseInvoices.reduce((sum, inv) => {
-      if (!inv.isDeductible) return sum;
+      if (!inv.esDeducible) return sum;
       
       // Calcular el IVA acreditable proporcionalmente al monto deducible
       let deductibleRatio = 1; // Por defecto, todo el IVA es acreditable
+      const deductibilityType = inv.tipoDeducibilidad;
       
-      if (inv.deductibilityType === 'fixed' && inv.deductibleAmount && inv.total) {
-        deductibleRatio = Math.min(1, inv.deductibleAmount / inv.total);
-      } else if (inv.deductibilityType === 'partial' && inv.deductiblePercentage) {
-        deductibleRatio = inv.deductiblePercentage / 100;
-      } else if (!inv.isDeductible) {
+      if (deductibilityType === 'fixed' && inv.montoDeducible && inv.total) {
+        deductibleRatio = Math.min(1, inv.montoDeducible / inv.total);
+      } else if (deductibilityType === 'partial' && inv.porcentajeDeducible) {
+        deductibleRatio = inv.porcentajeDeducible / 100;
+      } else if (!inv.esDeducible) {
         deductibleRatio = 0;
       }
       
-      return sum + ((inv.tax || 0) * deductibleRatio);
+      return sum + ((inv.impuestoTrasladado || 0) * deductibleRatio);
     }, 0);
     
-    const ivaWithheld = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.retainedVat || 0), 0);
+    const ivaWithheld = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.ivaRetenido || 0), 0);
     
     // Calcular balance de IVA
     const ivaBalance = ivaCollected - ivaPaid - ivaWithheld;
     
     // Calcular ISR retenido
-    const isrWithheld = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.retainedIsr || 0), 0);
+    const isrWithheld = monthIncomeInvoices.reduce((sum, inv) => sum + (inv.isrRetenido || 0), 0);
     
     // Obtener la depreciación del mes desde el estado
     const depreciation = monthlyDepreciations[month] || 0;
@@ -223,21 +219,21 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
     
     // Acumular datos de meses anteriores hasta el actual
     for (let i = 0; i <= month; i++) {
-      const monthIncome = incomeInvoices.filter(inv => new Date(inv.date).getMonth() === i);
-      const monthExpense = expenseInvoices.filter(inv => new Date(inv.date).getMonth() === i);
+      const monthIncome = incomeInvoices.filter(inv => new Date(inv.fecha).getMonth() === i);
+      const monthExpense = expenseInvoices.filter(inv => new Date(inv.fecha).getMonth() === i);
       
-      periodIncomesTotal += monthIncome.reduce((sum, inv) => sum + (inv.subtotal || 0), 0);
+      periodIncomesTotal += monthIncome.reduce((sum, inv) => sum + (inv.subTotal || 0), 0);
       
       // Acumular gastos deducibles solamente
       periodExpensesTotal += monthExpense.reduce((sum, inv) => {
-        if (!inv.isDeductible) return sum;
+        if (!inv.esDeducible) return sum;
         
         let deductibleAmount = 0;
-        if (inv.deductibilityType === 'fixed' && inv.deductibleAmount) {
-          deductibleAmount = inv.deductibleAmount;
-        } else if (inv.deductibilityType === 'partial' && inv.deductiblePercentage) {
-          deductibleAmount = (inv.total || 0) * (inv.deductiblePercentage / 100);
-        } else if (inv.deductibilityType === 'full') {
+        if (inv.tipoDeducibilidad === 'fixed' && inv.montoDeducible) {
+          deductibleAmount = inv.montoDeducible;
+        } else if (inv.tipoDeducibilidad === 'partial' && inv.porcentajeDeducible) {
+          deductibleAmount = (inv.total || 0) * (inv.porcentajeDeducible / 100);
+        } else if (inv.tipoDeducibilidad === 'full') {
           deductibleAmount = inv.total || 0;
         }
         
@@ -247,25 +243,25 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
       // Acumular depreciaciones
       totalDepreciation += monthlyDepreciations[i] || 0;
       
-      periodIVACharged += monthIncome.reduce((sum, inv) => sum + (inv.tax || 0), 0);
+      periodIVACharged += monthIncome.reduce((sum, inv) => sum + (inv.impuestoTrasladado || 0), 0);
       
       // IVA acreditable proporcional
       periodIVAPaid += monthExpense.reduce((sum, inv) => {
-        if (!inv.isDeductible) return sum;
+        if (!inv.esDeducible) return sum;
         
         let deductibleRatio = 1;
-        if (inv.deductibilityType === 'fixed' && inv.deductibleAmount && inv.total) {
-          deductibleRatio = Math.min(1, inv.deductibleAmount / inv.total);
-        } else if (inv.deductibilityType === 'partial' && inv.deductiblePercentage) {
-          deductibleRatio = inv.deductiblePercentage / 100;
-        } else if (!inv.isDeductible) {
+        if (inv.tipoDeducibilidad === 'fixed' && inv.montoDeducible && inv.total) {
+          deductibleRatio = Math.min(1, inv.montoDeducible / inv.total);
+        } else if (inv.tipoDeducibilidad === 'partial' && inv.porcentajeDeducible) {
+          deductibleRatio = inv.porcentajeDeducible / 100;
+        } else if (!inv.esDeducible) {
           deductibleRatio = 0;
         }
         
-        return sum + ((inv.tax || 0) * deductibleRatio);
+        return sum + ((inv.impuestoTrasladado || 0) * deductibleRatio);
       }, 0);
       
-      periodIVAWithheld += monthIncome.reduce((sum, inv) => sum + (inv.retainedVat || 0), 0);
+      periodIVAWithheld += monthIncome.reduce((sum, inv) => sum + (inv.ivaRetenido || 0), 0);
     }
     
     // Incluir la depreciación acumulada en las deducciones acumuladas para el periodo

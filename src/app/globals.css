@@ -48,7 +48,6 @@
     --ring: 216 34% 17%;
   }
 }
-
 @layer base {
   * {
     @apply border-border;
@@ -56,4 +55,32 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+@layer base {
+  th, td {
+    @apply text-sm;
+  }
+}
+
+@layer base {
+  th {
+    @apply bg-gray-100 font-semibold text-gray-700 text-left py-2 px-3;
+  }
+}
+
+@layer base {
+  tr:not(:last-child) {
+    @apply border-b hover:bg-gray-50;
+  }
+}
+
+@layer base {
+  td {
+    @apply px-3 py-2;
+  }
+}
+
+h2 {
+  @apply text-xl font-bold;
 }

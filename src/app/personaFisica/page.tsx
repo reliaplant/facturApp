@@ -70,10 +70,10 @@ export default function PersonaFisicaPage() {
   ];
 
   useEffect(() => {
-    const observers: IntersectionObserver[] = [];
+    const observers = [];
     const sections = document.querySelectorAll('section[id]');
     
-    const observerCallback = (entries: IntersectionObserverEntry[]) => {
+    const observerCallback = (entries) => {
       entries.forEach(entry => {
         if (entry.isIntersecting) {
           setActiveSection(entry.target.id);

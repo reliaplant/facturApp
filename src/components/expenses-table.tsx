@@ -1,656 +1,570 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Search, Calendar as CalendarIcon, FileText, Eye, Download, Check, MoreHorizontal, X, Pencil, ChevronDown, ChevronRight } from "lucide-react";
+import { Lock, Unlock, Check } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Invoice } from "@/models/Invoice";
 import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Checkbox } from "@/components/ui/checkbox";
-import { formatCurrency } from "@/lib/utils";
-
-// Categorías de egresos
-const expenseCategories = [
-  "Todas",
-  "Gastos generales",
-  "Compra de materiales",
-  "Servicios profesionales",
-  "Arrendamiento",
-  "Otros"
-];
+import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
 
 interface ExpensesTableProps {
   year: number;
   invoices: Invoice[];
+  disableExport?: boolean;
 }
 
-export function ExpensesTable({ year, invoices = [] }: ExpensesTableProps) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
-  const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+export function ExpensesTable({ year, invoices = [], disableExport = false }: ExpensesTableProps) {
+  // State declarations
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [invoicesToUpdate, setInvoicesToUpdate] = useState<Invoice[]>([]);
-  const [showMetodoPagoDetails, setShowMetodoPagoDetails] = useState(false);
-  const [showRegimeFiscalDetails, setShowRegimeFiscalDetails] = useState(false);
-  const [category, setCategory] = useState("Todas");
-  const [showDeductibilityEditor, setShowDeductibilityEditor] = useState(false);
   const [updatedInvoices, setUpdatedInvoices] = useState<Record<string, Invoice>>({});
-  
-  // Cargar facturas actualizadas desde localStorage al montar el componente
+  const [highlightedPaymentComplements, setHighlightedPaymentComplements] = useState<string[]>([]);
+  const highlightTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [isDeductibilityEditorOpen, setIsDeductibilityEditorOpen] = useState(false);
+  const [invoiceForDeductibility, setInvoiceForDeductibility] = useState<Invoice | null>(null);
+
+  // Load/Save from/to localStorage
   useEffect(() => {
     try {
-      const savedInvoices = localStorage.getItem(`updatedInvoices_${year}`);
-      if (savedInvoices) {
-        const parsed = JSON.parse(savedInvoices);
-        setUpdatedInvoices(parsed);
-      }
-    } catch (error) {
-      console.error("Error al cargar facturas actualizadas del localStorage:", error);
-    }
+      const savedInvoices = localStorage.getItem(`updatedReceivedInvoices_${year}`);
+      if (savedInvoices) setUpdatedInvoices(JSON.parse(savedInvoices));
+    } catch (error) { /* Ignore storage errors */ }
+    
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
   }, [year]);
   
-  // Guardar facturas actualizadas en localStorage cuando cambian
+  // Save to localStorage when updatedInvoices changes
   useEffect(() => {
+    if (Object.keys(updatedInvoices).length === 0) return;
     try {
-      if (Object.keys(updatedInvoices).length > 0) {
-        localStorage.setItem(`updatedInvoices_${year}`, JSON.stringify(updatedInvoices));
-      }
-    } catch (error) {
-      console.error("Error al guardar facturas actualizadas en localStorage:", error);
-    }
+      localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(updatedInvoices));
+    } catch (error) { /* Ignore storage errors */ }
   }, [updatedInvoices, year]);
   
-  // Combinar las facturas originales con las actualizadas para mantener los cambios
-  const mergedInvoices = invoices.map(invoice => {
-    return updatedInvoices[invoice.id] || invoice;
-  });
+  // Helper functions - consolidated for brevity
+  const invoiceHelpers = useMemo(() => ({
+    isDeducible: (invoice: Invoice) => invoice.mesDeduccion && !invoice.estaCancelado,
+    isPaymentComplement: (invoice: Invoice) => invoice.tipoDeComprobante === 'P',
+    isPUEPayment: (invoice: Invoice) => invoice.metodoPago === 'PUE',
+    isAnnualDeduction: (invoice: Invoice) => invoice.usoCFDI?.startsWith('D'),
+    isNonDeductible: (invoice: Invoice) => invoice.usoCFDI === 'S01',
+    isPaidWithComplement: (invoice: Invoice) => 
+      (!!invoice.pagadoConComplementos && invoice.pagadoConComplementos.length > 0) ||
+      invoices.some(pc => pc.tipoDeComprobante === 'P' && 
+                 pc.docsRelacionadoComplementoPago?.some(uuid => 
+                   uuid.toUpperCase() === invoice.uuid.toUpperCase())),
+    needsPaymentComplement: (invoice: Invoice) => 
+      invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice),
+    isPaidPPDInvoice: (invoice: Invoice) => 
+      invoice.metodoPago === 'PPD' && invoiceHelpers.isPaidWithComplement(invoice),
+    isPPDWithoutComplement: (invoice: Invoice) => 
+      invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice),
+  }), [invoices]);
+
+  // Update the utility function to calculate gravadoIVA and gravadoISR with better edge case handling
+  const calculateGravados = useCallback((invoice: Invoice) => {
+    if (!invoiceHelpers.isDeducible(invoice)) {
+      return { gravadoIVA: 0, gravadoISR: 0 };
+    }
+    
+    // Get IVA value from trasladado field
+    const ivaValue = invoice.impuestoTrasladado || 0;
+    
+    // For ISR, calculate based on IVA ÷ 0.16, fallback to subtotal if no IVA exists
+    const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
+    
+    // For IVA, always calculated as 16% of gravadoISR
+    const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
+    
+    return { gravadoIVA, gravadoISR };
+  }, [invoiceHelpers]);
   
-  // Debugging para ver qué facturas están llegando
-  useEffect(() => {
-    try {
-      // Validar si realmente tenemos facturas tipo E
-      const realExpenses = mergedInvoices.filter(inv => inv.cfdiType === 'E');
-      
-      console.log(`ExpensesTable - Recibimos ${mergedInvoices.length} facturas totales`);
-      console.log(`ExpensesTable - De las cuales ${realExpenses.length} son tipo E (emitidos)`);
-      
-      if (realExpenses.length > 0 && realExpenses.length !== mergedInvoices.length) {
-        console.warn("ADVERTENCIA: Se recibieron facturas que no son emitidos en la tabla de emitidos");
+  // Process and filter invoices - using useMemo for better performance
+  const { filteredInvoices, invoicesByMonth, sortedMonths, totalAmount } = useMemo(() => {
+    // Merge original invoices with updated ones
+    const mergedInvoices = invoices.map(invoice => updatedInvoices[invoice.id] || invoice);
+    
+    // Filter for current year and received invoices only
+    const filtered = mergedInvoices.filter(invoice => {
+      try {
+        return new Date(invoice.fecha).getFullYear() === year && invoice.recibida;
+      } catch (error) { return false; }
+    });
+    
+    // Calculate total amount and group by month
+    const total = filtered.reduce((sum, invoice) => sum + invoice.total, 0);
+    const byMonth: Record<number, Invoice[]> = {};
+    
+    filtered.forEach(invoice => {
+      try {
+        const month = new Date(invoice.fecha).getMonth() + 1;
+        if (!byMonth[month]) byMonth[month] = [];
+        byMonth[month].push(invoice);
+      } catch (e) { /* Skip invalid dates */ }
+    });
+    
+    // Sort invoices within each month
+    Object.values(byMonth).forEach(monthInvoices => {
+      monthInvoices.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+    });
+    
+    // Get sorted month numbers
+    const months = Object.keys(byMonth).map(Number).sort((a, b) => a - b);
+    
+    return { filteredInvoices: filtered, invoicesByMonth: byMonth, sortedMonths: months, totalAmount: total };
+  }, [invoices, updatedInvoices, year]);
+
+  // Date and month utilities - consolidated
+  const dateUtils = useMemo(() => ({
+    getMonth: (dateString: string) => new Date(dateString).getMonth() + 1,
+    getMonthName: (month: number) => format(new Date(year, month - 1, 1), 'MMMM', { locale: es }),
+    getMonthAbbreviation: (month: number) => {
+      if (month === 13) return 'ANUAL';
+      return ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'][month - 1] || '';
+    }
+  }), [year]);
+
+  // Tax totals calculation - using useMemo for better performance
+  const monthlyTaxTotals = useMemo(() => {
+    const totals: Record<number, { isr: number; iva: number }> = {};
+    
+    // Initialize all months
+    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0 };
+    
+    // Calculate totals
+    filteredInvoices.forEach(invoice => {
+      if (invoice.mesDeduccion && !invoice.estaCancelado) {
+        totals[invoice.mesDeduccion].isr += invoice.gravadoISR || 0;
+        totals[invoice.mesDeduccion].iva += invoice.gravadoIVA || 0;
       }
-      
-      if (mergedInvoices.length > 0) {
-        const firstInvoice = mergedInvoices[0];
-        console.log("Muestra de la primera factura:", {
-          uuid: firstInvoice.uuid,
-          cfdiType: firstInvoice.cfdiType,
-          issuerRfc: firstInvoice.issuerRfc,
-          receiverRfc: firstInvoice.receiverRfc,
-          total: firstInvoice.total
-        });
-      }
-    } catch (error) {
-      console.error("Error al analizar facturas en ExpensesTable:", error);
-    }
-  }, [mergedInvoices]);
-  
-  // Filtrar facturas por año, búsqueda, rango de fechas y categoría
-  const filteredInvoices = mergedInvoices.filter(invoice => {
-    const invoiceYear = new Date(invoice.date).getFullYear();
-    const matchesYear = invoiceYear === year;
+    });
     
-    const matchesSearch = searchTerm === "" ||
-      invoice.uuid.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      invoice.issuerName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      invoice.issuerRfc.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    let matchesDateRange = true;
-    if (dateFrom) {
-      matchesDateRange = matchesDateRange && new Date(invoice.date) >= dateFrom;
-    }
-    if (dateTo) {
-      matchesDateRange = matchesDateRange && new Date(invoice.date) <= dateTo;
-    }
-    
-    const matchesCategory = category === "Todas" || invoice.expenseType === category;
-    
-    return matchesYear && matchesSearch && matchesDateRange && matchesCategory && !invoice.isCancelled;
-  });
-  
-  const totalAmount = filteredInvoices.reduce((sum, invoice) => sum + invoice.total, 0);
-  
-  // Función para obtener el mes de la factura (1-12)
-  const getMonth = (dateString: string): number => {
-    return new Date(dateString).getMonth() + 1;
-  };
-  
-  // Función para obtener las abreviaturas de meses en español
-  const getMonthAbbreviation = (month: number): string => {
-    // Valor especial para deducción anual
-    if (month === 13) return 'ANUAL';
-    
-    const monthAbbreviations = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'];
-    return monthAbbreviations[month - 1] || '';
-  };
-  
-  // Nombre del mes para mostrar en la fila de separación
-  const getMonthName = (month: number): string => {
-    const date = new Date(year, month - 1, 1);
-    return format(date, 'MMMM', { locale: es });
-  };
+    return totals;
+  }, [filteredInvoices]);
 
-  // Agrupar facturas por mes
-  const invoicesByMonth = filteredInvoices.reduce((acc: { [key: number]: Invoice[] }, invoice) => {
-    const month = getMonth(invoice.date);
-    if (!acc[month]) {
-      acc[month] = [];
-    }
-    acc[month].push(invoice);
-    return acc;
-  }, {});
-  
-  // Ordenar los meses numéricamente
-  const sortedMonths = Object.keys(invoicesByMonth)
-    .map(Number)
-    .sort((a, b) => a - b);
-
-  // Handle row click to open the invoice modal
-  const handleInvoiceClick = (invoice: Invoice) => {
-    setSelectedInvoice(updatedInvoices[invoice.id] || invoice);
-    setIsModalOpen(true);
-  };
-
-  // Function to update invoice with new deductibility info
-  const handleUpdateInvoice = (updatedInvoice: Invoice) => {
-    // Calcular los valores de deducibilidad adicionales
-    const calculatedInvoice = calculateDeductibilityValues(updatedInvoice);
-    
-    // Almacenar la factura actualizada en el estado local
-    setUpdatedInvoices(prev => ({
-      ...prev,
-      [calculatedInvoice.id]: calculatedInvoice
-    }));
-    
-    // Actualizar la factura seleccionada si es la misma que se está modificando
-    if (selectedInvoice && selectedInvoice.id === calculatedInvoice.id) {
-      setSelectedInvoice(calculatedInvoice);
-    }
-    
-    // Asegurar que los cambios se guarden inmediatamente en localStorage
-    try {
-      const currentSaved = localStorage.getItem(`updatedInvoices_${year}`) || "{}";
-      const parsed = JSON.parse(currentSaved);
-      parsed[calculatedInvoice.id] = calculatedInvoice;
-      localStorage.setItem(`updatedInvoices_${year}`, JSON.stringify(parsed));
-    } catch (error) {
-      console.error("Error al guardar factura individual en localStorage:", error);
-    }
-  };
-  
-  // Calcula los valores adicionales de deducibilidad
-  const calculateDeductibilityValues = (invoice: Invoice): Invoice => {
-    if (!invoice.isDeductible) {
-      return invoice;
-    }
-    
-    // Por defecto, usar el mes de emisión como mes de deducción
-    const deductionMonth = invoice.deductionMonth || getMonth(invoice.date);
-    
-    // Calcular montos deducibles según el tipo de deducibilidad
-    let deductibleTaxedAmount = 0;   // Monto gravado
-    let deductibleVAT = 0;           // IVA deducible
-    let deductibleExempt = 0;        // Monto exento
-    
-    if (invoice.deductibilityType === 'full') {
-      // Deducción completa
-      deductibleTaxedAmount = invoice.subtotal;
-      deductibleVAT = invoice.tax || 0;
-      // Si hay conceptos con tasa 0% o exentos, establecer esos valores
-      // Como no tenemos esa información por el momento, lo dejamos en 0
-    } else if (invoice.deductibilityType === 'partial' && invoice.deductiblePercentage) {
-      // Deducción parcial (porcentaje)
-      const factor = invoice.deductiblePercentage / 100;
-      deductibleTaxedAmount = invoice.subtotal * factor;
-      deductibleVAT = (invoice.tax || 0) * factor;
-    } else if (invoice.deductibilityType === 'fixed' && invoice.deductibleAmount) {
-      // Monto fijo - asumimos que este es el total deducible
-      // Proporcionalmente distribuimos entre gravado e IVA
-      if (invoice.total > 0) {
-        const factor = invoice.deductibleAmount / invoice.total;
-        deductibleTaxedAmount = invoice.subtotal * factor;
-        deductibleVAT = (invoice.tax || 0) * factor;
-      }
-    }
-    
-    // Total deducible es la suma de los componentes
-    const deductibleTotal = deductibleTaxedAmount + deductibleVAT + deductibleExempt;
-    
-    // Diferencia entre el total deducible y el total de la factura
-    const deductibleDifference = deductibleTotal - invoice.total;
-    
-    return {
-      ...invoice,
-      deductionMonth,
-      deductibleTaxedAmount,
-      deductibleVAT,
-      deductibleExempt,
-      deductibleTotal,
-      deductibleDifference
-    };
-  };
-
-  // Handle checkbox click without triggering row click
-  const handleCheckboxClick = (e: React.MouseEvent, invoice: Invoice) => {
-    e.stopPropagation();
-    const isDeductible = !invoice.isDeductible;
-    const updatedInvoice = {
-      ...invoice,
-      isDeductible,
-      deductibilityType: isDeductible ? 'full' : 'none' as 'none' | 'full' | 'partial' | 'fixed'
-    };
-    handleUpdateInvoice(updatedInvoice);
-  };
-
-  // Helper function to display deductibility information nicely
-  const getDeductibilityDisplay = (invoice: Invoice) => {
-    if (!invoice.isDeductible) return null;
-    
-    if (invoice.deductibilityType === 'fixed' && invoice.deductibleAmount) {
-      return `${formatCurrency(invoice.deductibleAmount)}`;
-    } else if (invoice.deductibilityType === 'partial' && invoice.deductiblePercentage) {
-      return `${invoice.deductiblePercentage}%`;
-    }
-    return null;
-  };
-
-  // Function to open modal with deductibility editor open
-  const openDeductibilityEditor = (invoice: Invoice) => {
+  // Invoice interaction handlers - use useCallback for event handlers
+  const handleInvoiceClick = useCallback((invoice: Invoice) => {
     setSelectedInvoice(invoice);
-    setShowDeductibilityEditor(true);
     setIsModalOpen(true);
-  };
-  
-  return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-xl flex justify-between items-center">
-            <span>Facturas CFDI Emitidas {year}</span>
-            <Badge variant="outline" className="text-sm py-1">
-              Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Badge>
-          </CardTitle>
-          
-          <div className="flex flex-col md:flex-row gap-3 pt-2">
-            <div className="relative flex-grow">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Buscar por UUID, emisor o RFC..."
-                className="pl-9"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+  }, []);
+
+  const handleUpdateInvoice = useCallback((updatedInvoice: Invoice) => {
+    setUpdatedInvoices(prev => {
+      const newState = { ...prev, [updatedInvoice.id]: updatedInvoice };
+      if (selectedInvoice?.id === updatedInvoice.id) setSelectedInvoice(updatedInvoice);
+      return newState;
+    });
+  }, [selectedInvoice]);
+
+  const handleLockToggle = useCallback((e: React.MouseEvent, invoice: Invoice) => {
+    e.stopPropagation();
+    handleUpdateInvoice({ ...invoice, locked: !invoice.locked });
+  }, [handleUpdateInvoice]);
+
+  const handleMonthSelect = useCallback((invoiceId: string, month: string) => {
+    const invoice = filteredInvoices.find(inv => inv.id === invoiceId);
+    if (!invoice) return;
+    
+    const isDeducible = month !== "none";
+    let updatedInvoice = {
+      ...invoice,
+      mesDeduccion: month === "none" ? undefined : parseInt(month),
+      esDeducible: isDeducible,
+    };
+    
+    if (isDeducible) {
+      // Calculate the gravado values using the correct formula
+      const { gravadoISR, gravadoIVA } = calculateGravados(updatedInvoice);
+      updatedInvoice = {
+        ...updatedInvoice,
+        gravadoISR,
+        gravadoIVA
+      };
+    } else {
+      // If not deductible, set gravado values to 0
+      updatedInvoice = {
+        ...updatedInvoice,
+        gravadoISR: 0,
+        gravadoIVA: 0
+      };
+    }
+    
+    handleUpdateInvoice(updatedInvoice);
+  }, [filteredInvoices, calculateGravados, handleUpdateInvoice]);
+
+  const handleGravadoDoubleClick = useCallback((invoice: Invoice) => {
+    if (invoice.locked || invoiceHelpers.isPaymentComplement(invoice)) return;
+    
+    setInvoiceForDeductibility(invoice);
+    setIsDeductibilityEditorOpen(true);
+  }, [invoiceHelpers]);
+
+  // Auto-assignment of payment months - simplified logic
+  useEffect(() => {
+    if (!invoices || invoices.length === 0) return;
+    
+    // Create a lookup of payment complements for faster access
+    const paymentComplements = invoices.filter(inv => inv.tipoDeComprobante === 'P');
+    const paymentMap = new Map<string, Date[]>();
+    
+    paymentComplements.forEach(pc => {
+      if (!pc.docsRelacionadoComplementoPago) return;
+      
+      pc.docsRelacionadoComplementoPago.forEach(uuid => {
+        const key = uuid.toUpperCase();
+        const paymentDate = new Date(pc.fecha);
+        
+        if (!paymentMap.has(key)) {
+          paymentMap.set(key, [paymentDate]);
+        } else {
+          paymentMap.get(key)?.push(paymentDate);
+        }
+      });
+    });
+    
+    // Process each invoice that needs a payment month
+    const updates: Record<string, Invoice> = {};
+    
+    invoices.forEach(invoice => {
+      // Skip if already processed or is a payment complement
+      if (invoice.tipoDeComprobante === 'P' || 
+          invoice.mesDeduccion !== undefined || 
+          updatedInvoices[invoice.id]?.mesDeduccion !== undefined) return;
+      
+      // Check if this invoice has payment complements
+      const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
+      
+      if (paymentDates?.length) {
+        // Use the earliest payment date's month
+        const earliestMonth = Math.min(...paymentDates.map(d => d.getMonth() + 1));
+        const baseInvoice = {
+          ...invoice,
+          mesDeduccion: earliestMonth,
+          esDeducible: true,
+          pagado: true
+        };
+        
+        const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+        updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+      } 
+      // Handle special cases
+      else if (invoiceHelpers.isNonDeductible(invoice)) {
+        updates[invoice.id] = {
+          ...invoice,
+          mesDeduccion: undefined,
+          esDeducible: false
+        };
+      } else if (invoiceHelpers.isAnnualDeduction(invoice)) {
+        updates[invoice.id] = {
+          ...invoice,
+          mesDeduccion: 13, // Annual
+          esDeducible: true
+        };
+      } else if (invoiceHelpers.isPUEPayment(invoice)) {
+        const invoiceMonth = new Date(invoice.fecha).getMonth() + 1;
+        const baseInvoice = {
+          ...invoice,
+          mesDeduccion: invoiceMonth,
+          esDeducible: true
+        };
+        
+        const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+        updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+      } else if (invoice.metodoPago === 'PPD') {
+        updates[invoice.id] = {
+          ...invoice,
+          mesDeduccion: undefined,
+          esDeducible: false
+        };
+      }
+    });
+    
+    // Only update state if we have changes
+    if (Object.keys(updates).length > 0) {
+      console.log("Auto-assigning payment months to", Object.keys(updates).length, "invoices");
+      setUpdatedInvoices(prev => ({ ...prev, ...updates }));
+    }
+  }, [invoices, year, updatedInvoices, calculateGravados, invoiceHelpers]);
+
+  // Render helper function for invoice row - simplifies the render logic
+  const renderInvoiceRow = useCallback((invoice: Invoice, index: number) => {
+    const isS01 = invoice.usoCFDI === 'S01';
+    const isComplement = invoiceHelpers.isPaymentComplement(invoice);
+    
+    return (
+      <tr
+        key={invoice.id}
+        id={isComplement ? `payment-complement-${invoice.uuid}` : undefined}
+        className={`border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 
+                  ${isS01 ? 'bg-gray-100 dark:bg-gray-800/80 text-gray-400' : 'bg-white dark:bg-gray-950'}
+                  ${invoice.locked ? 'opacity-80' : ''}
+                  ${isComplement ? '!bg-blue-50 dark:bg-blue-900 text-blue-600' : ''}
+                  ${highlightedPaymentComplements.includes(invoice.uuid) ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}`}
+      >
+        {/* Lock Button */}
+        <td className="px-2 py-1 align-middle text-center">
+          {isS01 || isComplement ? (
+            <span className="h-7 w-7 block"></span>
+          ) : (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={(e) => handleLockToggle(e, invoice)}
+              disabled={invoice.estaCancelado}
+            >
+              {invoice.locked ? 
+                <Lock className="h-4 w-4 text-amber-600" /> : 
+                <Unlock className="h-4 w-4 text-gray-400" />}
+            </Button>
+          )}
+        </td>
+        
+        {/* Invoice Info */}
+        <td className="px-2 py-1 align-middle">
+          <div className="flex flex-col">
+            <span className={isS01 ? "text-gray-400" : ""}>{format(new Date(invoice.fecha), 'dd/MM/yyyy')}</span>
+            <button 
+              className={`hover:text-blue-700 text-xs text-left ${isS01 ? "text-gray-400" : "text-blue-500"}`}
+              onClick={() => handleInvoiceClick(invoice)}
+            >
+              {invoice.uuid.substring(0, 8)}... ({invoice.tipoDeComprobante})
+            </button>
+          </div>
+        </td>
+
+        {/* Emisor */}
+        <td className="px-2 py-1 align-middle">
+          <div className="flex flex-col">
+            <span className={`truncate max-w-[40ch] ${isS01 ? "text-gray-400" : ""}`}>
+              {invoice.nombreEmisor} ({invoice.regimenFiscal || 'N/A'})
+            </span>
+            <span className={isS01 ? "text-gray-400" : "text-gray-500 text-xs"}>
+              {invoice.rfcEmisor}
+            </span>
+          </div>
+        </td>
+
+        {/* Uso/Pago */}
+        <td className="px-2 py-1 align-middle">
+          <div className="flex flex-col">
+            <span className={`${isS01 ? "text-gray-400" : "font-medium"}`}>
+              {invoice.usoCFDI}
+            </span>
+            {!isComplement && !isS01 && (
+              <div className="flex items-center gap-1">
+                <span className={`text-xs ${
+                  invoiceHelpers.needsPaymentComplement(invoice) ? 'text-red-500 font-medium' : 
+                  invoiceHelpers.isPaidPPDInvoice(invoice) ? 'text-blue-600 font-medium' : 'text-gray-500'
+                }`}>
+                  {invoice.formaPago} / {invoice.metodoPago}
+                  {invoiceHelpers.needsPaymentComplement(invoice) && ' ⚠️'}
+                  {invoiceHelpers.isPaidPPDInvoice(invoice) && (
+                    <Check className="h-3 w-3 inline ml-1 text-blue-600" />
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
+        </td>
+
+        {/* Concepto */}
+        <td className="px-2 py-1 align-middle">
+          {isComplement 
+            ? <span className="text-gray-400">Comp. de Pago</span>
+            : isS01 ? (
+              <span className="text-sm text-gray-400 italic">Sin efectos fiscales</span>
+            ) : (
+              <span className="text-sm truncate max-w-[48ch]">{invoice.concepto || invoice.descripcion || 'Sin concepto'}</span>
+            )}
+        </td>
+        
+        {/* Categoría */}
+        <td className="px-2 py-1 align-middle">
+          {isComplement || isS01
+            ? <span></span>
+            : <span className="text-sm truncate max-w-[48ch]">{invoice.categoria || 'Sin categoría'}</span>
+          }
+        </td>
+
+        {/* SubTotal */}
+        <td className="px-2 py-1 align-middle text-right">
+          {isComplement 
+            ? <span></span>
+            : <span className={isS01 ? "text-gray-400" : ""}>
+                ${invoice.subTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </span>
+          }
+        </td>
+
+        {/* Impuestos */}
+        <td className="px-2 py-1 align-middle">
+          {isComplement ? (
+            <span></span>
+          ) : (
+            <div className={`flex flex-col text-xs text-right ${isS01 ? "text-gray-400" : ""}`}>
+              <span>+IVA: ${(invoice.impuestoTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              <span>-IVA: ${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              <span>-ISR: ${(invoice.isrRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
             </div>
-            
-            <div className="flex gap-2 flex-wrap">
-              <Select 
-                value={category} 
-                onValueChange={setCategory}
+          )}
+        </td>
+        
+        {/* Total */}
+        <td className="px-2 py-1 align-middle text-right font-medium">
+          {isComplement 
+            ? <span></span>
+            : <span className={isS01 ? "text-gray-400" : ""}>
+                ${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </span>
+          }
+        </td>
+        
+        {/* Mes Pago */}
+        <td className="px-2 py-1 align-middle text-center">
+          {isComplement || isS01 ? (
+            <span></span>
+          ) : (
+            <div className="flex flex-col items-center">
+              <Select
+                value={invoice.mesDeduccion?.toString() || "none"}
+                onValueChange={(value) => handleMonthSelect(invoice.id, value)}
+                onClick={(e) => e.stopPropagation()}
+                disabled={invoice.locked}
               >
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue placeholder="Categoría" />
+                <SelectTrigger className="h-7 w-24 text-xs mx-auto">
+                  <SelectValue placeholder="-" />
                 </SelectTrigger>
                 <SelectContent>
-                  {expenseCategories.map(cat => (
-                    <SelectItem key={cat} value={cat}>
-                      {cat}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="none">-</SelectItem>
+                  {Array.from({ length: 12 }, (_, i) => {
+                    const monthNum = i+1;
+                    const needsWarning = invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice);
+                    return (
+                      <SelectItem key={monthNum} value={monthNum.toString()}>
+                        {dateUtils.getMonthAbbreviation(monthNum)}{needsWarning ? " (Sin CP)" : ""}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
-              
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button variant="outline" className="flex items-center gap-2">
-                    <CalendarIcon className="h-4 w-4" />
-                    {dateFrom && dateTo ? (
-                      <span>
-                        {format(dateFrom, "dd/MM/yyyy")} - {format(dateTo, "dd/MM/yyyy")}
-                      </span>
-                    ) : (
-                      <span>Rango de fechas</span>
-                    )}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="end">
-                  <div className="flex flex-col sm:flex-row gap-2 p-3">
-                    <div>
-                      <div className="mb-2 text-sm font-medium">Desde</div>
-                      <Calendar
-                        mode="single"
-                        selected={dateFrom}
-                        onSelect={setDateFrom}
-                        locale={es}
-                        className="border rounded-md"
-                      />
-                    </div>
-                    <div>
-                      <div className="mb-2 text-sm font-medium">Hasta</div>
-                      <Calendar
-                        mode="single"
-                        selected={dateTo}
-                        onSelect={setDateTo}
-                        locale={es}
-                        className="border rounded-md"
-                      />
-                    </div>
-                  </div>
-                  <div className="border-t p-3 flex justify-end gap-2">
-                    <Button variant="outline" size="sm" onClick={() => {
-                      setDateFrom(undefined);
-                      setDateTo(undefined);
-                    }}>
-                      Limpiar
-                    </Button>
-                    <Button size="sm">Aplicar</Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-              
-              <Button variant="outline">
-                <Download className="h-4 w-4" />
-                <span className="sr-only md:not-sr-only md:ml-2">Exportar</span>
-              </Button>
+            </div>
+          )}
+        </td>
+        
+        {/* Deducible Status */}
+        <td className="px-2 py-1 align-middle text-center">
+          {isComplement || isS01 ? (
+            <span></span>
+          ) : (
+            <Badge variant="outline" className={`
+              ${invoice.esDeducible ? 'bg-green-50 text-green-700 border-green-300' : 'bg-red-50 text-red-700 border-red-300'}
+            `}>
+              {invoice.esDeducible ? 'Sí' : 'No'}
+            </Badge>
+          )}
+        </td>
+        
+        {/* Gravado ISR */}
+        <td 
+          className="px-2 py-1 align-middle text-right cursor-pointer"
+          onDoubleClick={() => !isS01 && handleGravadoDoubleClick(invoice)}
+        >
+          {isComplement || isS01
+            ? <span></span>
+            : <>${
+              invoiceHelpers.isDeducible(invoice) 
+              ? invoice.gravadoISR || 0
+              : '0.00'
+              }</>
+          }
+        </td>
+
+        {/* Gravado IVA */}
+        <td 
+          className="px-2 py-1 align-middle text-right cursor-pointer"
+          onDoubleClick={() => !isS01 && handleGravadoDoubleClick(invoice)}
+        >
+          {isComplement || isS01
+            ? <span></span>
+            : <>${
+              invoiceHelpers.isDeducible(invoice)
+              ? invoice.gravadoIVA || 0
+              : '0.00'
+              }</>
+          }
+        </td>
+      </tr>
+    );
+  }, [dateUtils, handleGravadoDoubleClick, handleInvoiceClick, handleLockToggle, handleMonthSelect, highlightedPaymentComplements, invoiceHelpers]);
+
+  return (
+    <TooltipProvider>
+      <div className="space-y-2">
+        <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border">
+          {/* Header */}
+          <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-base font-medium whitespace-nowrap">Facturas Recibidas {year}</h2>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+                Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </Badge>
+              {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Gastos_${year}.xlsx`} />}
             </div>
           </div>
-        </CardHeader>
-        
-        <CardContent>
-          <div className="rounded-md border overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-gray-100 dark:bg-gray-800 text-left">
-                    {/* Eliminadas columnas redundantes "Mes" y "No." */}
-                    {/* Ocultado: TipoDocumento */}
-                    {/* Ocultado: RFC Receptor */}
-                    {/* Ocultado: Receptor */}
-                    {/* Ocultado: DomicilioFiscalReceptor */}
-                    {/* Ocultado: RegimenFiscalReceptor */}
-                    <th className="px-2 py-1.5 font-medium">UsoCFDI</th>
-                    <th className="px-2 py-1.5 font-medium">RFC Emisor</th>
-                    <th className="px-2 py-1.5 font-medium">Emisor</th>
-                    <th className="px-2 py-1.5 font-medium cursor-pointer" onClick={() => setShowRegimeFiscalDetails(!showRegimeFiscalDetails)}>
-                      <div className="flex items-center gap-1">
-                        <span>RegimenFiscal</span>
-                        {showRegimeFiscalDetails ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                      </div>
-                    </th>
-                    {showRegimeFiscalDetails && (
-                      <>
-                        <th className="px-2 py-1.5 font-medium">
-                          <span>LugarExp</span>
-                        </th>
-                        <th className="px-2 py-1.5 font-medium">Serie</th>
-                        <th className="px-2 py-1.5 font-medium">Folio</th>
-                        <th className="px-2 py-1.5 font-medium">UUID</th>
-                      </>
-                    )}
-                    <th className="px-2 py-1.5 font-medium cursor-pointer" onClick={() => setShowMetodoPagoDetails(!showMetodoPagoDetails)}>
-                      <div className="flex items-center gap-1">
-                        <span>MetPago</span>
-                        {showMetodoPagoDetails ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                      </div>
-                    </th>
-                    {showMetodoPagoDetails && (
-                      <>
-                        <th className="px-2 py-1.5 font-medium">NumCtaPago</th>
-                        <th className="px-2 py-1.5 font-medium">FormaCtaPago</th>
-                        <th className="px-2 py-1.5 font-medium">FormaPago</th>
-                        <th className="px-2 py-1.5 font-medium">Moneda</th>
-                        <th className="px-2 py-1.5 font-medium">TipoCambio</th>
-                      </>
-                    )}
-                    <th className="px-2 py-1.5 font-medium text-right">SubTotal</th>
-                    <th className="px-2 py-1.5 font-medium text-right">ImpTrasladados</th>
-                    <th className="px-2 py-1.5 font-medium text-right">IvaTrasladado</th>
-                    <th className="px-2 py-1.5 font-medium text-right">IepsTrasladado</th>
-                    <th className="px-2 py-1.5 font-medium text-right">ImpRetenidos</th>
-                    <th className="px-2 py-1.5 font-medium text-right">IvaRetenido</th>
-                    <th className="px-2 py-1.5 font-medium text-right">IsrRetenido</th>
-                    <th className="px-2 py-1.5 font-medium text-right">Descuento</th>
-                    <th className="px-2 py-1.5 font-medium text-right">Total</th>
-                    <th className="px-2 py-1.5 font-medium">Deducible</th>
-                    
-                    {/* Columnas de deducibilidad reducidas */}
-                    <th className="px-2 py-1.5 font-medium text-center">Mes Ded.</th>
-                    <th className="px-2 py-1.5 font-medium text-right">Gravado</th>
-                    <th className="px-2 py-1.5 font-medium text-center">Acciones</th>
+
+          {/* Table */}
+          <div className="relative">
+            <div className="max-h-[70vh] overflow-y-auto">
+              <table className="w-full text-xs relative">
+                <thead className="sticky top-0 z-20">
+                  <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Emisor</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Categoría</th>
+                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">SubTotal</th>
+                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Impuestos</th>
+                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Total</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Mes Pago</th>
+                    <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
+                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado ISR</th>
+                    <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="mt-1">
                   {sortedMonths.length > 0 ? (
-                    sortedMonths.map(month => (
+                    sortedMonths.map((month) => (
                       <React.Fragment key={month}>
                         <tr className="bg-gray-200 dark:bg-gray-700">
-                          <td colSpan={showRegimeFiscalDetails && showMetodoPagoDetails ? 23 : 
-                                      showRegimeFiscalDetails ? 21 : 
-                                      showMetodoPagoDetails ? 20 : 18} 
-                              className="px-2 py-1 font-medium">
-                            {getMonthName(month)}
+                          <td colSpan={13} className="px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
+                        </tr>
+                        
+                        {invoicesByMonth[month].map(renderInvoiceRow)}
+                        
+                        {/* Monthly Totals */}
+                        <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
+                          <td colSpan={13} className="px-2 py-1.5 text-right text-gray-500">
+                            Total Deducible: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
+                            IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                           </td>
                         </tr>
-                        {invoicesByMonth[month].map((invoice, index) => (
-                          <tr 
-                            key={invoice.id}
-                            onClick={() => handleInvoiceClick(invoice)}
-                            className={`border-t border-gray-200 dark:border-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
-                              index % 2 === 0 ? 'bg-white dark:bg-gray-950' : 'bg-gray-50 dark:bg-gray-900'
-                            }`}
-                          >
-                            {/* Eliminadas columnas "Mes" y "No." */}
-                            {/* Ocultado: TipoDocumento */}
-                            {/* Ocultado: RFC Receptor */}
-                            {/* Ocultado: Receptor */}
-                            {/* Ocultado: DomicilioFiscalReceptor */}
-                            {/* Ocultado: RegimenFiscalReceptor */}
-                            <td className="px-2 py-1 align-middle">{invoice.cfdiUsage}</td>
-                            <td className="px-2 py-1 align-middle">{invoice.issuerRfc}</td>
-                            <td className="px-2 py-1 align-middle whitespace-nowrap overflow-hidden max-w-[150px]">
-                              <div className="overflow-hidden text-ellipsis" title={invoice.issuerName}>
-                                {invoice.issuerName}
-                              </div>
-                            </td>
-                            <td className="px-2 py-1 align-middle">{invoice.fiscalRegime}</td>
-                            {showRegimeFiscalDetails && (
-                              <>
-                                <td className="px-2 py-1 align-middle">{invoice.lugarExpedicion || invoice.issuerZipCode || 'N/A'}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.series || 'N/A'}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.folio || 'N/A'}</td>
-                                <td className="px-2 py-1 align-middle">
-                                  <span className="font-mono text-xxs">{invoice.uuid.substring(0, 8)}...</span>
-                                </td>
-                              </>
-                            )}
-                            <td className="px-2 py-1 align-middle">{invoice.paymentMethod}</td>
-                            {showMetodoPagoDetails && (
-                              <>
-                                <td className="px-2 py-1 align-middle">{invoice.paymentAccountNumber || 'N/A'}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.paymentAccountForm || 'N/A'}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.paymentForm}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.currency || 'MXN'}</td>
-                                <td className="px-2 py-1 align-middle">{invoice.exchangeRate || '1.00'}</td>
-                              </>
-                            )}
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${invoice.subtotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.transferredTaxes || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.tax || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.iepsTax || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.retainedTaxes || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.retainedVat || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.retainedIsr || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              ${(invoice.discount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right font-medium">
-                              ${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-2 py-1 align-middle">
-                              <div className="flex items-center gap-1">
-                                <Checkbox
-                                  className="h-3 w-3"
-                                  checked={invoice.isDeductible}
-                                  onClick={(e) => handleCheckboxClick(e as React.MouseEvent, invoice)}
-                                  onCheckedChange={(checked: boolean) => {
-                                    const updatedInvoice = {
-                                      ...invoice,
-                                      isDeductible: checked,
-                                      deductibilityType: 'full' as 'full' | 'partial' | 'fixed' | 'none'
-                                    };
-                                    handleUpdateInvoice(updatedInvoice);
-                                  }}
-                                />
-                                
-                                {invoice.isDeductible && getDeductibilityDisplay(invoice) && (
-                                  <span className="text-xxs text-gray-600">{getDeductibilityDisplay(invoice)}</span>
-                                )}
-                                
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                    <Button variant="ghost" size="icon" className="h-4 w-4 p-0">
-                                      <MoreHorizontal className="h-2 w-2" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="start" className="text-xs">
-                                    <DropdownMenuLabel className="text-xs">Configuración de deducibilidad</DropdownMenuLabel>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem onClick={(e) => {
-                                      e.stopPropagation();
-                                      openDeductibilityEditor(invoice);
-                                    }}>
-                                      <Pencil className="h-3 w-3 mr-1" /> Configuración avanzada
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={(e) => {
-                                      e.stopPropagation();
-                                      const updatedInvoice = {
-                                        ...invoice,
-                                        isDeductible: true,
-                                        deductibilityType: 'full' as 'none' | 'full' | 'partial' | 'fixed'
-                                      };
-                                      handleUpdateInvoice(updatedInvoice);
-                                    }}>
-                                      <Check className="h-3 w-3 mr-1" /> Deducible (100%)
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={(e) => {
-                                      e.stopPropagation();
-                                      const updatedInvoice = {
-                                        ...invoice,
-                                        isDeductible: false,
-                                        deductibilityType: 'none' as 'none' | 'full' | 'partial' | 'fixed'
-                                      };
-                                      handleUpdateInvoice(updatedInvoice);
-                                    }}>
-                                      <X className="h-3 w-3 mr-1" /> No deducible
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            </td>
-                            
-                            {/* Solo mostrar Mes Ded. y Gravado como solicitado */}
-                            <td className="px-2 py-1 align-middle text-center">
-                              {invoice.isDeductible ? (
-                                <div onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-                                  <Select
-                                    value={invoice.deductionMonth ? getMonthAbbreviation(invoice.deductionMonth) : getMonthAbbreviation(getMonth(invoice.date))}
-                                    onValueChange={(value) => {
-                                      const monthIndex = ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC', 'ANUAL'].indexOf(value) + 1;
-                                      const updatedInvoice = {
-                                        ...invoice,
-                                        deductionMonth: monthIndex
-                                      };
-                                      handleUpdateInvoice(updatedInvoice);
-                                    }}
-                                  >
-                                    <SelectTrigger className="w-[60px] h-[20px] text-xs">
-                                      <SelectValue placeholder="Mes" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC', 'ANUAL'].map((monthAbbr, index) => (
-                                        <SelectItem key={index} value={monthAbbr} className="text-xs">
-                                          {monthAbbr}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                              ) : '-'}
-                            </td>
-                            <td className="px-2 py-1 align-middle text-right">
-                              {invoice.isDeductible ? (
-                                `$${(invoice.deductibleTaxedAmount || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}`
-                              ) : '-'}
-                            </td>
-                            
-                            <td className="px-2 py-1 align-middle text-center">
-                              <div className="flex justify-center gap-1">
-                                <Button variant="ghost" size="icon" className="h-5 w-5" title="Ver detalle">
-                                  <Eye className="h-3 w-3" />
-                                </Button>
-                                <Button variant="ghost" size="icon" className="h-5 w-5" title="Descargar XML">
-                                  <FileText className="h-3 w-3" />
-                                </Button>
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                                    <Button variant="ghost" size="icon" className="h-5 w-5">
-                                      <MoreHorizontal className="h-3 w-3" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" className="text-xs">
-                                    <DropdownMenuItem onClick={(e) => {
-                                      e.stopPropagation();
-                                      setSelectedInvoice(invoice);
-                                      setIsModalOpen(true);
-                                    }}>
-                                      Ver detalle
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
                       </React.Fragment>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={showRegimeFiscalDetails && showMetodoPagoDetails ? 23 : 
-                                  showRegimeFiscalDetails ? 21 : 
-                                  showMetodoPagoDetails ? 20 : 18} 
-                          className="px-2 py-4 text-center text-gray-500 text-xs">
-                        No se encontraron facturas CFDI emitidas para el año {year} con los filtros actuales
+                      <td colSpan={13} className="px-2 py-4 text-center text-gray-500 text-xs">
+                        No se encontraron facturas CFDI recibidas para el año {year} con los filtros actuales
                       </td>
                     </tr>
                   )}
@@ -658,18 +572,24 @@ export function ExpensesTable({ year, invoices = [] }: ExpensesTableProps) {
               </table>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
 
-      {/* Add the invoice preview modal */}
-      <InvoicePreviewModal 
-        invoice={selectedInvoice}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
-        onUpdate={handleUpdateInvoice}
-        showDeductibilityEditor={showDeductibilityEditor}
-        onDeductibilityEditorClose={() => setShowDeductibilityEditor(false)}
-      />
-    </div>
+        {/* Modals */}
+        <InvoicePreviewModal
+          invoice={selectedInvoice}
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          onUpdate={handleUpdateInvoice}
+        />
+        
+        <InvoiceDeductibilityEditor
+          invoice={invoiceForDeductibility}
+          isOpen={isDeductibilityEditorOpen}
+          onClose={() => setIsDeductibilityEditorOpen(false)}
+          onSave={handleUpdateInvoice}
+        />
+      </div>
+    </TooltipProvider>
   );
 }
+

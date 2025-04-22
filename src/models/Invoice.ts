@@ -2,150 +2,62 @@
  * Modelo que representa una factura CFDI
  */
 export interface Invoice {
-  id: string;               // Identificador único en el sistema
-  uuid: string;             // Identificador único fiscal (UUID/Folio fiscal)
-  series?: string;          // Serie de la factura
-  folio?: string;           // Folio de la factura
-  
-  // Información básica
-  date: string;             // Fecha de emisión YYYY-MM-DD
-  certificateNumber?: string; // Número de certificado
-  paymentMethod: string;    // Método de Pago (e.g., PUE, PPD)
-  paymentForm: string;      // Forma de Pago (e.g., 01: Efectivo, 03: Transferencia)
-  cfdiType: 'I' | 'E' | 'P' | 'N' | 'T'; // Para el cliente: I: Ingreso, E: Egreso, P: Pago, N: Nómina, T: Traslado
-  originalType?: string;    // Tipo de comprobante original del CFDI (para referencia)
-  cfdiUsage: string;        // Uso del CFDI (e.g., G03: Gastos en general)
-  
-  // Información fiscal
-  fiscalYear: number;       // Año fiscal (derivado de la fecha)
-  fiscalRegime: string;     // Régimen fiscal del emisor (RegimenFiscal)
-  regimenFiscalReceptor?: string; // Régimen fiscal del receptor (RegimenFiscalReceptor)
-  
-  // Ubicaciones
-  lugarExpedicion?: string; // Código postal del emisor (LugarExpedicion)
+
+  id: string; // Identificador único en el sistema
+  idCliente: string; // ID del cliente al que pertenece
+  fechaCreacion: string; // Fecha de creación en el sistema
+  fechaActualizacion: string; // Fecha de última actualización
+  contenidoXml?: string; // Contenido XML de la factura
+  recibida: boolean; // Indica si la factura ha sido recibida
+  fecha: string; // Fecha de emisión YYYY-MM-DD
+  tipoDeComprobante?: string; // Tipo de comprobante original del CFDI (para referencia)
+  rfcReceptor: string; // RFC del receptor
+  nombreReceptor: string; // Nombre o razón social del receptor
   domicilioFiscalReceptor?: string; // Código postal del receptor (DomicilioFiscalReceptor)
+  regimenFiscalReceptor?: string; // Régimen fiscal del receptor (RegimenFiscalReceptor)
+  usoCFDI: string; // Uso del CFDI (e.g., G03: Gastos en general)
+  rfcEmisor: string; // RFC del emisor
+  nombreEmisor: string; // Nombre o razón social del emisor
+  lugarExpedicion?: string; // Código postal del emisor (LugarExpedicion)
+  regimenFiscal: string; // Régimen fiscal del emisor (RegimenFiscal)
+  serie?: string; // Serie de la factura
+  folio?: string; // Folio de la factura
+  uuid: string; // Identificador único fiscal (UUID/Folio fiscal)
+  metodoPago: string; // Método de Pago (e.g., PUE, PPD)
+  numCtaPago?: string; // Número de cuenta para pago
+  formaPago: string; // Forma de Pago (e.g., 01: Efectivo, 03: Transferencia)
+  moneda?: string; // Moneda (MXN por defecto)
+  tipoCambio?: string; // Tipo de cambio (1.00 por defecto para MXN)
+  subTotal: number; // Subtotal (sin impuestos)
+  impuestosTrasladados?: number; // Total impuestos trasladados
+  impuestoTrasladado?: number; // IVA (16%)
+  iepsTrasladado?: number; // IEPS trasladado
+  impuestoRetenido?: number; // Impuestos retenidos
+  ivaRetenido?: number; // IVA retenido
+  isrRetenido?: number; // ISR retenido
+  descuento?: number; // Descuento
+  total: number; // Total (con impuestos)
+  estaCancelado: boolean; // Indica si la factura está cancelada
+  fechaCancelación?: string;
+  Gravado?: number; // Mes de deducción (mes en que se realizó el pago)
+  Tasa0?: number; // Mes de deducción (mes en que se realizó el pago)
+  Exento?: number; // Mes de deducción (mes en que se realizó el pago)
+  mesDeduccion?: number; // Mes de deducción (mes en que se realizó el pago)
+  esDeducible?: boolean; // Tambien aplica para es gravable en el caso de CFDIs emitidos
+  tipoDeducibilidad?: string; // Tipo de deducibilidad (added as optional)
+  gravadoISR?: number; // Add this field to replace montoDeducible
+  locked?: boolean; // Indica si la factura está bloqueada para edición
+  notasDeducibilidad?: string;
   
-  // Para mantener compatibilidad con código existente
-  issuerZipCode?: string;   // Alias para lugarExpedicion
-  receiverZipCode?: string; // Alias para domicilioFiscalReceptor
-  receiverFiscalRegime?: string; // Alias para regimenFiscalReceptor
+  // New fields to track payment status
+  pagado?: boolean; // If the invoice has been paid (especially for PPD method)
+  pagadoConComplementos?: string[]; // UUIDs of payment complements that paid this invoice
   
-  // Moneda y cambio
-  currency?: string;        // Moneda (MXN por defecto)
-  exchangeRate?: string;    // Tipo de cambio (1.00 por defecto para MXN)
-  
-  // Importes
-  subtotal: number;         // Subtotal (sin impuestos)
-  discount?: number;        // Descuento
-  total: number;            // Total (con impuestos)
-  
-  // Impuestos
-  tax?: number;             // IVA (16%)
-  taxRate?: number;         // Tasa de IVA (e.g., 0.16)
-  retainedTax?: number;     // Impuestos retenidos
-  retainedVat?: number;     // IVA retenido
-  retainedIsr?: number;     // ISR retenido
-  iepsTax?: number;         // IEPS trasladado
-  transferredTaxes?: number; // Total impuestos trasladados
-  retainedTaxes?: number;   // Total impuestos retenidos
-  localTaxes?: number;      // Impuestos locales
-  
-  // Formas de pago adicionales
-  paymentAccountNumber?: string; // Número de cuenta para pago
-  paymentAccountForm?: string;   // Forma de cuenta para pago
-  
-  // Participantes
-  issuerRfc: string;        // RFC del emisor
-  issuerName: string;       // Nombre o razón social del emisor
-  receiverRfc: string;      // RFC del receptor
-  receiverName: string;     // Nombre o razón social del receptor
-  
-  // Información adicional
-  concepts: InvoiceConcept[]; // Conceptos de la factura
-  expenseType?: string;     // Tipo de gasto (para egresos)
-  cancellationDate?: string; // Fecha de cancelación si aplica
-  isCancelled: boolean;     // Indica si la factura está cancelada
-  observations?: string;    // Observaciones adicionales
-  
-  // Metadata del sistema
-  clientId: string;         // ID del cliente al que pertenece
-  createdAt: string;        // Fecha de creación en el sistema
-  updatedAt: string;        // Fecha de última actualización
-  xmlContent?: string;      // Contenido XML de la factura (podría almacenarse en otro lugar)
-  
-  // Deductibility fields
-  isDeductible?: boolean;
-  deductibilityType?: 'full' | 'partial' | 'fixed' | 'none';
-  deductiblePercentage?: number;
-  deductibleAmount?: number;
-  deductibilityNotes?: string;
-  
-  // Campos adicionales de deducibilidad
-  deductionMonth?: number;          // Mes de deducción (mes en que se realizó el pago)
-  deductibleTaxedAmount?: number;   // Gravado (lo que se deduce)
-  deductibleVAT?: number;           // IVA deducible
-  deductibleRateZero?: number;      // Tasa 0
-  deductibleExempt?: number;        // Exento
-  deductibleTotal?: number;         // Total deducible (gravado + IVA + exento)
-  deductibleDifference?: number;    // Diferencia entre total deducible y total de la factura
+  docsRelacionadoComplementoPago: string[]; // UUIDs de documentos relacionados en complemento de pago
+  ejercicioFiscal: number; // Año fiscal (derivado de la fecha)
+  noCertificado?: string; // Número de certificado
+
+  // Add a new field for the "Gravado IVA" column
+  gravadoIVA?: number;
 }
 
-/**
- * Modelo para los conceptos de una factura
- */
-export interface InvoiceConcept {
-  id: string;               // Identificador único del concepto
-  description: string;      // Descripción del concepto
-  quantity: number;         // Cantidad
-  unitValue: number;        // Valor unitario
-  amount: number;           // Importe (cantidad * valor unitario)
-  unitMeasure: string;      // Unidad de medida
-  productCode?: string;     // Clave de producto o servicio SAT
-  taxes?: ConceptTax[];     // Impuestos del concepto
-}
-
-/**
- * Modelo para los impuestos por concepto
- */
-export interface ConceptTax {
-  type: 'transfer' | 'withholding'; // Tipo: Traslado o Retención
-  taxType: 'IVA' | 'ISR' | 'IEPS';  // Tipo de impuesto
-  base: number;             // Base gravable
-  rate: number;             // Tasa o cuota
-  amount: number;           // Importe del impuesto
-}
-
-/**
- * Calcula el total de ingresos para un año fiscal específico
- */
-export function calculateTotalIncomesByYear(invoices: Invoice[], year: number): number {
-  return invoices
-    .filter(invoice => 
-      invoice.cfdiType === 'I' && 
-      !invoice.isCancelled && 
-      new Date(invoice.date).getFullYear() === year
-    )
-    .reduce((sum, invoice) => sum + invoice.total, 0);
-}
-
-/**
- * Calcula el total de egresos para un año fiscal específico
- */
-export function calculateTotalExpensesByYear(invoices: Invoice[], year: number): number {
-  return invoices
-    .filter(invoice => 
-      invoice.cfdiType === 'E' && 
-      !invoice.isCancelled && 
-      new Date(invoice.date).getFullYear() === year
-    )
-    .reduce((sum, invoice) => sum + invoice.total, 0);
-}
-
-/**
- * Calcula la utilidad fiscal para un año específico
- */
-export function calculateTaxableIncome(invoices: Invoice[], year: number): number {
-  const incomes = calculateTotalIncomesByYear(invoices, year);
-  const expenses = calculateTotalExpensesByYear(invoices, year);
-  return incomes - expenses;
-}

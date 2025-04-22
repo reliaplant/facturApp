@@ -1,27 +1,25 @@
 "use client";
-import { useState, useEffect } from "react";
-import Image from "next/image";
+import React, { useState, useEffect, useRef } from "react"; // Add React import and useRef
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FileUploader } from "@/components/file-uploader";
 import { IncomesTable } from "@/components/incomes-table";
 import { ExpensesTable } from "@/components/expenses-table";
 import { FiscalSummary } from "@/components/fiscal-summary";
 import { YearSelector } from "@/components/year-selector";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, RefreshCw, FileUp, ChevronDown, ChevronUp } from "lucide-react";
-import { Invoice, calculateTotalIncomesByYear, calculateTotalExpensesByYear } from "@/models/Invoice";
+import { ChevronLeft, RefreshCw, FileUp } from "lucide-react";
+import { Invoice } from "@/models/Invoice";
 import { processCFDIFiles } from "@/services/cfdi-parser";
 import { v4 as uuidv4 } from "uuid";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { TaxDeclarationsTable } from "@/components/tax-declarations-table";
-import { FixedAssetsTable } from "@/components/fixed-assets-table";
-import { getMonthName } from "@/models/TaxDeclaration";
 import { Client } from "@/models/Client";
 import { clientService } from "@/services/client-service";
+import InfoClientePF from "./components/infoClientePF";
+import DeclaracionMensualPF from "@/components/declaracionMensualPF/declaracionMensualPF";
+import { FixedAssetsTable } from "@/components/fixed-assets-table";
+import { Download } from "lucide-react"; // Add this import
+import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -31,9 +29,11 @@ export default function ClientDashboard() {
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [client, setClient] = useState<Client | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [showUploader, setShowUploader] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>("fiscal");
   const { toast } = useToast();
+  
+  // Fix the ref - use imported useRef hook directly
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load client data
   useEffect(() => {
@@ -58,7 +58,6 @@ export default function ClientDashboard() {
           setClient(clientData);
         }
       } catch (error) {
-        console.error("Error loading client:", error);
         // Fallback to mock client data if there's an error
         const mockClients = clientService.getMockClients();
         const mockClient = mockClients.find(c => c.id === clientId);
@@ -77,68 +76,23 @@ export default function ClientDashboard() {
     fetchClient();
   }, [clientId, toast]);
 
-  // Calcular datos fiscales basados en las facturas
-  const fiscalData = {
-    incomes: calculateTotalIncomesByYear(invoices, selectedYear),
-    expenses: calculateTotalExpensesByYear(invoices, selectedYear),
-    incomesCount: invoices.filter(
-      inv =>
-        new Date(inv.date).getFullYear() === selectedYear &&
-        inv.cfdiType === "I" &&
-        !inv.isCancelled
-    ).length,
-    expensesCount: invoices.filter(
-      inv =>
-        new Date(inv.date).getFullYear() === selectedYear &&
-        inv.cfdiType === "E" &&
-        !inv.isCancelled
-    ).length,
-    get taxableIncome() {
-      return this.incomes - this.expenses;
-    },
-  };
+  // Direct file upload handler that works with the native file dialog
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!client || !event.target.files || event.target.files.length === 0) return;
 
-  const handleFileUpload = async (files: File[]) => {
-    if (!client) return;
-
+    const files = Array.from(event.target.files);
     setIsLoading(true);
     try {
-      console.log(
-        `Procesando ${files.length} archivos para el cliente ${client.name} (RFC: ${client.rfc})`
-      );
-
-      // Para debugging - mostramos los nombres de los archivos
-      files.forEach((file, index) => {
-        console.log(`Archivo ${index + 1}: ${file.name}, Tamaño: ${file.size} bytes`);
-      });
-
-      // Procesar los archivos XML utilizando el servicio real
+      // Procesar los archivos XML utilizando el servicio actualizado
       const processedInvoices = await processCFDIFiles(files, clientId, client.rfc);
 
-      console.log(`Resultado del procesamiento: ${processedInvoices.length} facturas`);
       if (processedInvoices.length > 0) {
-        // Mostrar detalles de las facturas procesadas para debugging
-        processedInvoices.forEach((inv, idx) => {
-          console.log(`Factura ${idx + 1}: Tipo=${inv.cfdiType}, Total=${inv.total}, UUID=${inv.uuid}`);
-        });
-
-        console.log(`Facturas procesadas: ${processedInvoices.length} total`);
-        console.log(`Recibidas: ${processedInvoices.filter(inv => inv.cfdiType === "I").length}`);
-        console.log(`Emitidas: ${processedInvoices.filter(inv => inv.cfdiType === "E").length}`);
-
         // Añadir las nuevas facturas al estado actual
         setInvoices(prevInvoices => {
           // Verificar que no existan facturas duplicadas por UUID
           const uuids = new Set(prevInvoices.map(inv => inv.uuid));
           const uniqueNewInvoices = processedInvoices.filter(inv => !uuids.has(inv.uuid));
-
-          console.log(`Se agregarán ${uniqueNewInvoices.length} facturas nuevas a la lista`);
-
-          // Mostrar resumen de facturas únicas
-          const newRecibidas = uniqueNewInvoices.filter(inv => inv.cfdiType === "I").length;
-          const newEmitidas = uniqueNewInvoices.filter(inv => inv.cfdiType === "E").length;
-          console.log(`Nuevas recibidas: ${newRecibidas}, Nuevas emitidas: ${newEmitidas}`);
-
+          
           return [...prevInvoices, ...uniqueNewInvoices];
         });
 
@@ -147,7 +101,6 @@ export default function ClientDashboard() {
           description: `Se han procesado ${processedInvoices.length} factura(s) CFDI.`,
         });
       } else {
-        console.warn("No se procesaron facturas correctamente");
         toast({
           title: "Aviso",
           description: "No se pudieron procesar facturas válidas de los archivos seleccionados.",
@@ -155,7 +108,6 @@ export default function ClientDashboard() {
         });
       }
     } catch (error) {
-      console.error("Error procesando archivos:", error);
       toast({
         title: "Error al cargar archivos",
         description: "Ocurrió un error al procesar los archivos XML.",
@@ -163,6 +115,17 @@ export default function ClientDashboard() {
       });
     } finally {
       setIsLoading(false);
+      // Reset the file input so the same files can be selected again if needed
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  // Function to trigger file dialog
+  const openFileDialog = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
     }
   };
 
@@ -170,7 +133,6 @@ export default function ClientDashboard() {
     setIsRefreshing(true);
     try {
       // En un caso real, aquí consultarías facturas desde una API o base de datos
-      // Para este ejemplo, solo simulamos una actualización
       await new Promise(resolve => setTimeout(resolve, 1000));
 
       toast({
@@ -188,156 +150,20 @@ export default function ClientDashboard() {
     }
   };
 
-  const loadExampleData = () => {
-    if (!client) return;
-
-    const currentYear = new Date().getFullYear();
-    const exampleInvoices: Invoice[] = [
-      // Facturas recibidas
-      {
-        id: uuidv4(),
-        uuid: uuidv4(),
-        date: `${currentYear}-01-15`,
-        cfdiType: "I",
-        paymentMethod: "PUE",
-        paymentForm: "01",
-        cfdiUsage: "G03",
-        fiscalYear: currentYear,
-        fiscalRegime: "621",
-        subtotal: 10000,
-        total: 11600,
-        tax: 1600,
-        issuerRfc: client.rfc,
-        issuerName: client.name,
-        receiverRfc: "XAXX010101000",
-        receiverName: "Cliente de Ejemplo",
-        concepts: [
-          {
-            id: uuidv4(),
-            description: "Servicios profesionales enero",
-            quantity: 1,
-            unitValue: 10000,
-            amount: 10000,
-            unitMeasure: "E48",
-            taxes: [],
-          },
-        ],
-        isCancelled: false,
-        clientId: clientId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      // Facturas emitidas
-      {
-        id: uuidv4(),
-        uuid: uuidv4(),
-        date: `${currentYear}-01-10`,
-        cfdiType: "E",
-        paymentMethod: "PUE",
-        paymentForm: "01",
-        cfdiUsage: "G03",
-        fiscalYear: currentYear,
-        fiscalRegime: "601",
-        subtotal: 2500,
-        total: 2900,
-        tax: 400,
-        issuerRfc: "XAXX010101000",
-        issuerName: "Proveedor de Ejemplo",
-        receiverRfc: client.rfc,
-        receiverName: client.name,
-        concepts: [
-          {
-            id: uuidv4(),
-            description: "Material de oficina",
-            quantity: 1,
-            unitValue: 2500,
-            amount: 2500,
-            unitMeasure: "H87",
-            taxes: [],
-          },
-        ],
-        isCancelled: false,
-        expenseType: "Gastos generales",
-        clientId: clientId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ];
-
-    setInvoices(prevInvoices => [...prevInvoices, ...exampleInvoices]);
-
-    toast({
-      title: "Datos de ejemplo cargados",
-      description: "Se han agregado facturas de ejemplo para demostración.",
+  // Get filtered income and expense invoices for the selected year
+  const getYearFilteredInvoices = () => {
+    const yearStart = new Date(selectedYear, 0, 1);
+    const yearEnd = new Date(selectedYear, 11, 31);
+    
+    return invoices.filter(inv => {
+      const invDate = new Date(inv.fecha);
+      return invDate >= yearStart && invDate <= yearEnd;
     });
   };
-
-  const testXMLParser = async () => {
-    // XML de prueba con estructura básica CFDI
-    const xmlSample = `<?xml version="1.0" encoding="UTF-8"?>
-<cfdi:Comprobante Version="4.0" 
-                 Fecha="2023-01-15T12:00:00" 
-                 SubTotal="10000.00" 
-                 Total="11600.00"
-                 TipoDeComprobante="I" 
-                 FormaPago="01" 
-                 MetodoPago="PUE">
-  <cfdi:Emisor Rfc="${client?.rfc}" Nombre="${client?.name}" RegimenFiscal="621"/>
-  <cfdi:Receptor Rfc="XAXX010101000" Nombre="Cliente Público General" UsoCFDI="G03"/>
-  <cfdi:Conceptos>
-    <cfdi:Concepto ClaveProdServ="80141600" Cantidad="1" ClaveUnidad="E48" 
-                  Descripcion="Servicios profesionales" ValorUnitario="10000.00" Importe="10000.00">
-      <cfdi:Impuestos>
-        <cfdi:Traslados>
-          <cfdi:Traslado Base="10000.00" Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="1600.00"/>
-        </cfdi:Traslados>
-      </cfdi:Impuestos>
-    </cfdi:Concepto>
-  </cfdi:Conceptos>
-  <cfdi:Impuestos TotalImpuestosTrasladados="1600.00">
-    <cfdi:Traslados>
-      <cfdi:Traslado Impuesto="002" TipoFactor="Tasa" TasaOCuota="0.160000" Importe="1600.00"/>
-    </cfdi:Traslados>
-  </cfdi:Impuestos>
-  <cfdi:Complemento>
-    <tfd:TimbreFiscalDigital UUID="ecb477da-98f8-4791-8d28-c9724326bda1"/>
-  </cfdi:Complemento>
-</cfdi:Comprobante>`;
-
-    // Convertir string a Blob y luego a File
-    const blob = new Blob([xmlSample], { type: "application/xml" });
-    const file = new File([blob], "factura_prueba.xml", { type: "application/xml" });
-
-    // Procesar el archivo
-    await handleFileUpload([file]);
-  };
-
-  const debugInvoicesState = () => {
-    console.log("===== ESTADO ACTUAL DE FACTURAS =====");
-    console.log(`Total facturas: ${invoices.length}`);
-
-    const recibidas = invoices.filter(inv => inv.cfdiType === "I");
-    const emitidas = invoices.filter(inv => inv.cfdiType === "E");
-
-    console.log(`Facturas recibidas: ${recibidas.length}`);
-    recibidas.forEach((inv, i) => {
-      console.log(
-        `Recibida ${i + 1}: UUID=${inv.uuid.substring(0, 8)}, Emisor=${inv.issuerRfc}, Receptor=${inv.receiverRfc}, Total=${inv.total}`
-      );
-    });
-
-    console.log(`Facturas emitidas: ${emitidas.length}`);
-    emitidas.forEach((inv, i) => {
-      console.log(
-        `Emitida ${i + 1}: UUID=${inv.uuid.substring(0, 8)}, Emisor=${inv.issuerRfc}, Receptor=${inv.receiverRfc}, Total=${inv.total}`
-      );
-    });
-
-    toast({
-      title: "Diagnóstico completado",
-      description: `Ver consola para detalles (${invoices.length} facturas analizadas)`,
-    });
-  };
+  
+  const yearInvoices = getYearFilteredInvoices();
+  const emittedInvoices = yearInvoices.filter(inv => !inv.recibida);
+  const receivedInvoices = yearInvoices.filter(inv => inv.recibida);
 
   if (!client) {
     return <div className="flex items-center justify-center min-h-screen">Cargando...</div>;
@@ -383,10 +209,7 @@ export default function ClientDashboard() {
                 <TabsTrigger value="declaraciones">Declaraciones</TabsTrigger>
                 <TabsTrigger value="pagos">Pagos</TabsTrigger>
                 <TabsTrigger value="info">Info</TabsTrigger>
-                <TabsTrigger value="llaves">Llaves</TabsTrigger>
-                <TabsTrigger value="cuestionario">Cuestionario</TabsTrigger>
                 <TabsTrigger value="activos">Activos</TabsTrigger>
-                <TabsTrigger value="dashboard">Dashboard</TabsTrigger>
                 <TabsTrigger value="ccf">CCF</TabsTrigger>
                 <TabsTrigger value="opinion">Opinion</TabsTrigger>
               </TabsList>
@@ -395,13 +218,32 @@ export default function ClientDashboard() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => setShowUploader(!showUploader)}
+                onClick={openFileDialog}
+                disabled={isLoading}
                 className="flex items-center whitespace-nowrap"
               >
                 <FileUp className="h-4 w-4 mr-1" />
-                {showUploader ? "Ocultar" : "Cargar"}
-                {showUploader ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
+                {isLoading ? "Cargando..." : "Cargar Facturas"}
               </Button>
+              
+              {/* Hidden file input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept=".xml"
+                multiple
+                className="hidden"
+              />
+
+              {/* Add Export Excel Button */}
+              <ExportInvoicesExcel
+                emittedInvoices={emittedInvoices}
+                receivedInvoices={receivedInvoices}
+                year={selectedYear}
+                fileName={`${client?.name || 'Cliente'}_Facturas_${selectedYear}.xlsx`}
+                buttonLabel="Exportar.xlsx"
+              />
 
               <Button
                 variant="outline"
@@ -419,28 +261,8 @@ export default function ClientDashboard() {
       </div>
 
       {/* Main Content */}
-      <main className="w-full px-3 py-4">
-        {/* Área de carga que se muestra/oculta */}
-        {showUploader && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-4 mb-4 transition-all duration-300">
-            <h2 className="text-lg font-medium mb-4">Cargar Facturas CFDI</h2>
-            <FileUploader onFilesUploaded={handleFileUpload} isLoading={isLoading} />
-
-            <div className="flex justify-end mt-4 gap-2">
-              <Button variant="outline" onClick={debugInvoicesState} className="text-sm">
-                Debug Facturas
-              </Button>
-              <Button variant="outline" onClick={testXMLParser} className="text-sm">
-                Probar Parser XML
-              </Button>
-              <Button variant="outline" onClick={loadExampleData} className="text-sm">
-                Cargar datos de ejemplo
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* Contenido de las tabs - Ahora dentro de un componente Tabs */}
+      <main className="w-full p-3">
+        {/* Contenido de las tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="fiscal">
             <FiscalSummary 
@@ -453,397 +275,66 @@ export default function ClientDashboard() {
           <TabsContent value="incomes">
             <IncomesTable
               year={selectedYear}
-              invoices={invoices.filter(inv => inv.cfdiType === "I")}
+              invoices={invoices.filter(inv => !inv.recibida)}
+              disableExport={true} // Add this prop to hide the export button
             />
           </TabsContent>
 
           <TabsContent value="expenses">
             <ExpensesTable
               year={selectedYear}
-              invoices={invoices.filter(inv => inv.cfdiType === "E")}
+              invoices={invoices.filter(inv => inv.recibida)}
+              disableExport={true} // Add this prop to hide the export button
             />
           </TabsContent>
 
           <TabsContent value="declaraciones">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle>Declaraciones Fiscales</CardTitle>
-                <Dialog>
-                  <DialogTrigger asChild>
-                    <Button variant="outline" size="sm">
-                      Nueva Declaración
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-[500px]">
-                    <DialogHeader>
-                      <DialogTitle>Agregar Nueva Declaración</DialogTitle>
-                      <DialogDescription>
-                        Complete la información para añadir una nueva declaración fiscal.
-                      </DialogDescription>
-                    </DialogHeader>
-                    {/* Aquí iría el formulario para crear una nueva declaración */}
-                    <div className="grid gap-4 py-4">
-                      <p className="text-sm text-muted-foreground">
-                        La función para agregar declaraciones estará disponible próximamente.
-                      </p>
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline">Cancelar</Button>
-                      <Button>Guardar Declaración</Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-              </CardHeader>
-              <CardContent>
-                <Tabs defaultValue="iva" className="w-full">
-                  <TabsList>
-                    <TabsTrigger value="iva">IVA</TabsTrigger>
-                    <TabsTrigger value="isr">ISR</TabsTrigger>
-                    <TabsTrigger value="annual">Anual</TabsTrigger>
-                  </TabsList>
-
-                  <div className="mt-4">
-                    <TabsContent value="iva">
-                      <TaxDeclarationsTable
-                        clientId={clientId}
-                        selectedYear={selectedYear}
-                        declarations={[]} /* En producción, aquí se pasarían las declaraciones desde una API o base de datos */
-                        onUpdateDeclaration={declaration => {
-                          console.log("Actualizar declaración:", declaration);
-                          toast({
-                            title: "Declaración actualizada",
-                            description: `Se ha actualizado la declaración de ${getMonthName(
-                              declaration.month
-                            )} ${declaration.year}.`,
-                          });
-                        }}
-                        onAddDeclaration={declaration => {
-                          console.log("Nueva declaración:", declaration);
-                          toast({
-                            title: "Declaración agregada",
-                            description: `Se ha agregado una nueva declaración para ${getMonthName(
-                              declaration.month
-                            )} ${declaration.year}.`,
-                          });
-                        }}
-                      />
-                    </TabsContent>
-
-                    <TabsContent value="isr">
-                      <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-6">
-                        <h3 className="text-lg font-semibold mb-4">Declaraciones de ISR</h3>
-                        <p className="text-muted-foreground">
-                          El módulo de declaraciones de ISR estará disponible próximamente.
-                        </p>
-                      </div>
-                    </TabsContent>
-
-                    <TabsContent value="annual">
-                      <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-6">
-                        <h3 className="text-lg font-semibold mb-4">Declaración Anual</h3>
-                        <p className="text-muted-foreground">
-                          El módulo de declaraciones anuales estará disponible próximamente.
-                        </p>
-                      </div>
-                    </TabsContent>
-                  </div>
-                </Tabs>
-              </CardContent>
-            </Card>
+            <DeclaracionMensualPF 
+              clientId={clientId}
+              selectedYear={selectedYear}
+              declaraciones={[]} 
+              onEdit={() => {}}
+            />
           </TabsContent>
 
           <TabsContent value="pagos">
-            <Card>
-              <CardHeader>
-                <CardTitle>Pagos</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Control de pagos y movimientos financieros.</p>
-              </CardContent>
-            </Card>
+            {/* Replace Card with simpler structure */}
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
+              <h2 className="text-xl font-semibold mb-4">Pagos</h2>
+              <p>Control de pagos y movimientos financieros.</p>
+            </div>
           </TabsContent>
 
           <TabsContent value="info">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle>Información Fiscal</CardTitle>
-                <Button variant="outline" size="sm">
-                  Editar
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Datos Generales</h3>
-                      <div className="grid gap-2">
-                        <div>
-                          <div className="text-sm font-medium">Nombre completo</div>
-                          <div className="text-base">{client.name}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">RFC</div>
-                          <div className="text-base">{client.rfc}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">CURP</div>
-                          <div className="text-base">{client.curp || "No especificado"}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Correo electrónico</div>
-                          <div className="text-base">{client.email || "No especificado"}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Teléfono</div>
-                          <div className="text-base">{client.phone || "No especificado"}</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Domicilio Fiscal</h3>
-                      <div className="grid gap-2">
-                        <div>
-                          <div className="text-sm font-medium">Calle</div>
-                          <div className="text-base">{client.address?.street || "No especificado"}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Número exterior / interior</div>
-                          <div className="text-base">
-                            {client.address?.exteriorNumber || "-"} / {client.address?.interiorNumber || "-"}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Colonia</div>
-                          <div className="text-base">{client.address?.colony || "No especificado"}</div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Ciudad y Estado</div>
-                          <div className="text-base">
-                            {client.address?.city || "-"}, {client.address?.state || "-"}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-sm font-medium">Código Postal</div>
-                          <div className="text-base">{client.address?.zipCode || "No especificado"}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Información Fiscal</h3>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      <div>
-                        <div className="text-sm font-medium">Régimen fiscal</div>
-                        <div className="text-base">{client.fiscalInfo?.regime || "No especificado"}</div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Actividad económica principal</div>
-                        <div className="text-base">{client.fiscalInfo?.economicActivity || "No especificado"}</div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Fecha de alta</div>
-                        <div className="text-base">
-                          {client.fiscalInfo?.registrationDate
-                            ? new Date(client.fiscalInfo.registrationDate).toLocaleDateString("es-ES")
-                            : "No especificado"}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Fecha de última actualización</div>
-                        <div className="text-base">
-                          {client.fiscalInfo?.lastUpdateDate
-                            ? new Date(client.fiscalInfo.lastUpdateDate).toLocaleDateString("es-ES")
-                            : "No especificado"}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Estatus fiscal</div>
-                        <div className="text-base text-green-600 font-medium">
-                          {client.fiscalInfo?.status || "Activo"}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Obligaciones fiscales</div>
-                        <div className="text-base">
-                          {client.fiscalInfo?.obligations ? client.fiscalInfo.obligations.join(", ") : "No especificado"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-1">
-                    <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Estatus de Cliente</h3>
-                    <div className="grid gap-4 p-4 border rounded-lg bg-gray-50 dark:bg-gray-800/50">
-                      <div className="flex justify-between items-center">
-                        <div>
-                          <div className="text-sm font-medium">Estatus de servicio</div>
-                          <div
-                            className={`text-base ${
-                              client.isActive !== false ? "text-green-600" : "text-red-600"
-                            } font-medium flex items-center`}
-                          >
-                            <div
-                              className={`h-2 w-2 rounded-full ${
-                                client.isActive !== false ? "bg-green-600" : "bg-red-600"
-                              } mr-2`}
-                            ></div>
-                            {client.isActive !== false ? "Activo" : "Inactivo"}
-                          </div>
-                          <div className="text-sm text-gray-500 mt-1">
-                            Cliente desde:{" "}
-                            {client.serviceInfo?.clientSince
-                              ? new Date(client.serviceInfo.clientSince).toLocaleDateString("es-ES", {
-                                  year: "numeric",
-                                  month: "long",
-                                })
-                              : "No especificado"}
-                          </div>
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <div className="text-sm font-medium">Última factura</div>
-                          <div className="text-base">
-                            {client.serviceInfo?.lastInvoice
-                              ? new Date(client.serviceInfo.lastInvoice).toLocaleDateString("es-ES", {
-                                  year: "numeric",
-                                  month: "long",
-                                })
-                              : "No disponible"}
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium">Plan de servicio</div>
-                        <div className="text-base">{client.serviceInfo?.plan || "No especificado"}</div>
-                        <div className="text-sm text-gray-500 mt-1">{client.serviceInfo?.planDescription || ""}</div>
-                      </div>
-                      <div className="flex justify-between items-center mt-2">
-                        <div>
-                          <div className="text-sm font-medium">Próxima renovación</div>
-                          <div className="text-base">
-                            {client.serviceInfo?.nextRenewal
-                              ? new Date(client.serviceInfo.nextRenewal).toLocaleDateString("es-ES")
-                              : "No especificado"}
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              await clientService.toggleClientStatus(client.id, !client.isActive);
-
-                              // Update local state
-                              setClient(prev =>
-                                prev
-                                  ? {
-                                      ...prev,
-                                      isActive: !prev.isActive,
-                                    }
-                                  : null
-                              );
-
-                              toast({
-                                title: `Cliente ${!client.isActive ? "activado" : "desactivado"}`,
-                                description: `El cliente ha sido ${
-                                  !client.isActive ? "activado" : "desactivado"
-                                } correctamente.`,
-                              });
-                            } catch (error) {
-                              console.error("Error toggling client status:", error);
-                              toast({
-                                title: "Error",
-                                description: "No se pudo cambiar el estatus del cliente.",
-                                variant: "destructive",
-                              });
-                            }
-                          }}
-                        >
-                          {client.isActive !== false ? "Marcar como inactivo" : "Reactivar cliente"}
-                        </Button>
-                      </div>
-                      {client.isActive === false && (
-                        <div className="mt-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                          <div className="text-sm text-red-600 dark:text-red-400 font-medium">Motivo de inactividad</div>
-                          <div className="text-sm mt-1">{client.inactiveReason || "No especificado"}</div>
-                          <div className="text-sm text-gray-500 mt-1">
-                            Fecha de inactivación:{" "}
-                            {client.inactiveDate
-                              ? new Date(client.inactiveDate).toLocaleDateString("es-ES")
-                              : "No registrada"}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="llaves">
-            <Card>
-              <CardHeader>
-                <CardTitle>Llaves</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Gestión de llaves fiscales y certificados.</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="cuestionario">
-            <Card>
-              <CardHeader>
-                <CardTitle>Cuestionario</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Cuestionarios fiscales y formularios del cliente.</p>
-              </CardContent>
-            </Card>
+            <InfoClientePF 
+              initialClient={client} 
+              clientId={params.clientId} 
+            />
           </TabsContent>
 
           <TabsContent value="activos">
-            <Card className="pt-4">
-              <CardContent>
-                <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
-              </CardContent>
-            </Card>
+            {/* Replace Card with simpler structure */}
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
+              <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
+            </div>
           </TabsContent>
-
-          <TabsContent value="dashboard">
-            <Card>
-              <CardHeader>
-                <CardTitle>Dashboard</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Resumen y panel de control principal del cliente.</p>
-              </CardContent>
-            </Card>
-          </TabsContent>
+         
           <TabsContent value="ccf">
-            <Card>
-              <CardHeader>
-                <CardTitle>CSF</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Resumen y panel de control principal del cliente.</p>
-              </CardContent>
-            </Card>
+            {/* Replace Card with simpler structure */}
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
+              <h2 className="text-xl font-semibold mb-4">CSF</h2>
+              <p>Resumen y panel de control principal del cliente.</p>
+            </div>
           </TabsContent>
+          
           <TabsContent value="opinion">
-            <Card>
-              <CardHeader>
-                <CardTitle>Opinion</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p>Resumen y panel de control principal del cliente.</p>
-              </CardContent>
-            </Card>
+            {/* Replace Card with simpler structure */}
+            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
+              <h2 className="text-xl font-semibold mb-4">Opinion</h2>
+              <p>Resumen y panel de control principal del cliente.</p>
+            </div>
           </TabsContent>
         </Tabs>
-        
       </main>
     </div>
   );

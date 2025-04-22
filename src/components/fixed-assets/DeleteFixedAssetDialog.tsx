@@ -49,36 +49,20 @@ export const DeleteFixedAssetDialog = ({ asset, onAssetDeleted }: DeleteFixedAss
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <Button variant="ghost" size="sm" className="text-red-500 hover:text-red-700 hover:bg-red-100" onClick={() => setIsOpen(true)}>
+      <Button variant="danger" size="xs" onClick={() => setIsOpen(true)}>
         <Trash2 className="h-4 w-4" />
       </Button>
       
-      <DialogContent>
+      <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Eliminar Activo Fijo</DialogTitle>
           <DialogDescription>
-            Esta acción no se puede deshacer. ¿Está seguro que desea eliminar este activo?
+            ¿Está seguro que desea eliminar el activo "{asset.name}"?
+            Esta acción no se puede deshacer.
           </DialogDescription>
         </DialogHeader>
         
-        <div className="py-4">
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span className="font-medium">Nombre:</span>
-              <span>{asset.name}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-medium">Valor original:</span>
-              <span>{formatCurrency(asset.cost)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="font-medium">Valor actual:</span>
-              <span>{formatCurrency(asset.currentValue)}</span>
-            </div>
-          </div>
-        </div>
-        
-        <DialogFooter>
+        <DialogFooter className="mt-4">
           <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading}>
             Cancelar
           </Button>
@@ -87,7 +71,7 @@ export const DeleteFixedAssetDialog = ({ asset, onAssetDeleted }: DeleteFixedAss
             onClick={handleDelete}
             disabled={isLoading}
           >
-            {isLoading ? "Eliminando..." : "Eliminar activo"}
+            {isLoading ? "Eliminando..." : "Eliminar"}
           </Button>
         </DialogFooter>
       </DialogContent>

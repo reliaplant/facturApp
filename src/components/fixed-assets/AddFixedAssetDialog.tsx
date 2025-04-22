@@ -8,25 +8,26 @@ import { toast } from "@/components/ui/use-toast";
 import { Plus } from "lucide-react";
 import { CreateFixedAssetData } from "@/models/FixedAsset";
 import { FixedAssetService } from "@/services/fixed-asset-service";
-import { FISCAL_CATEGORIES, annualRateToMonths } from "./utils";
 
 const fixedAssetService = new FixedAssetService();
 
 export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: string, onAssetAdded: () => void }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [customRate, setCustomRate] = useState(false);
   const [formData, setFormData] = useState<Partial<CreateFixedAssetData>>({
     clientId,
     name: '',
     type: '',
     purchaseDate: new Date().toISOString().split('T')[0], // Fecha actual en formato YYYY-MM-DD
     cost: 0,
-    depreciationMethod: 'straightLine',
-    usefulLifeMonths: 60, // 5 años por defecto
-    residualValue: 0,
-    fiscalCategory: '',
-    deductionRate: 10, // Tasa por defecto del 10%
+    depreciationMethod: 'straightLine', // Siempre línea recta
+    usefulLifeMonths: 60, // 5 años por defecto (en meses)
+    residualValue: 0, // Siempre 0
+    invoiceNumber: '',
+    notes: '',
+    // Asegurar que tenemos todos los campos necesarios que podrían requerirse en el backend
+    fiscalCategory: 'other', // Valor por defecto
+    deductionRate: 20 // Valor por defecto
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,37 +39,19 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
   };
 
   const handleSelectChange = (name: string, value: string) => {
-    if (name === 'fiscalCategory' && !customRate) {
-      // Buscar la tasa de depreciación para la categoría seleccionada
-      const category = FISCAL_CATEGORIES.find(cat => cat.id === value);
-      if (category) {
-        // Actualizar la tasa de depreciación y calcular la vida útil en meses
-        const deductionRate = category.defaultRate;
-        const usefulLifeMonths = annualRateToMonths(deductionRate);
-        
-        setFormData({
-          ...formData,
-          [name]: value,
-          deductionRate: deductionRate,
-          usefulLifeMonths: usefulLifeMonths
-        });
-        return;
-      }
+    if (name === 'depreciationYears') {
+      // Convertir años a meses para el campo usefulLifeMonths
+      const months = parseInt(value) * 12;
+      setFormData({
+        ...formData,
+        usefulLifeMonths: months
+      });
+      return;
     }
     
     setFormData({
       ...formData,
       [name]: value
-    });
-  };
-
-  const handleDeductionRateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const rate = parseFloat(e.target.value);
-    setCustomRate(true);
-    setFormData({
-      ...formData,
-      deductionRate: rate,
-      usefulLifeMonths: annualRateToMonths(rate)
     });
   };
 
@@ -88,8 +71,20 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
         return;
       }
 
+      // Asegurar que todos los valores numéricos son números, no cadenas
+      const assetData = {
+        ...formData,
+        cost: Number(formData.cost),
+        usefulLifeMonths: Number(formData.usefulLifeMonths),
+        residualValue: 0,
+        depreciationMethod: 'straightLine'
+      } as CreateFixedAssetData;
+
+      console.log("Creando activo con datos:", assetData);
+
       // Crear el activo
-      await fixedAssetService.createFixedAsset(formData as CreateFixedAssetData);
+      await fixedAssetService.createFixedAsset(assetData);
+      
       toast({
         title: "Éxito",
         description: "Activo fijo creado correctamente.",
@@ -106,22 +101,32 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
         depreciationMethod: 'straightLine',
         usefulLifeMonths: 60,
         residualValue: 0,
-        fiscalCategory: '',
-        deductionRate: 10,
+        invoiceNumber: '',
+        notes: '',
+        fiscalCategory: 'other',
+        deductionRate: 20
       });
-      setCustomRate(false);
       onAssetAdded();
     } catch (error) {
       console.error("Error al crear activo:", error);
+      // Mostrar más detalles del error para facilitar la depuración
+      let errorMessage = "No se pudo crear el activo. Intente nuevamente.";
+      if (error instanceof Error) {
+        errorMessage += ` Error: ${error.message}`;
+      }
+      
       toast({
         title: "Error",
-        description: "No se pudo crear el activo. Intente nuevamente.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
     }
   };
+
+  // Calculate current depreciation years for display
+  const currentDepreciationYears = Math.round((formData.usefulLifeMonths || 60) / 12);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -185,7 +190,7 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="cost" className="text-right">Valor Original *</Label>
+              <Label htmlFor="cost" className="text-right">Valor *</Label>
               <Input
                 id="cost"
                 name="cost"
@@ -200,87 +205,23 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="depreciationMethod" className="text-right">Método Deprec. *</Label>
+              <Label htmlFor="depreciationYears" className="text-right">Años de Depreciación *</Label>
               <Select 
-                name="depreciationMethod"
-                value={formData.depreciationMethod}
-                onValueChange={(value) => handleSelectChange('depreciationMethod', value)}
+                name="depreciationYears"
+                value={currentDepreciationYears.toString()}
+                onValueChange={(value) => handleSelectChange('depreciationYears', value)}
               >
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Método de depreciación" />
+                  <SelectValue placeholder="Años de depreciación" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="straightLine">Línea Recta</SelectItem>
-                  <SelectItem value="doubleDecline">Doble Declinación</SelectItem>
-                  <SelectItem value="sumOfYears">Suma de Años Dígitos</SelectItem>
-                  <SelectItem value="units">Unidades</SelectItem>
+                  <SelectItem value="1">1 año</SelectItem>
+                  <SelectItem value="2">2 años</SelectItem>
+                  <SelectItem value="3">3 años</SelectItem>
+                  <SelectItem value="4">4 años</SelectItem>
+                  <SelectItem value="5">5 años</SelectItem>
                 </SelectContent>
               </Select>
-            </div>
-
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="usefulLifeMonths" className="text-right">Vida útil (meses) *</Label>
-              <Input
-                id="usefulLifeMonths"
-                name="usefulLifeMonths"
-                type="number"
-                min="1"
-                className="col-span-3"
-                value={formData.usefulLifeMonths || ''}
-                onChange={handleInputChange}
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="residualValue" className="text-right">Valor Residual *</Label>
-              <Input
-                id="residualValue"
-                name="residualValue"
-                type="number"
-                min="0"
-                step="0.01"
-                className="col-span-3"
-                value={formData.residualValue || ''}
-                onChange={handleInputChange}
-                required
-              />
-            </div>
-
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="fiscalCategory" className="text-right">Categoría Fiscal *</Label>
-              <Select 
-                name="fiscalCategory"
-                value={formData.fiscalCategory}
-                onValueChange={(value) => handleSelectChange('fiscalCategory', value)}
-              >
-                <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Categoría fiscal" />
-                </SelectTrigger>
-                <SelectContent>
-                  {FISCAL_CATEGORIES.map((category) => (
-                    <SelectItem key={category.id} value={category.id}>
-                      {category.name} ({category.defaultRate}%)
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="other">Otra</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="deductionRate" className="text-right">% Deducción Anual</Label>
-              <Input
-                id="deductionRate"
-                name="deductionRate"
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                className="col-span-3"
-                value={formData.deductionRate || ''}
-                onChange={handleDeductionRateChange}
-              />
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">

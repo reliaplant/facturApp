@@ -1,59 +1,85 @@
 export interface Client {
   id: string;
-  name: string;
   rfc: string;
-  curp?: string;
+  curp: string;
+  nombres: string;
+  primerApellido: string;
+  segundoApellido?: string;
+  nombreComercial?: string;
   email?: string;
-  phone?: string;
-  lastAccess?: string;
+  telefono?: string;
+  
+  // Fiscal information
+  fechaInicioOperaciones: string;
+  estatusEnElPadron: string;
+  fechaUltimoCambioEstado: string;
+  ultimaActualizacionDatos: string;
+  
+  // Address information
+  address: {
+    codigoPostal?: string;
+    tipoVialidad?: string;
+    nombreVialidad?: string;
+    numeroExterior?: string;
+    numeroInterior?: string;
+    nombreColonia: string;
+    nombreLocalidad: string;
+    municipio: string;
+    nombreEntidadFederativa: string;
+    entreCalles?: string;
+  };
+
+  // Economic activities
+  actividadesEconomicas: Array<{
+    regimen: string;
+    fechaInicio: string;
+    fechaFin?: string;
+  }>;
+
+  // Obligations
+  obligaciones: Array<{
+    descripcion: string;
+    vencimiento: string;
+    fechaInicio: string;
+    fechaFin?: string;
+  }>;
+
+  // Status information
+  estatusPago: string;
+  estatusCliente: string;
+  estatusDeclaracion: string;
+  estatusDeclaracionPagoCliente: string;
+  fechaUltimaDeclaracion?: string;
+  razonCancelacion?: string;
+
+  // Pending tasks
+  listaPendientes?: Array<{
+    descripcion: string;
+    fecha: string;
+  }>;
+
+  // Service information
+  plan?: string;
+  
   isActive?: boolean;
-  inactiveDate?: string;
-  inactiveReason?: string;
-  address?: {
-    street?: string;
-    exteriorNumber?: string;
-    interiorNumber?: string;
-    colony?: string;
-    city?: string;
-    state?: string;
-    zipCode?: string;
-  };
-  fiscalInfo?: {
-    regime?: string;
-    economicActivity?: string;
-    registrationDate?: string;
-    lastUpdateDate?: string;
-    status?: string;
-    obligations?: string[];
-  };
-  serviceInfo?: {
-    clientSince?: string;
-    plan?: string;
-    planDescription?: string;
-    lastInvoice?: string;
-    nextRenewal?: string;
-  };
   createdAt?: string;
   updatedAt?: string;
-}
+  lastCSFUrl?: string;  // Add this field
+  lastCSFDate?: string; // Añadimos la fecha de la última carga
+  lastOPFUrl?: string;  // Añadir para Opinión de Fiel Cumplimiento
+  lastOPFDate?: string; // Añadir fecha de última opinión
 
-export interface CreateClientData {
-  name: string;
-  rfc: string;
-  curp?: string;
-  email?: string;
-  phone?: string;
-  // Other optional fields can be added as needed
-}
-
-export interface UpdateClientData {
-  name?: string;
-  rfc?: string;
-  curp?: string;
-  email?: string;
-  phone?: string;
-  isActive?: boolean;
-  inactiveDate?: string;
-  inactiveReason?: string;
-  // Other optional fields can be added as needed
+  // FIEL Documents
+  cerUrl?: string;
+  cerDate?: string;
+  acuseCerUrl?: string;
+  acuseCerDate?: string;
+  keyCerUrl?: string;
+  keyCerDate?: string;
+  renCerUrl?: string;
+  renCerDate?: string;
+  claveFielUrl?: string;
+  claveFielDate?: string;
+  cartaManifiestoUrl?: string;
+  cartaManifiestoDate?: string;
 }

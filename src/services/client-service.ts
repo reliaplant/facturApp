@@ -11,31 +11,66 @@ import {
   getDocs,
   orderBy
 } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import app from '@/services/firebase';
-import { Client, CreateClientData, UpdateClientData } from '@/models/Client';
+import { Client } from '@/models/Client';
 
 const db = getFirestore(app);
+const storage = getStorage(app);
+
+// Define types that match the Client model
+export interface CreateClientData {
+  rfc: string;
+  curp?: string;
+  nombres: string;
+  primerApellido: string;
+  segundoApellido?: string;
+  nombreComercial?: string;
+  email?: string;
+  telefono?: string;
+}
+
+export interface UpdateClientData extends Partial<Client> {}
 
 export const clientService = {
   // Create a new client
   async createClient(clientData: CreateClientData): Promise<Client> {
     try {
-      const clientId = `client_${Date.now()}`;
+      const clientId = clientData.rfc;
       
       // Create a base client object with required fields
       const newClient: Client = {
         id: clientId,
-        name: clientData.name,
         rfc: clientData.rfc,
+        curp: clientData.curp || '',
+        nombres: clientData.nombres,
+        primerApellido: clientData.primerApellido,
+        fechaInicioOperaciones: new Date().toISOString(),
+        estatusEnElPadron: 'ACTIVO',
+        fechaUltimoCambioEstado: new Date().toISOString(),
+        ultimaActualizacionDatos: new Date().toISOString(),
+        address: {
+          nombreColonia: '',
+          nombreLocalidad: '',
+          municipio: '',
+          nombreEntidadFederativa: ''
+        },
+        actividadesEconomicas: [],
+        obligaciones: [],
+        estatusPago: 'PENDIENTE',
+        estatusCliente: 'ACTIVO',
+        estatusDeclaracion: 'PENDIENTE',
+        estatusDeclaracionPagoCliente: 'PENDIENTE',
         isActive: true,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
       
-      // Only add optional fields if they exist
+      // Add optional fields if they exist
+      if (clientData.segundoApellido) newClient.segundoApellido = clientData.segundoApellido;
+      if (clientData.nombreComercial) newClient.nombreComercial = clientData.nombreComercial;
       if (clientData.email) newClient.email = clientData.email;
-      if (clientData.phone) newClient.phone = clientData.phone;
-      if (clientData.curp) newClient.curp = clientData.curp;
+      if (clientData.telefono) newClient.telefono = clientData.telefono;
       
       await setDoc(doc(db, 'clients', clientId), newClient);
       
@@ -49,15 +84,32 @@ export const clientService = {
   // Get client by ID
   async getClientById(clientId: string): Promise<Client | null> {
     try {
-      const clientDoc = await getDoc(doc(db, 'clients', clientId));
+      if (!clientId) {
+        console.error("getClientById: Client ID is null or undefined");
+        return null;
+      }
+      
+      console.log(`Attempting to fetch client with ID: ${clientId}`);
+      const clientRef = doc(db, 'clients', clientId);
+      const clientDoc = await getDoc(clientRef);
       
       if (clientDoc.exists()) {
-        return clientDoc.data() as Client;
+        console.log(`Client document found: ${clientId}`);
+        const data = clientDoc.data() as Client;
+        return {
+          ...data,
+          id: clientId, // Ensure ID is always set
+          actividadesEconomicas: data.actividadesEconomicas || [],
+          obligaciones: data.obligaciones || [],
+          listaPendientes: data.listaPendientes || []
+        };
+      } else {
+        console.log(`No client document found with ID: ${clientId}`);
       }
       
       return null;
     } catch (error) {
-      console.error("Error getting client:", error);
+      console.error(`Error getting client with ID ${clientId}:`, error);
       throw error;
     }
   },
@@ -150,59 +202,73 @@ export const clientService = {
     }
   },
   
-  // For development/demo purposes - get mock clients when Firestore is not available
-  getMockClients(): Client[] {
-    return [
-      { 
-        id: "1",
-        name: "Andrés González",
-        rfc: "GOGA9302255S8",
-        curp: "GOLA820930MDFNRN09",
-        email: "andres@ejemplo.com",
-        phone: "55 1234 5678",
-        lastAccess: "2023-12-01",
-        isActive: true,
-        address: {
-          street: "Av. Insurgentes Sur",
-          exteriorNumber: "1602",
-          interiorNumber: "304",
-          colony: "Crédito Constructor",
-          city: "Ciudad de México",
-          state: "CDMX",
-          zipCode: "03940"
-        },
-        fiscalInfo: {
-          regime: "Régimen de Personas Físicas con Actividades Empresariales y Profesionales",
-          economicActivity: "Servicios legales",
-          registrationDate: "2010-01-15",
-          lastUpdateDate: "2023-03-22",
-          status: "Activo",
-          obligations: ["Declaración anual de ISR", "Declaraciones mensuales de IVA"]
-        },
-        serviceInfo: {
-          clientSince: "2022-01-01",
-          plan: "Premium Contable",
-          planDescription: "Incluye: Contabilidad, Declaraciones, Asesoría fiscal",
-          lastInvoice: "2025-03-01",
-          nextRenewal: "2025-04-30"
-        }
-      },
-      { 
-        id: "2",
-        name: "María Rodríguez López",
-        rfc: "ROLM750630XYZ",
-        lastAccess: "2023-11-28",
-        isActive: true
-      },
-      {
-        id: "3",
-        name: "Empresa ABC, S.A. de C.V.",
-        rfc: "EAB960909123",
-        lastAccess: "2023-12-02",
-        isActive: false,
-        inactiveDate: "2023-11-01",
-        inactiveReason: "Falta de pago"
+  // Upload FIEL document
+  async uploadFielDocument(
+    clientId: string, 
+    file: File, 
+    documentType: 'cer' | 'acuseCer' | 'keyCer' | 'renCer' | 'claveFiel' | 'cartaManifiesto'
+  ): Promise<{url: string, date: string}> {
+    try {
+      const timestamp = new Date().getTime();
+      const path = `clients/${clientId}/fiel/${documentType}_${timestamp}`;
+      const storageRef = ref(storage, path);
+      
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      const currentDate = new Date().toISOString();
+      
+      // Update client document with the new URL and date
+      const clientRef = doc(db, 'clients', clientId);
+      const updateData: Record<string, string> = {};
+      
+      switch (documentType) {
+        case 'cer':
+          updateData.cerUrl = downloadUrl;
+          updateData.cerDate = currentDate;
+          break;
+        case 'acuseCer':
+          updateData.acuseCerUrl = downloadUrl;
+          updateData.acuseCerDate = currentDate;
+          break;
+        case 'keyCer':
+          updateData.keyCerUrl = downloadUrl;
+          updateData.keyCerDate = currentDate;
+          break;
+        case 'renCer':
+          updateData.renCerUrl = downloadUrl;
+          updateData.renCerDate = currentDate;
+          break;
+        case 'claveFiel':
+          updateData.claveFielUrl = downloadUrl;
+          updateData.claveFielDate = currentDate;
+          break;
+        case 'cartaManifiesto':
+          updateData.cartaManifiestoUrl = downloadUrl;
+          updateData.cartaManifiestoDate = currentDate;
+          break;
       }
-    ];
+      
+      await updateDoc(clientRef, updateData);
+      
+      return {
+        url: downloadUrl,
+        date: currentDate
+      };
+    } catch (error) {
+      console.error(`Error uploading ${documentType} document:`, error);
+      throw error;
+    }
+  },
+
+  // Add this method to your existing clientService
+  async deleteFileFromStorage(filePath: string): Promise<void> {
+    try {
+      const fileRef = ref(storage, filePath);
+      await deleteObject(fileRef);
+      console.log(`File deleted successfully from path: ${filePath}`);
+    } catch (error) {
+      console.error(`Error deleting file from path ${filePath}:`, error);
+      throw error;
+    }
   }
 };

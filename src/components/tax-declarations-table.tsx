@@ -47,7 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TaxDeclaration, calculateDueDate, getMonthName, getPeriodName, isDeclarationLate } from "@/models/TaxDeclaration";
+import { TaxDeclaration, calculateDueDate, getMonthName, getPeriodName, isDeclarationLate } from "@/models/declaracion";
 import { v4 as uuidv4 } from "uuid";
 import { MonthlyFiscalData } from "./fiscal-summary";
 
