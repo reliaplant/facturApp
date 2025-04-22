@@ -3,7 +3,6 @@
  */
 export interface Invoice {
 
-  id: string; // Identificador único en el sistema
   idCliente: string; // ID del cliente al que pertenece
   fechaCreacion: string; // Fecha de creación en el sistema
   fechaActualizacion: string; // Fecha de última actualización
@@ -22,7 +21,7 @@ export interface Invoice {
   regimenFiscal: string; // Régimen fiscal del emisor (RegimenFiscal)
   serie?: string; // Serie de la factura
   folio?: string; // Folio de la factura
-  uuid: string; // Identificador único fiscal (UUID/Folio fiscal)
+  uuid: string; // Identificador único fiscal (UUID/Folio fiscal) - Primary key
   metodoPago: string; // Método de Pago (e.g., PUE, PPD)
   numCtaPago?: string; // Número de cuenta para pago
   formaPago: string; // Forma de Pago (e.g., 01: Efectivo, 03: Transferencia)

@@ -90,7 +90,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
   // Process and filter invoices - using useMemo for better performance
   const { filteredInvoices, invoicesByMonth, sortedMonths, totalAmount } = useMemo(() => {
     // Merge original invoices with updated ones
-    const mergedInvoices = invoices.map(invoice => updatedInvoices[invoice.id] || invoice);
+    const mergedInvoices = invoices.map(invoice => updatedInvoices[invoice.uuid] || invoice);
     
     // Filter for current year and received invoices only
     const filtered = mergedInvoices.filter(invoice => {
@@ -158,8 +158,8 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
 
   const handleUpdateInvoice = useCallback((updatedInvoice: Invoice) => {
     setUpdatedInvoices(prev => {
-      const newState = { ...prev, [updatedInvoice.id]: updatedInvoice };
-      if (selectedInvoice?.id === updatedInvoice.id) setSelectedInvoice(updatedInvoice);
+      const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
+      if (selectedInvoice?.uuid === updatedInvoice.uuid) setSelectedInvoice(updatedInvoice);
       return newState;
     });
   }, [selectedInvoice]);
@@ -170,7 +170,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
   }, [handleUpdateInvoice]);
 
   const handleMonthSelect = useCallback((invoiceId: string, month: string) => {
-    const invoice = filteredInvoices.find(inv => inv.id === invoiceId);
+    const invoice = filteredInvoices.find(inv => inv.uuid === invoiceId);
     if (!invoice) return;
     
     const isDeducible = month !== "none";
@@ -239,7 +239,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
       // Skip if already processed or is a payment complement
       if (invoice.tipoDeComprobante === 'P' || 
           invoice.mesDeduccion !== undefined || 
-          updatedInvoices[invoice.id]?.mesDeduccion !== undefined) return;
+          updatedInvoices[invoice.uuid]?.mesDeduccion !== undefined) return;
       
       // Check if this is a type D invoice (annual deduction)
       const isAnnualType = invoice.usoCFDI?.startsWith('D');
@@ -257,11 +257,11 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           };
           
           const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+          updates[invoice.uuid] = { ...baseInvoice, gravadoISR, gravadoIVA };
         } 
         else if (invoice.formaPago === '01') {
           // If payment form is 01 (Cash), type D is NEVER deducible
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: undefined,
             esDeducible: false,
@@ -270,7 +270,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
         }
         else if (invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice)) {
           // PPD without complement - not deducible yet
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: undefined,
             esDeducible: false,
@@ -279,7 +279,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
         }
         else {
           // Default for other cases - keep as annual but wait for user decision
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: undefined,
             esDeducible: false,
@@ -303,17 +303,17 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           };
           
           const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+          updates[invoice.uuid] = { ...baseInvoice, gravadoISR, gravadoIVA };
         } 
         // Handle special cases
         else if (invoiceHelpers.isNonDeductible(invoice)) {
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: undefined,
             esDeducible: false
           };
         } else if (invoiceHelpers.isAnnualDeduction(invoice)) {
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: 13, // Annual
             esDeducible: true, // Always mark them as deductible
@@ -328,9 +328,9 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
           };
           
           const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-          updates[invoice.id] = { ...baseInvoice, gravadoISR, gravadoIVA };
+          updates[invoice.uuid] = { ...baseInvoice, gravadoISR, gravadoIVA };
         } else if (invoice.metodoPago === 'PPD') {
-          updates[invoice.id] = {
+          updates[invoice.uuid] = {
             ...invoice,
             mesDeduccion: undefined,
             esDeducible: false
@@ -399,7 +399,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     
     return (
       <tr
-        key={invoice.id}
+        key={invoice.uuid}
         id={isComplement ? `payment-complement-${invoice.uuid}` : undefined}
         className={`border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 
                   ${isS01 ? 'bg-gray-100 dark:bg-gray-800/80 text-gray-400' : 'bg-white dark:bg-gray-950'}
@@ -534,7 +534,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
             <div className="flex flex-col items-center">
               <Select
                 value={invoice.mesDeduccion?.toString() || "none"}
-                onValueChange={(value) => handleMonthSelect(invoice.id, value)}
+                onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
                 onClick={(e) => e.stopPropagation()}
                 disabled={invoice.locked}
               >

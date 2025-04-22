@@ -237,7 +237,7 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       
       // Crear objeto factura con solo los campos definidos en la interfaz
       const invoice: Invoice = {
-        id: uuidv4(),
+        id: uuid, // This is now the primary identifier
         idCliente: clientId,
         fechaCreacion: new Date().toISOString(),
         fechaActualizacion: new Date().toISOString(),
