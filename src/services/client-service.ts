@@ -270,5 +270,63 @@ export const clientService = {
       console.error(`Error deleting file from path ${filePath}:`, error);
       throw error;
     }
+  },
+
+  // Helper function to sanitize objects for Firestore (replace undefined with null)
+  _sanitizeForFirestore(obj: any): any {
+    if (obj === undefined) return null;
+    if (obj === null) return null;
+    if (typeof obj !== 'object') return obj;
+    
+    // Handle arrays
+    if (Array.isArray(obj)) {
+      return obj.map(item => this._sanitizeForFirestore(item));
+    }
+    
+    // Handle objects
+    const sanitized: Record<string, any> = {};
+    
+    for (const [key, value] of Object.entries(obj)) {
+      // Skip undefined values entirely
+      if (value !== undefined) {
+        sanitized[key] = this._sanitizeForFirestore(value);
+      }
+    }
+    
+    return sanitized;
+  },
+
+  // Get mock clients for development
+  getMockClients(): Client[] {
+    return [
+      {
+        id: 'MOCK123456789',
+        rfc: 'MOCK123456789',
+        curp: 'MOCKURP123456789XXX',
+        nombres: 'Cliente',
+        primerApellido: 'De',
+        segundoApellido: 'Prueba',
+        name: 'Cliente De Prueba', // Added for display
+        fechaInicioOperaciones: '2020-01-01T00:00:00.000Z',
+        estatusEnElPadron: 'ACTIVO',
+        fechaUltimoCambioEstado: '2020-01-01T00:00:00.000Z',
+        ultimaActualizacionDatos: '2023-01-01T00:00:00.000Z',
+        address: {
+          nombreColonia: 'Centro',
+          nombreLocalidad: 'Ciudad de México',
+          municipio: 'Cuauhtémoc',
+          nombreEntidadFederativa: 'Ciudad de México'
+        },
+        actividadesEconomicas: [],
+        obligaciones: [],
+        estatusPago: 'PENDIENTE',
+        estatusCliente: 'ACTIVO',
+        estatusDeclaracion: 'PENDIENTE',
+        estatusDeclaracionPagoCliente: 'PENDIENTE',
+        isActive: true,
+        createdAt: '2023-01-01T00:00:00.000Z',
+        updatedAt: '2023-01-01T00:00:00.000Z'
+      }
+    ];
   }
 };

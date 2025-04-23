@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Lock, Unlock, Check } from "lucide-react";
 import { format } from "date-fns";
@@ -11,22 +11,26 @@ import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
+import { invoiceService } from "@/services/invoice-service"; // Add this import
+import { useToast } from "@/components/ui/use-toast"; // Make sure this is imported
 
 interface ExpensesTableProps {
   year: number;
   invoices: Invoice[];
   disableExport?: boolean;
+  clientId: string; // Add this prop
 }
 
-export function ExpensesTable({ year, invoices = [], disableExport = false }: ExpensesTableProps) {
+export function ExpensesTable({ year, invoices = [], disableExport = false, clientId }: ExpensesTableProps) {
   // State declarations
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [updatedInvoices, setUpdatedInvoices] = useState<Record<string, Invoice>>({});
   const [highlightedPaymentComplements, setHighlightedPaymentComplements] = useState<string[]>([]);
-  const highlightTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [isDeductibilityEditorOpen, setIsDeductibilityEditorOpen] = useState(false);
   const [invoiceForDeductibility, setInvoiceForDeductibility] = useState<Invoice | null>(null);
+  const { toast } = useToast(); // Make sure we have the toast
 
   // Load/Save from/to localStorage
   useEffect(() => {
@@ -164,43 +168,76 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     });
   }, [selectedInvoice]);
 
-  const handleLockToggle = useCallback((e: React.MouseEvent, invoice: Invoice) => {
+  // Update the handlers to use the single updateInvoice method
+  const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
-    handleUpdateInvoice({ ...invoice, locked: !invoice.locked });
-  }, [handleUpdateInvoice]);
+    const newLockedStatus = !invoice.locked;
+    
+    try {
+      await invoiceService.updateInvoice(clientId, invoice.uuid, { locked: newLockedStatus });
+      handleUpdateInvoice({ ...invoice, locked: newLockedStatus });
+      
+      toast({
+        title: newLockedStatus ? "Factura bloqueada" : "Factura desbloqueada",
+        description: "El estado de la factura se ha actualizado correctamente.",
+        variant: "default",
+      });
+    } catch (error) {
+      console.error("Error updating lock status:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el estado de la factura.",
+        variant: "destructive",
+      });
+    }
+  }, [handleUpdateInvoice, clientId, toast]);
 
-  const handleMonthSelect = useCallback((invoiceId: string, month: string) => {
+  // Simplified month selection handler
+  const handleMonthSelect = useCallback(async (invoiceId: string, month: string) => {
     const invoice = filteredInvoices.find(inv => inv.uuid === invoiceId);
     if (!invoice) return;
     
     const isDeducible = month !== "none";
-    let updatedInvoice = {
-      ...invoice,
-      mesDeduccion: month === "none" ? undefined : parseInt(month),
-      esDeducible: isDeducible,
-    };
+    const numericMonth = isDeducible ? parseInt(month) : null;
     
-    if (isDeducible) {
-      // Calculate the gravado values using the correct formula
-      const { gravadoISR, gravadoIVA } = calculateGravados(updatedInvoice);
-      updatedInvoice = {
-        ...updatedInvoice,
-        gravadoISR,
-        gravadoIVA,
-        gravadoModificado: false // Reset modification flag when month changes
+    try {
+      let updateData: Partial<Invoice> = {
+        mesDeduccion: numericMonth,
+        esDeducible: isDeducible
       };
-    } else {
-      // If not deductible, set gravado values to 0
-      updatedInvoice = {
-        ...updatedInvoice,
-        gravadoISR: 0,
-        gravadoIVA: 0,
-        gravadoModificado: false // Reset modification flag when not deductible
-      };
+      
+      if (isDeducible) {
+        const { gravadoISR, gravadoIVA } = calculateGravados({...invoice, ...updateData});
+        updateData = {
+          ...updateData,
+          gravadoISR,
+          gravadoIVA,
+          gravadoModificado: false
+        };
+      } else {
+        updateData.gravadoISR = 0;
+        updateData.gravadoIVA = 0;
+        updateData.gravadoModificado = false;
+      }
+      
+      // Single update call
+      await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
+      handleUpdateInvoice({...invoice, ...updateData});
+      
+      toast({
+        title: "Actualizado",
+        description: isDeducible ? `Factura asignada al mes ${month}` : "Factura sin mes asignado",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error("Error updating month:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el mes de la factura",
+        variant: "destructive"
+      });
     }
-    
-    handleUpdateInvoice(updatedInvoice);
-  }, [filteredInvoices, calculateGravados, handleUpdateInvoice]);
+  }, [filteredInvoices, calculateGravados, handleUpdateInvoice, clientId, toast]);
 
   const handleGravadoDoubleClick = useCallback((invoice: Invoice) => {
     if (invoice.locked || invoiceHelpers.isPaymentComplement(invoice)) return;
@@ -346,49 +383,112 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     }
   }, [invoices, year, updatedInvoices, calculateGravados, invoiceHelpers]);
 
-  // Add a new handler for toggling deductible status
-  const handleToggleDeductible = useCallback((e: React.MouseEvent, invoice: Invoice) => {
+  // Simplified deductible toggle handler
+  const handleToggleDeductible = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
     
     if (invoice.locked || invoiceHelpers.isPaymentComplement(invoice) || invoice.usoCFDI === 'S01') {
-      return; // Don't allow toggling for locked, complement, or S01 invoices
+      return;
     }
     
-    const isCurrentlyDeducible = invoice.esDeducible;
-    const isAnnualType = invoiceHelpers.isAnnualDeduction(invoice);
-    
-    if (isCurrentlyDeducible) {
-      // Si es actualmente deducible, marcarlo como no deducible
-      handleUpdateInvoice({
-        ...invoice,
-        esDeducible: false,
-        // Keep mesDeduccion as is - don't change it
-        gravadoISR: 0,
-        gravadoIVA: 0,
-        gravadoModificado: false,
-        // Mantenemos la bandera anual incluso si no es deducible
-        anual: isAnnualType ? true : invoice.anual
-      });
-    } else {
-      // Si no es deducible, marcarlo como deducible
-      const currentMonth = isAnnualType ? 13 : (invoice.mesDeduccion || new Date().getMonth() + 1);
+    try {
+      const isCurrentlyDeducible = invoice.esDeducible;
+      const isAnnualType = invoiceHelpers.isAnnualDeduction(invoice);
       
-      const updatedInvoice = {
-        ...invoice,
-        esDeducible: true,
-        mesDeduccion: currentMonth,
+      let updateData: Partial<Invoice> = {
+        esDeducible: !isCurrentlyDeducible,
         anual: isAnnualType ? true : invoice.anual
       };
       
-      const { gravadoISR, gravadoIVA } = calculateGravados(updatedInvoice);
-      handleUpdateInvoice({
-        ...updatedInvoice,
-        gravadoISR,
-        gravadoIVA,
-        gravadoModificado: false
+      if (!isCurrentlyDeducible) {
+        // Turning on deductible status
+        const currentMonth = isAnnualType ? 13 : (invoice.mesDeduccion || new Date().getMonth() + 1);
+        updateData.mesDeduccion = currentMonth;
+        
+        const { gravadoISR, gravadoIVA } = calculateGravados({
+          ...invoice,
+          ...updateData,
+          mesDeduccion: currentMonth
+        });
+        
+        updateData.gravadoISR = gravadoISR;
+        updateData.gravadoIVA = gravadoIVA;
+        updateData.gravadoModificado = false;
+      } else {
+        // Turning off deductible status
+        updateData.gravadoISR = 0;
+        updateData.gravadoIVA = 0;
+        updateData.gravadoModificado = false;
+        // Keep mesDeduccion as is
+      }
+      
+      // Update in one call
+      await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
+      handleUpdateInvoice({...invoice, ...updateData});
+      
+      toast({
+        title: "Actualizado",
+        description: !isCurrentlyDeducible 
+          ? (isAnnualType ? "Factura marcada como deducción anual" : "Factura marcada como deducible")
+          : "Factura marcada como no deducible",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error("Error updating deductible status:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el estado de deducibilidad",
+        variant: "destructive"
       });
     }
-  }, [handleUpdateInvoice, calculateGravados, invoiceHelpers]);
+  }, [handleUpdateInvoice, calculateGravados, invoiceHelpers, clientId, toast]);
+
+  // Add handler for clicking on a PPD invoice to find its payment complement
+  const handleFindPaymentComplement = useCallback((invoice: Invoice) => {
+    // Only proceed if this is a PPD invoice with a payment complement
+    if (!invoiceHelpers.isPaidPPDInvoice(invoice)) return;
+    
+    // Find the payment complement invoices for this invoice
+    const paymentComplements = invoices.filter(
+      pc => pc.tipoDeComprobante === 'P' && 
+            pc.docsRelacionadoComplementoPago?.some(
+              uuid => uuid.toUpperCase() === invoice.uuid.toUpperCase()
+            )
+    );
+    
+    if (paymentComplements.length === 0) return;
+    
+    // Get the first payment complement
+    const paymentComplement = paymentComplements[0];
+    
+    // Scroll to the payment complement element
+    const complementElement = document.getElementById(`payment-complement-${paymentComplement.uuid}`);
+    if (complementElement) {
+      complementElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      
+      // Highlight the payment complement
+      setHighlightedPaymentComplements([paymentComplement.uuid]);
+      
+      // Clear previous timer if exists
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+      
+      // Set timeout to remove highlight after 3 seconds
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedPaymentComplements([]);
+      }, 2000);
+    }
+  }, [invoices, invoiceHelpers]);
+  
+  // Clean up the timer on component unmount
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, []);
 
   // Render helper function for invoice row - simplifies the render logic
   const renderInvoiceRow = useCallback((invoice: Invoice, index: number) => {
@@ -396,6 +496,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
     const isComplement = invoiceHelpers.isPaymentComplement(invoice);
     const isAnnualDeduction = invoice.usoCFDI?.startsWith('D');
     const needsComplement = invoice.metodoPago === 'PPD' && !invoiceHelpers.isPaidWithComplement(invoice);
+    const hasComplement = !isComplement && invoice.metodoPago === 'PPD' && invoiceHelpers.isPaidWithComplement(invoice);
     
     return (
       <tr
@@ -405,7 +506,9 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
                   ${isS01 ? 'bg-gray-100 dark:bg-gray-800/80 text-gray-400' : 'bg-white dark:bg-gray-950'}
                   ${invoice.locked ? 'opacity-80' : ''}
                   ${isComplement ? '!bg-blue-50 dark:bg-blue-900 text-blue-600' : ''}
+                  ${hasComplement ? '!bg-blue-50/30 dark:!bg-blue-900/30 cursor-pointer' : ''}
                   ${highlightedPaymentComplements.includes(invoice.uuid) ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}`}
+        onClick={hasComplement ? () => handleFindPaymentComplement(invoice) : undefined}
       >
         {/* Lock Button - Updated styling */}
         <td className="pl-7 px-2 py-1 align-middle text-center">
@@ -629,7 +732,17 @@ export function ExpensesTable({ year, invoices = [], disableExport = false }: Ex
         </td>
       </tr>
     );
-  }, [dateUtils, handleGravadoDoubleClick, handleInvoiceClick, handleLockToggle, handleMonthSelect, highlightedPaymentComplements, invoiceHelpers, handleToggleDeductible]);
+  }, [
+    dateUtils,
+    handleGravadoDoubleClick,
+    handleInvoiceClick,
+    handleLockToggle,
+    handleMonthSelect,
+    highlightedPaymentComplements,
+    invoiceHelpers,
+    handleToggleDeductible,
+    handleFindPaymentComplement  // Add this dependency
+  ]);
 
   return (
     <div className="space-y-2">

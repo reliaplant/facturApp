@@ -20,6 +20,7 @@ import DeclaracionMensualPF from "@/components/declaracionMensualPF/declaracionM
 import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
+import { invoiceService } from "@/services/invoice-service"; // Add this import
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -38,14 +39,23 @@ export default function ClientDashboard() {
   // Add a mock logged-in user state
   const [loggedInUser] = useState({ name: "Ana Rodríguez", email: "ana@example.com" });
 
-  // Load client data
+  // Add a state for tracking saving process
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+
+  // Load client data and invoices on component mount
   useEffect(() => {
-    const fetchClient = async () => {
+    const fetchClientData = async () => {
       try {
         const clientData = await clientService.getClientById(clientId);
-
-        // If we can't find the client in Firestore, try using mock data for development
-        if (!clientData) {
+        
+        if (clientData) {
+          setClient(clientData);
+          
+          // Also fetch the client's invoices - now using invoiceService
+          const clientInvoices = await invoiceService.getInvoices(clientId);
+          setInvoices(clientInvoices);
+        } else {
+          // If we can't find the client in Firestore, try using mock data for development
           const mockClients = clientService.getMockClients();
           const mockClient = mockClients.find(c => c.id === clientId);
           if (mockClient) {
@@ -57,8 +67,6 @@ export default function ClientDashboard() {
               variant: "destructive",
             });
           }
-        } else {
-          setClient(clientData);
         }
       } catch (error) {
         // Fallback to mock client data if there's an error
@@ -76,33 +84,88 @@ export default function ClientDashboard() {
       }
     };
 
-    fetchClient();
+    fetchClientData();
   }, [clientId, toast]);
 
-  // Direct file upload handler that works with the native file dialog
+  // Updated file upload handler to better handle duplicate detection
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!client || !event.target.files || event.target.files.length === 0) return;
 
     const files = Array.from(event.target.files);
     setIsLoading(true);
+    
     try {
-      // Procesar los archivos XML utilizando el servicio actualizado
+      // Step 1: Process CFDI files
+      console.log("Processing CFDI files...");
       const processedInvoices = await processCFDIFiles(files, clientId, client.rfc);
+      console.log(`Successfully processed ${processedInvoices.length} invoices`);
 
       if (processedInvoices.length > 0) {
-        // Añadir las nuevas facturas al estado actual
-        setInvoices(prevInvoices => {
-          // Verificar que no existan facturas duplicadas por UUID
-          const uuids = new Set(prevInvoices.map(inv => inv.uuid));
-          const uniqueNewInvoices = processedInvoices.filter(inv => !uuids.has(inv.uuid));
+        // Step 2: Save to Firestore - now using invoiceService
+        setIsSaving(true);
+        
+        try {
+          console.log("Saving invoices to Firestore...");
+          const result = await invoiceService.saveInvoices(clientId, processedInvoices);
           
-          return [...prevInvoices, ...uniqueNewInvoices];
-        });
-
-        toast({
-          title: "Archivos cargados correctamente",
-          description: `Se han procesado ${processedInvoices.length} factura(s) CFDI.`,
-        });
+          // The saveClientInvoices now returns an object with counts
+          const { savedIds, existingIds, errors } = result;
+          
+          // Prepare detailed status message
+          let statusDetails = [];
+          if (savedIds && savedIds.length > 0) {
+            statusDetails.push(`${savedIds.length} nueva(s)`);
+          }
+          if (existingIds && existingIds.length > 0) {
+            statusDetails.push(`${existingIds.length} ya existente(s)`);
+          }
+          if (errors && errors > 0) {
+            statusDetails.push(`${errors} con error(es)`);
+          }
+          
+          // Step 3: Refresh invoices list - now using invoiceService
+          try {
+            console.log("Refreshing invoices list...");
+            const updatedInvoices = await invoiceService.getInvoices(clientId);
+            setInvoices(updatedInvoices);
+            console.log(`Loaded ${updatedInvoices.length} invoices from Firestore`);
+            
+            if (savedIds && savedIds.length > 0) {
+              toast({
+                title: "Facturas procesadas",
+                description: `Resultado: ${statusDetails.join(", ")}.`,
+                variant: savedIds.length > 0 ? "default" : "default"
+              });
+            } else if (existingIds && existingIds.length > 0 && (savedIds?.length === 0 || !savedIds)) {
+              toast({
+                title: "Aviso",
+                description: "No se guardaron nuevas facturas. Todas las facturas ya existían en el sistema.",
+                variant: "default",
+              });
+            } else {
+              toast({
+                title: "Aviso",
+                description: "No se pudieron guardar las facturas. Verifique los logs para más detalles.",
+                variant: "destructive",
+              });
+            }
+          } catch (refreshError) {
+            console.error("Error refreshing invoices:", refreshError);
+            // Even if refresh fails, show save results
+            toast({
+              title: "Facturas procesadas",
+              description: `Resultado: ${statusDetails.join(", ")}. No se pudieron cargar las actualizaciones.`,
+              variant: "default",
+            });
+          }
+        } catch (saveError) {
+          console.error("Error saving invoices:", saveError);
+          toast({
+            title: "Error al guardar",
+            description: "Se procesaron los archivos pero no se pudieron guardar en la base de datos.",
+            variant: "destructive",
+          });
+        }
       } else {
         toast({
           title: "Aviso",
@@ -111,14 +174,16 @@ export default function ClientDashboard() {
         });
       }
     } catch (error) {
+      console.error("Error processing files:", error);
       toast({
-        title: "Error al cargar archivos",
-        description: "Ocurrió un error al procesar los archivos XML.",
+        title: "Error al procesar archivos",
+        description: "Ocurrió un error al leer o procesar los archivos XML.",
         variant: "destructive",
       });
     } finally {
       setIsLoading(false);
-      // Reset the file input so the same files can be selected again if needed
+      setIsSaving(false);
+      // Reset the file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
@@ -132,11 +197,13 @@ export default function ClientDashboard() {
     }
   };
 
+  // Update the refresh function to also reload invoices from Firestore
   const handleRefreshData = async () => {
     setIsRefreshing(true);
     try {
-      // En un caso real, aquí consultarías facturas desde una API o base de datos
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Fetch invoices from Firestore using invoiceService
+      const clientInvoices = await invoiceService.getInvoices(clientId);
+      setInvoices(clientInvoices);
 
       toast({
         title: "Datos actualizados",
@@ -233,17 +300,17 @@ export default function ClientDashboard() {
                 disabled={isRefreshing}
               >
                 <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
-                Actualizar
+                Recuperar_CFDIs
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={openFileDialog}
-                disabled={isLoading}
+                disabled={isLoading || isSaving}
                 className="flex items-center whitespace-nowrap"
               >
                 <FileUp className="h-3.5 w-3.5 mr-1" />
-                {isLoading ? "Cargando..." : "Subir"}
+                {isLoading ? "Procesando..." : isSaving ? "Guardando..." : "Subir"}
               </Button>
               
               {/* Hidden file input */}
@@ -296,6 +363,7 @@ export default function ClientDashboard() {
               year={selectedYear}
               invoices={invoices.filter(inv => !inv.recibida)}
               disableExport={true} // Add this prop to hide the export button
+              clientId={clientId} // Add clientId prop
             />
           </TabsContent>
 
@@ -304,6 +372,7 @@ export default function ClientDashboard() {
               year={selectedYear}
               invoices={invoices.filter(inv => inv.recibida)}
               disableExport={true} // Add this prop to hide the export button
+              clientId={clientId} // Add clientId prop
             />
           </TabsContent>
 

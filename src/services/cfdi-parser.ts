@@ -243,43 +243,43 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         fechaActualizacion: new Date().toISOString(),
         contenidoXml: xmlContent,
         recibida,
-        fecha,
-        tipoDeComprobante: comprobante.TipoDeComprobante || undefined,
-        rfcReceptor,
-        nombreReceptor: receptor.Nombre || '',
-        domicilioFiscalReceptor: receptor.DomicilioFiscalReceptor || undefined,
-        regimenFiscalReceptor: receptor.RegimenFiscalReceptor || undefined,
-        usoCFDI,
-        anual: isAnnual, // Set the anual field based on usoCFDI
-        rfcEmisor,
-        nombreEmisor: emisor.Nombre || '',
-        lugarExpedicion: comprobante.LugarExpedicion || undefined,
-        regimenFiscal: emisor.RegimenFiscal || '',
-        serie: comprobante.Serie || undefined,
-        folio: comprobante.Folio || undefined,
-        uuid,
-        metodoPago: comprobante.MetodoPago || 'PUE',
-        numCtaPago: comprobante.NumCtaPago || undefined,
-        formaPago: comprobante.FormaPago || '99',
-        moneda: comprobante.Moneda || undefined,
-        tipoCambio: comprobante.TipoCambio || undefined,
-        subTotal,
-        impuestosTrasladados: (impuestoTrasladado + iepsTrasladado) || undefined,
-        impuestoTrasladado: impuestoTrasladado || undefined,
-        iepsTrasladado: iepsTrasladado || undefined,
-        impuestoRetenido: (ivaRetenido + isrRetenido) || undefined,
-        ivaRetenido: ivaRetenido || undefined,
-        isrRetenido: isrRetenido || undefined,
-        descuento,
-        total,
-        estaCancelado,
-        fechaCancelación: fechaCancelacion, // Add the cancellation date if found
-        Tasa0: tasa0 || undefined, 
-        Exento: exento || undefined,
-        noCertificado: comprobante.NoCertificado || undefined,
-        ejercicioFiscal,
+        fecha: ensureDefined(fecha, ''),
+        tipoDeComprobante: ensureDefined(comprobante.TipoDeComprobante, ''),
+        rfcReceptor: ensureDefined(rfcReceptor, ''),
+        nombreReceptor: ensureDefined(receptor.Nombre, ''),
+        domicilioFiscalReceptor: ensureDefined(receptor.DomicilioFiscalReceptor, ''),
+        regimenFiscalReceptor: ensureDefined(receptor.RegimenFiscalReceptor, ''),
+        usoCFDI: ensureDefined(usoCFDI, 'G03'),
+        anual: isAnnual,
+        rfcEmisor: ensureDefined(rfcEmisor, ''),
+        nombreEmisor: ensureDefined(emisor.Nombre, ''),
+        lugarExpedicion: ensureDefined(comprobante.LugarExpedicion, ''),
+        regimenFiscal: ensureDefined(emisor.RegimenFiscal, ''),
+        serie: ensureDefined(comprobante.Serie, ''),
+        folio: ensureDefined(comprobante.Folio, ''),
+        uuid: ensureDefined(uuid, ''),
+        metodoPago: ensureDefined(comprobante.MetodoPago, 'PUE'),
+        numCtaPago: ensureDefined(comprobante.NumCtaPago, ''),
+        formaPago: ensureDefined(comprobante.FormaPago, '99'),
+        moneda: ensureDefined(comprobante.Moneda, 'MXN'),
+        tipoCambio: ensureDefined(comprobante.TipoCambio, '1'),
+        subTotal: ensureDefined(subTotal, 0),
+        impuestosTrasladados: ensureDefined((impuestoTrasladado + iepsTrasladado), 0),
+        impuestoTrasladado: ensureDefined(impuestoTrasladado, 0),
+        iepsTrasladado: ensureDefined(iepsTrasladado, 0),
+        impuestoRetenido: ensureDefined((ivaRetenido + isrRetenido), 0),
+        ivaRetenido: ensureDefined(ivaRetenido, 0),
+        isrRetenido: ensureDefined(isrRetenido, 0),
+        descuento: ensureDefined(descuento, 0),
+        total: ensureDefined(total, 0),
+        estaCancelado: ensureDefined(estaCancelado, false),
+        fechaCancelación: ensureDefined(fechaCancelacion, ''),
+        Tasa0: ensureDefined(tasa0, 0),
+        Exento: ensureDefined(exento, 0),
+        noCertificado: ensureDefined(comprobante.NoCertificado, ''),
+        ejercicioFiscal: ensureDefined(ejercicioFiscal, new Date().getFullYear()),
         esDeducible: false,
-        docsRelacionadoComplementoPago: docsRelacionados
+        docsRelacionadoComplementoPago: ensureDefined(docsRelacionados, [])
       };
       
       // Añadir UUID al set para evitar duplicados
@@ -351,4 +351,9 @@ async function readFileAsText(file: File): Promise<string> {
     reader.onerror = (error) => reject(error);
     reader.readAsText(file);
   });
+}
+
+// Helper function to handle undefined values
+function ensureDefined<T>(value: T | undefined, defaultValue: T): T {
+  return value !== undefined ? value : defaultValue;
 }
