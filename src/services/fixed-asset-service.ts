@@ -124,8 +124,8 @@ export class FixedAssetService {
       updatedAt: now
     };
     
-    // Guardar en Firestore
-    await setDoc(doc(db, 'fixedAssets', assetId), newAsset);
+    // Guardar en Firestore como subcollección del cliente
+    await setDoc(doc(db, `clients/${assetData.clientId}/fixedAssets`, assetId), newAsset);
     
     return newAsset;
   }
@@ -133,8 +133,8 @@ export class FixedAssetService {
   /**
    * Actualiza un activo fijo existente
    */
-  async updateFixedAsset(assetId: string, updateData: UpdateFixedAssetData): Promise<FixedAsset> {
-    const assetRef = doc(db, 'fixedAssets', assetId);
+  async updateFixedAsset(clientId: string, assetId: string, updateData: UpdateFixedAssetData): Promise<FixedAsset> {
+    const assetRef = doc(db, `clients/${clientId}/fixedAssets`, assetId);
     
     // Verificar si el activo existe
     const assetDoc = await getDoc(assetRef);
@@ -159,8 +159,8 @@ export class FixedAssetService {
   /**
    * Obtiene un activo fijo por su ID
    */
-  async getFixedAssetById(assetId: string): Promise<FixedAsset | null> {
-    const assetRef = doc(db, 'fixedAssets', assetId);
+  async getFixedAssetById(clientId: string, assetId: string): Promise<FixedAsset | null> {
+    const assetRef = doc(db, `clients/${clientId}/fixedAssets`, assetId);
     const assetDoc = await getDoc(assetRef);
     
     if (!assetDoc.exists()) {
@@ -181,15 +181,11 @@ export class FixedAssetService {
     
     if (status) {
       q = query(
-        collection(db, 'fixedAssets'),
-        where('clientId', '==', clientId),
+        collection(db, `clients/${clientId}/fixedAssets`),
         where('status', '==', status)
       );
     } else {
-      q = query(
-        collection(db, 'fixedAssets'),
-        where('clientId', '==', clientId)
-      );
+      q = collection(db, `clients/${clientId}/fixedAssets`);
     }
     
     const querySnapshot = await getDocs(q);
@@ -222,8 +218,8 @@ export class FixedAssetService {
   /**
    * Elimina un activo fijo
    */
-  async deleteFixedAsset(assetId: string): Promise<void> {
-    const assetRef = doc(db, 'fixedAssets', assetId);
+  async deleteFixedAsset(clientId: string, assetId: string): Promise<void> {
+    const assetRef = doc(db, `clients/${clientId}/fixedAssets`, assetId);
     
     // Verificar si el activo existe
     const assetDoc = await getDoc(assetRef);

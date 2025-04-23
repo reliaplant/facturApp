@@ -26,9 +26,9 @@ export const DeleteFixedAssetDialog = ({ asset, onAssetDeleted }: DeleteFixedAss
   const [isLoading, setIsLoading] = useState(false);
 
   const handleDelete = async () => {
-    setIsLoading(true);
     try {
-      await fixedAssetService.deleteFixedAsset(asset.id);
+      setIsLoading(true);
+      await fixedAssetService.deleteFixedAsset(asset.clientId, asset.id);
       toast({
         title: "Activo eliminado",
         description: `Se ha eliminado "${asset.name}" correctamente.`,

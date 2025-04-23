@@ -157,9 +157,12 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess }: FixedAssetDialo
       } as CreateFixedAssetData;
 
       if (isEditMode && asset) {
-        await fixedAssetService.updateFixedAsset(asset.id, assetData);
+        await fixedAssetService.updateFixedAsset(clientId, asset.id, assetData);
       } else {
-        await fixedAssetService.createFixedAsset(assetData);
+        await fixedAssetService.createFixedAsset({
+          ...assetData,
+          clientId,
+        });
       }
       
       setIsOpen(false);
