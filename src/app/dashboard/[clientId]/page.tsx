@@ -221,8 +221,6 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="pagos">Pagos</TabsTrigger>
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
-                <TabsTrigger size="sm" value="ccf">CCF</TabsTrigger>
-                <TabsTrigger size="sm" value="opinion">Opinion</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-1.5">
@@ -335,26 +333,12 @@ export default function ClientDashboard() {
 
           <TabsContent value="activos">
             {/* Replace Card with simpler structure */}
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
+            <div className="bg-white dark:bg-gray-800">
               <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
             </div>
           </TabsContent>
          
-          <TabsContent value="ccf">
-            {/* Replace Card with simpler structure */}
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
-              <h2 className="text-xl font-semibold mb-4">CSF</h2>
-              <p>Resumen y panel de control principal del cliente.</p>
-            </div>
-          </TabsContent>
-          
-          <TabsContent value="opinion">
-            {/* Replace Card with simpler structure */}
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
-              <h2 className="text-xl font-semibold mb-4">Opinion</h2>
-              <p>Resumen y panel de control principal del cliente.</p>
-            </div>
-          </TabsContent>
+      
         </Tabs>
       </main>
     </div>
