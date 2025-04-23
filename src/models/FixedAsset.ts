@@ -11,6 +11,7 @@ export interface FixedAsset {
   purchaseDate: string;     // Fecha de compra
   cost: number;             // Valor de compra
   deductibleValue?: number; // Valor deducible para impuestos (si es distinto al costo)
+  monthlyDepreciation?: number; // Depreciación mensual (calculada)
   
   // Deprecación
   usefulLifeMonths: number; // Vida útil en meses

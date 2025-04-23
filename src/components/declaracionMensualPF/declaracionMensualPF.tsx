@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { FileText, Plus } from "lucide-react";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Declaracion } from '../../models/declaracion';
 import { formatCurrency } from "@/lib/utils";
+import DeclaracionModal from './declaracion-modal';
 
 interface DeclaracionMensualPFProps {
   declaraciones: Declaracion[];
@@ -23,6 +24,8 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
   onEdit,
   isLoading = false
 }) => {
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
   const formatDate = (date: Date | null) => {
     if (!date) return '-';
     return format(date, 'dd/MM/yyyy', { locale: es });
@@ -45,6 +48,21 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
     };
   }, { isr: 0, iva: 0 });
 
+  const handleOpenModal = () => {
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+  };
+
+  const handleSaveDeclaracion = (declaracion: Declaracion) => {
+    if (onEdit) {
+      onEdit(declaracion);
+      setIsModalOpen(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
@@ -66,7 +84,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <Button 
                 variant="outline" 
                 size="sm" 
-                onClick={() => onEdit({} as Declaracion)}
+                onClick={handleOpenModal}
                 className="text-xs ml-2"
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
@@ -83,6 +101,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
                   <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Mes</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Tipo</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Cliente Pagó Impuestos</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Cliente Pagó Servicio</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Fecha Presentación</th>
@@ -95,11 +114,11 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <tbody className="mt-1">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500">Cargando declaraciones...</td>
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500">Cargando declaraciones...</td>
                   </tr>
                 ) : declaraciones.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500">Este cliente no tiene declaraciones registradas para el año {selectedYear}</td>
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500">Este cliente no tiene declaraciones registradas para el año {selectedYear}</td>
                   </tr>
                 ) : (
                   declaraciones.map((declaracion) => (
@@ -109,6 +128,9 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                     >
                       <td className="pl-7 px-2 py-1 align-middle">
                         <span>{getNombreMes(declaracion.mes)} {declaracion.anio}</span>
+                      </td>
+                      <td className="px-2 py-1 align-middle text-center">
+                        <span className="capitalize">{declaracion.tipoDeclaracion || 'ordinaria'}</span>
                       </td>
                       <td className="px-2 py-1 align-middle text-center">
                         <div className="flex justify-center">
@@ -168,6 +190,14 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
           </div>
         </div>
       </div>
+      
+      {/* Use the extracted modal component */}
+      <DeclaracionModal
+        open={isModalOpen}
+        onClose={handleCloseModal}
+        onSave={handleSaveDeclaracion}
+        year={selectedYear}
+      />
     </div>
   );
 };

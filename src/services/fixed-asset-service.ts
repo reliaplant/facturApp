@@ -124,6 +124,9 @@ export class FixedAssetService {
       updatedAt: now
     };
     
+    // Calcular y agregar la depreciación mensual
+    newAsset.monthlyDepreciation = this.calculateMonthlyDepreciation(newAsset);
+    
     // Guardar en Firestore como subcollección del cliente
     await setDoc(doc(db, `clients/${assetData.clientId}/fixedAssets`, assetId), newAsset);
     
@@ -142,11 +145,30 @@ export class FixedAssetService {
       throw new Error(`Activo con ID ${assetId} no encontrado`);
     }
     
+    // Obtener el activo actual
+    const currentAsset = assetDoc.data() as FixedAsset;
+    
     // Datos de actualización con timestamp
     const updatePayload = {
       ...updateData,
       updatedAt: new Date().toISOString()
     };
+    
+    // Recalcular la depreciación mensual si se modificaron valores relevantes
+    if (
+      updateData.cost !== undefined || 
+      updateData.residualValue !== undefined || 
+      updateData.usefulLifeMonths !== undefined
+    ) {
+      // Crear un objeto temporal con los valores actualizados para el cálculo
+      const tempAsset: FixedAsset = {
+        ...currentAsset,
+        ...updateData,
+      };
+      
+      // Calcular y agregar la depreciación mensual actualizada
+      updatePayload.monthlyDepreciation = this.calculateMonthlyDepreciation(tempAsset);
+    }
     
     // Actualizar en Firestore
     await updateDoc(assetRef, updatePayload);
@@ -215,6 +237,44 @@ export class FixedAssetService {
     );
   }
   
+  /**
+   * Obtiene la depreciación mensual total para un cliente en un mes específico
+   */
+  async getTotalMonthlyDepreciation(
+    clientId: string,
+    startDate: string,
+    endDate: string
+  ): Promise<number> {
+    try {
+      // Obtener todos los activos fijos activos del cliente
+      const assets = await this.getFixedAssetsByClient(clientId, 'active');
+      
+      // Calcular la depreciación mensual total sumando las depreciaciones individuales
+      let totalMonthlyDepreciation = 0;
+      
+      for (const asset of assets) {
+        // Verificar si el activo estaba activo durante el período
+        const assetPurchaseDate = new Date(asset.purchaseDate);
+        const periodStartDate = new Date(startDate);
+        const periodEndDate = new Date(endDate);
+        
+        // Si el activo se compró después del período, no aplica
+        if (assetPurchaseDate > periodEndDate) {
+          continue;
+        }
+        
+        // Si el activo se compró durante el período o antes
+        const monthlyDepreciation = asset.monthlyDepreciation || this.calculateMonthlyDepreciation(asset);
+        totalMonthlyDepreciation += monthlyDepreciation;
+      }
+      
+      return totalMonthlyDepreciation;
+    } catch (error) {
+      console.error("Error al calcular la depreciación mensual total:", error);
+      return 0;
+    }
+  }
+
   /**
    * Elimina un activo fijo
    */

@@ -90,6 +90,7 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Valor de compra</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Valor deducible</th>
                   <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Meses (Total/Actual)</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Dep. Mensual</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Dep. Acumulada</th>
                   <th className="pr-7 px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Acciones</th>
                 </tr>
@@ -97,13 +98,13 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
               <tbody className="mt-1">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Cargando activos fijos...
                     </td>
                   </tr>
                 ) : assets.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Este cliente no tiene activos fijos registrados
                     </td>
                   </tr>
@@ -154,6 +155,9 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                           <span className="font-medium">{totalMonths}</span> / <span>{elapsedMonths}</span>
                         </td>
                         <td className="px-2 py-1 align-middle text-right font-medium">
+                          ${(asset.monthlyDepreciation || fixedAssetService.calculateMonthlyDepreciation(asset)).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="px-2 py-1 align-middle text-right font-medium">
                           ${asset.accumulatedDepreciation.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                         </td>
                         <td className="pr-7 px-2 py-1 align-middle">
@@ -182,6 +186,9 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                     ${totalDeductible.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                   </td>
                   <td className="px-2 py-1.5 text-center"></td>
+                  <td className="px-2 py-1.5 text-right">
+                    ${assets.reduce((sum, asset) => sum + (asset.monthlyDepreciation || fixedAssetService.calculateMonthlyDepreciation(asset)), 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                  </td>
                   <td className="px-2 py-1.5 text-right">
                     ${assets.reduce((sum, asset) => sum + asset.accumulatedDepreciation, 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                   </td>
