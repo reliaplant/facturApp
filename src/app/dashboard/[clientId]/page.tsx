@@ -35,6 +35,9 @@ export default function ClientDashboard() {
   // Fix the ref - use imported useRef hook directly
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Add a mock logged-in user state
+  const [loggedInUser] = useState({ name: "Ana Rodríguez", email: "ana@example.com" });
+
   // Load client data
   useEffect(() => {
     const fetchClient = async () => {
@@ -173,48 +176,67 @@ export default function ClientDashboard() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       {/* Header - Primera barra */}
       <header className="bg-white dark:bg-gray-800 shadow-sm">
-        <div className="w-full px-3 py-3">
+        <div className="w-full px-3 pr-7 py-1">
           <div className="flex justify-between items-center">
             <div className="flex items-center">
               <Link href="/dashboard" className="mr-3">
                 <Button variant="ghost" size="sm">
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Volver al Dashboard
+                  <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                  Volver
                 </Button>
               </Link>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+              <h1 className=" font-bold text-gray-900 dark:text-white">
                 {client.name} <span className="font-normal">({client.rfc})</span>
               </h1>
             </div>
-            <div className="text-sm text-gray-500">
-              {new Date().toLocaleDateString("es-ES", {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
+            
+            {/* Add user info with avatar */}
+            <div className="flex items-center gap-3">
+
+              
+              <div className="flex items-center gap-2  pl-3 border-gray-200 dark:border-gray-700">
+                <div className="text-xs font-medium text-gray-700 dark:text-gray-300 hidden sm:block">
+                  {loggedInUser.name}
+                </div>
+                <div className="h-7 w-7 rounded-full bg-violet-700 flex items-center justify-center text-white text-xs font-medium">
+                  {loggedInUser.name.charAt(0)}
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </header>
 
       {/* Segunda barra - Tabs y botones */}
-      <div className="bg-white dark:bg-gray-800 shadow-sm border-t border-gray-200 dark:border-gray-700">
-        <div className="w-full px-3 py-2">
+      <div className="bg-white dark:bg-gray-800 shadow-sm border-t border-b-2 border-gray-200 dark:border-gray-700">
+        <div className="w-full px-3 pr-7 py-0">
           <div className="flex justify-between items-center">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-              <TabsList className="overflow-x-auto">
-                <TabsTrigger value="fiscal">Cédula Fiscal</TabsTrigger>
-                <TabsTrigger value="incomes">Facturas Emitidas</TabsTrigger>
-                <TabsTrigger value="expenses">Facturas Recibidas</TabsTrigger>
-                <TabsTrigger value="declaraciones">Declaraciones</TabsTrigger>
-                <TabsTrigger value="pagos">Pagos</TabsTrigger>
-                <TabsTrigger value="info">Info</TabsTrigger>
-                <TabsTrigger value="activos">Activos</TabsTrigger>
-                <TabsTrigger value="ccf">CCF</TabsTrigger>
-                <TabsTrigger value="opinion">Opinion</TabsTrigger>
+              {/* Use simplified TabsList with bottom border-only styling */}
+              <TabsList size="sm" className="overflow-x-auto bg-transparent">
+                <TabsTrigger size="sm" value="fiscal">Cédula Fiscal</TabsTrigger>
+                <TabsTrigger size="sm" value="incomes">Facturas Emitidas</TabsTrigger>
+                <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
+                <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
+                <TabsTrigger size="sm" value="pagos">Pagos</TabsTrigger>
+                <TabsTrigger size="sm" value="info">Info</TabsTrigger>
+                <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
+                <TabsTrigger size="sm" value="ccf">CCF</TabsTrigger>
+                <TabsTrigger size="sm" value="opinion">Opinion</TabsTrigger>
               </TabsList>
             </Tabs>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
+
+
+            <Button
+                variant="gray800"
+                size="sm"
+                onClick={handleRefreshData}
+                disabled={isRefreshing}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
+                Actualizar
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -222,8 +244,8 @@ export default function ClientDashboard() {
                 disabled={isLoading}
                 className="flex items-center whitespace-nowrap"
               >
-                <FileUp className="h-4 w-4 mr-1" />
-                {isLoading ? "Cargando..." : "Cargar Facturas"}
+                <FileUp className="h-3.5 w-3.5 mr-1" />
+                {isLoading ? "Cargando..." : "Subir"}
               </Button>
               
               {/* Hidden file input */}
@@ -242,26 +264,25 @@ export default function ClientDashboard() {
                 receivedInvoices={receivedInvoices}
                 year={selectedYear}
                 fileName={`${client?.name || 'Cliente'}_Facturas_${selectedYear}.xlsx`}
-                buttonLabel="Exportar.xlsx"
+                buttonLabel="Exportar"
               />
 
-              <Button
-                variant="outline"
+   {/* Explicitly add size="sm" to YearSelector */}
+   <YearSelector 
+                selectedYear={selectedYear} 
+                onYearChange={setSelectedYear} 
                 size="sm"
-                onClick={handleRefreshData}
-                disabled={isRefreshing}
-              >
-                <RefreshCw className={`h-4 w-4 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
-                Actualizar
-              </Button>
-              <YearSelector selectedYear={selectedYear} onYearChange={setSelectedYear} />
+              />
+
+              
+           
             </div>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <main className="w-full p-3">
+      <main className="w-full">
         {/* Contenido de las tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="fiscal">

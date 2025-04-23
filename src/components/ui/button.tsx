@@ -20,13 +20,16 @@ const buttonVariants = cva(
         ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
         danger: "text-red-500 hover:text-red-700 hover:bg-red-100",
+        blue: "bg-blue-600 text-white hover:bg-blue-600",
+        black: "bg-black text-white hover:bg-gray-900",
+        gray800: "bg-gray-800 text-white hover:bg-gray-700",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        xs: "h-7 rounded-md px-2 text-xs",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
+        default: "h-8 px-4 py-1.5", // Reduced from h-10
+        xs: "h-6 rounded-md px-2 text-xs py-0.5", // Reduced from h-7
+        sm: "h-7 rounded-md px-3 py-1", // Reduced from h-9
+        lg: "h-10 rounded-md px-8 py-2", // Reduced from h-11
+        icon: "h-8 w-8", // Reduced from h-10 w-10
       },
     },
     defaultVariants: {

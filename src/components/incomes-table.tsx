@@ -259,7 +259,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
                   ${invoice.locked ? 'opacity-80' : ''}`}
       >
         {/* Lock Button */}
-        <td className="px-2 py-1 align-middle text-center">
+        <td className="pl-7 px-2 py-1 align-middle text-center">
           {isComplement ? (
             <span className="h-7 w-7 block"></span>
           ) : (
@@ -414,7 +414,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
           )}
         </td>
         <td 
-          className="px-2 py-1 align-middle text-right cursor-pointer"
+          className="pr-7 px-2 py-1 align-middle text-right cursor-pointer"
           onDoubleClick={() => !isComplement && handleGravadoDoubleClick(invoice)}
         >
           {isComplement ? <span></span> : (
@@ -440,9 +440,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
 
   return (
     <div className="space-y-2">
-      <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border">
+      <div className="bg-white dark:bg-gray-800 border-b">
         {/* Header */}
-        <div className="px-3 py-2 border-b border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-medium whitespace-nowrap">
             Facturas Emitidas {year}
           </h2>
@@ -458,11 +458,11 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
 
         {/* Table */}
         <div className="relative">
-          <div className="max-h-[70vh] overflow-y-auto">
+          <div className="max-h-[calc(100vh-140px)] overflow-y-auto">
             <table className="w-full text-xs relative">
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
-                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
+                  <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Receptor</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
@@ -474,7 +474,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Mes Cobro</th>
                   <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Ingreso</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado ISR</th>
-                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
+                  <th className="pr-8 px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
                 </tr>
               </thead>
               <tbody className="mt-1">
@@ -482,14 +482,14 @@ export function IncomesTable({ year, invoices = [], disableExport = false }: Inc
                   sortedMonths.map((month) => (
                     <React.Fragment key={month}>
                       <tr className="bg-gray-200 dark:bg-gray-700">
-                        <td colSpan={13} className="px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
+                        <td colSpan={13} className="pl-7 px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
                       </tr>
                       
                       {invoicesByMonth[month].map(renderInvoiceRow)}
                       
                       {/* Monthly Totals */}
                       <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
-                        <td colSpan={13} className="px-2 py-1.5 text-right text-gray-500">
+                        <td colSpan={13} className="px-7 py-1.5 text-right text-gray-500">
                           Total Gravado: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
                           IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                         </td>

@@ -155,9 +155,13 @@ export function ExportInvoicesExcel({
   };
 
   return (
-    <Button variant="outline" onClick={handleExport}>
-      <Download className="h-4 w-4" />
-      <span className="sr-only md:not-sr-only md:ml-2">{buttonLabel}</span>
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleExport}
+    >
+      <Download className="h-4 w-4 mr-1" />
+      <span>{buttonLabel}</span>
     </Button>
   );
 }
