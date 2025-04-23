@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { FileText, Plus } from "lucide-react";
@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Declaracion } from '../../models/declaracion';
 import { formatCurrency } from "@/lib/utils";
 import DeclaracionModal from './declaracion-modal';
+import { useToast } from '@/components/ui/use-toast';
+import { declaracionService } from '@/services/declaracion-service';
 
 interface DeclaracionMensualPFProps {
-  declaraciones: Declaracion[];
+  declaraciones?: Declaracion[];
   clientId: string;
   selectedYear: number;
   onEdit?: (declaracion: Declaracion) => void;
@@ -18,13 +20,91 @@ interface DeclaracionMensualPFProps {
 }
 
 const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({ 
-  declaraciones, 
   clientId,
   selectedYear,
   onEdit,
-  isLoading = false
+  isLoading: externalLoading = false
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [declaraciones, setDeclaraciones] = useState<Declaracion[]>([]);
+  const [editingDeclaracion, setEditingDeclaracion] = useState<Declaracion | null>(null);
+  const { toast } = useToast();
+
+  console.log("Client ID in DeclaracionMensualPF:", clientId);
+
+  // Load declarations from Firebase using the service
+  useEffect(() => {
+    const fetchDeclaraciones = async () => {
+      if (!clientId) {
+        console.error("No client ID provided");
+        return;
+      }
+      
+      try {
+        setLoading(true);
+        const data = await declaracionService.getDeclaraciones(clientId, selectedYear);
+        setDeclaraciones(data);
+      } catch (error) {
+        console.error("Error fetching declarations:", error);
+        toast({
+          title: "Error",
+          description: "No se pudieron cargar las declaraciones",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDeclaraciones();
+  }, [clientId, selectedYear, toast]);
+
+  const handleSaveDeclaracion = (declaracion: Declaracion) => {
+    console.log("Declaration saved:", declaracion);
+    
+    // Update UI immediately
+    if (editingDeclaracion?.id) {
+      setDeclaraciones(prev => 
+        prev.map(d => d.id === declaracion.id ? declaracion : d)
+      );
+    } else {
+      setDeclaraciones(prev => [...prev, declaracion]);
+    }
+    
+    // Refresh the list from Firebase
+    setTimeout(() => {
+      fetchDeclaracionesFromService();
+    }, 1000);
+    
+    // Call onEdit if provided
+    if (onEdit) {
+      onEdit(declaracion);
+    }
+  };
+
+  const fetchDeclaracionesFromService = async () => {
+    try {
+      const data = await declaracionService.getDeclaraciones(clientId, selectedYear);
+      setDeclaraciones(data);
+    } catch (error) {
+      console.error("Error refreshing declarations:", error);
+    }
+  };
+
+  const handleOpenModal = (declaracion?: Declaracion) => {
+    if (declaracion) {
+      setEditingDeclaracion(declaracion);
+    } else {
+      setEditingDeclaracion(null);
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingDeclaracion(null);
+  };
 
   const formatDate = (date: Date | null) => {
     if (!date) return '-';
@@ -48,20 +128,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
     };
   }, { isr: 0, iva: 0 });
 
-  const handleOpenModal = () => {
-    setIsModalOpen(true);
-  };
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false);
-  };
-
-  const handleSaveDeclaracion = (declaracion: Declaracion) => {
-    if (onEdit) {
-      onEdit(declaracion);
-      setIsModalOpen(false);
-    }
-  };
+  const isLoadingData = loading || externalLoading;
 
   return (
     <div className="space-y-2">
@@ -80,17 +147,15 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               Total IVA: {formatCurrency(totals.iva)}
             </Badge>
             
-            {onEdit && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleOpenModal}
-                className="text-xs ml-2"
-              >
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                Agregar
-              </Button>
-            )}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => handleOpenModal()}
+              className="text-xs ml-2"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Agregar
+            </Button>
           </div>
         </div>
 
@@ -112,7 +177,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                 </tr>
               </thead>
               <tbody className="mt-1">
-                {isLoading ? (
+                {isLoadingData ? (
                   <tr>
                     <td colSpan={9} className="px-2 py-4 text-center text-gray-500">Cargando declaraciones...</td>
                   </tr>
@@ -158,18 +223,16 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                       <td className="px-2 py-1 align-middle text-right font-medium">{formatCurrency(declaracion.montoIVA)}</td>
                       <td className="pr-7 px-2 py-1 align-middle text-center">
                         <div className="flex space-x-1 justify-center">
-                          {onEdit && (
-                            <Button 
-                              variant="ghost" 
-                              size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => onEdit(declaracion)}
-                            >
-                              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-4 w-4">
-                                <path d="M11.8536 1.14645C11.6583 0.951184 11.3417 0.951184 11.1465 1.14645L3.71455 8.57836C3.62459 8.66832 3.55263 8.77461 3.50251 8.89155L2.04044 12.303C1.9599 12.491 2.00189 12.709 2.14646 12.8536C2.29103 12.9981 2.50905 13.0401 2.69697 12.9596L6.10847 11.4975C6.2254 11.4474 6.3317 11.3754 6.42166 11.2855L13.8536 3.85355C14.0488 3.65829 14.0488 3.34171 13.8536 3.14645L11.8536 1.14645ZM4.42166 9.28547L11.5 2.20711L12.7929 3.5L5.71455 10.5784L4.21924 11.2192L3.78081 10.7808L4.42166 9.28547Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path>
-                              </svg>
-                            </Button>
-                          )}
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => handleOpenModal(declaracion)}
+                          >
+                            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" className="h-4 w-4">
+                              <path d="M11.8536 1.14645C11.6583 0.951184 11.3417 0.951184 11.1465 1.14645L3.71455 8.57836C3.62459 8.66832 3.55263 8.77461 3.50251 8.89155L2.04044 12.303C1.9599 12.491 2.00189 12.709 2.14646 12.8536C2.29103 12.9981 2.50905 13.0401 2.69697 12.9596L6.10847 11.4975C6.2254 11.4474 6.3317 11.3754 6.42166 11.2855L13.8536 3.85355C14.0488 3.65829 14.0488 3.34171 13.8536 3.14645L11.8536 1.14645ZM4.42166 9.28547L11.5 2.20711L12.7929 3.5L5.71455 10.5784L4.21924 11.2192L3.78081 10.7808L4.42166 9.28547Z" fill="currentColor" fillRule="evenodd" clipRule="evenodd"></path>
+                            </svg>
+                          </Button>
                           {declaracion.urlArchivoLineaCaptura && (
                             <Button 
                               variant="ghost" 
@@ -191,12 +254,14 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
         </div>
       </div>
       
-      {/* Use the extracted modal component */}
+      {/* Pass clientId and editing declaration to the modal */}
       <DeclaracionModal
         open={isModalOpen}
         onClose={handleCloseModal}
         onSave={handleSaveDeclaracion}
         year={selectedYear}
+        clientId={clientId}
+        declaracion={editingDeclaracion}
       />
     </div>
   );
