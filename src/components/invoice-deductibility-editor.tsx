@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+// Remove Textarea import as we'll use a regular HTML textarea
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Invoice } from "@/models/Invoice";
 
@@ -28,7 +29,8 @@ export function InvoiceDeductibilityEditor({
     mesDeduccion: "none",
     gravadoISR: 0,
     gravadoIVA: 0,
-    gravadoModificado: false
+    gravadoModificado: false,
+    notasDeducibilidad: ""
   });
 
   // Calculate proper gravado values
@@ -56,7 +58,8 @@ export function InvoiceDeductibilityEditor({
         mesDeduccion: invoice.mesDeduccion?.toString() || "none",
         gravadoISR: invoice.gravadoISR || gravadoISR,
         gravadoIVA: invoice.gravadoIVA || gravadoIVA,
-        gravadoModificado: invoice.gravadoModificado || false
+        gravadoModificado: invoice.gravadoModificado || false,
+        notasDeducibilidad: invoice.notasDeducibilidad || ""
       });
     }
   }, [invoice]);
@@ -70,7 +73,8 @@ export function InvoiceDeductibilityEditor({
       mesDeduccion: formData.mesDeduccion === "none" ? undefined : parseInt(formData.mesDeduccion),
       gravadoISR: formData.esDeducible ? formData.gravadoISR : 0,
       gravadoIVA: formData.esDeducible ? formData.gravadoIVA : 0,
-      gravadoModificado: formData.gravadoModificado
+      gravadoModificado: formData.gravadoModificado,
+      notasDeducibilidad: formData.notasDeducibilidad
     };
     
     onSave(updatedInvoice);
@@ -212,22 +216,23 @@ export function InvoiceDeductibilityEditor({
             </>
           )}
 
-          {/* Summary */}
-          {formData.esDeducible && formData.mesDeduccion !== "none" && (
-            <div className="bg-gray-50 p-3 rounded-md text-sm">
-              <p className="font-medium mb-2">Resumen de deducibilidad:</p>
-              <div className="grid grid-cols-2 gap-1">
-                <div>Mes de pago:</div>
-                <div className="text-right font-medium">
-                  {formData.mesDeduccion !== "none" ? getMonthAbbreviation(parseInt(formData.mesDeduccion)) : "-"}
-                </div>
-                <div>Gravado ISR:</div>
-                <div className="text-right font-medium">${formData.gravadoISR.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</div>
-                <div>Gravado IVA:</div>
-                <div className="text-right font-medium">${formData.gravadoIVA.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</div>
-              </div>
+          {/* Deductibility Notes Field - using regular textarea */}
+          {formData.esDeducible && (
+            <div className="grid grid-cols-1 gap-2">
+              <Label htmlFor="notasDeducibilidad">Notas sobre deducibilidad</Label>
+              <textarea
+                id="notasDeducibilidad"
+                placeholder="Agrega notas o comentarios sobre la deducibilidad de esta factura..."
+                value={formData.notasDeducibilidad}
+                onChange={(e) => setFormData({...formData, notasDeducibilidad: e.target.value})}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background 
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 
+                disabled:cursor-not-allowed disabled:opacity-50 min-h-[80px] resize-y"
+              />
             </div>
           )}
+
+        
         </div>
 
         <DialogFooter className="flex gap-2 items-center">
