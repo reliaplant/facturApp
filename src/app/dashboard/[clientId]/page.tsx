@@ -287,6 +287,7 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
+                <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-1.5">
@@ -384,6 +385,13 @@ export default function ClientDashboard() {
             />
           </TabsContent>
 
+          <TabsContent value="activos">
+            {/* Replace Card with simpler structure */}
+            <div className="bg-white dark:bg-gray-800">
+              <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
+            </div>
+          </TabsContent>
+
           <TabsContent value="info">
             <InfoClientePF 
               initialClient={client} 
@@ -391,14 +399,14 @@ export default function ClientDashboard() {
             />
           </TabsContent>
 
-          <TabsContent value="activos">
-            {/* Replace Card with simpler structure */}
-            <div className="bg-white dark:bg-gray-800">
-              <FixedAssetsTable clientId={clientId} selectedYear={selectedYear} />
+          <TabsContent value="checklist">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-md shadow-sm">
+              <h2 className="text-xl font-semibold mb-4">Checklist del Cliente</h2>
+              <p className="text-gray-600 dark:text-gray-300">
+                Contenido del checklist en construcción. Aquí se mostrarán las tareas pendientes y completadas.
+              </p>
             </div>
           </TabsContent>
-         
-      
         </Tabs>
       </main>
     </div>
