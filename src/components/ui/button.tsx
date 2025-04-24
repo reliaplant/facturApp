@@ -23,15 +23,16 @@ const buttonVariants = cva(
         blue: "bg-blue-600 text-white hover:bg-blue-600",
         black: "bg-black text-white hover:bg-gray-900",
         gray800: "bg-gray-800 text-white hover:bg-gray-700",
+        violet: "bg-violet-600 text-white hover:bg-violet-700",
       },
       size: {
-        default: "h-8 px-4 py-1.5", // Reduced from h-10
-        xs: "h-6 rounded-md px-2 text-xs py-0.5", // Reduced from h-7
-        sm: "h-7 rounded-md px-3 py-1", // Reduced from h-9
-        lg: "h-10 rounded-md px-8 py-2", // Reduced from h-11
-        icon: "h-8 w-8", // Reduced from h-10 w-10
-        fluid: "min-h-8 px-4 py-1.5 whitespace-normal text-left justify-start", // New variant for auto-width with text wrapping
-        fluidNoBreak: "min-h-8 px-4 py-1.5 whitespace-nowrap text-left justify-start overflow-hidden text-ellipsis", // Variant with no word breaking
+        default: "h-8 px-4 py-1.5",
+        xs: "h-6 rounded-md px-2 text-xs py-0.5",
+        sm: "h-7 rounded-md px-3 py-1",
+        lg: "h-10 rounded-md px-8 py-2",
+        icon: "h-8 w-8",
+        fluid: "min-h-8 px-4 py-1.5 whitespace-normal text-left justify-start",
+        fluidNoBreak: "min-h-8 px-4 py-1.5 whitespace-nowrap text-left justify-start overflow-hidden text-ellipsis",
       },
     },
     defaultVariants: {

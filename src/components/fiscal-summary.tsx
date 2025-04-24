@@ -6,6 +6,10 @@ import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { FixedAssetService } from "@/services/fixed-asset-service";
 import { TaxBracketsService, TaxBracket } from "@/services/tax-brackets-service"; 
+import DeclaracionModal from "@/components/declaracion-modal";
+import { Declaracion } from "@/models/declaracion";
+import { useToast } from "@/components/ui/use-toast";
+import { FilePlus } from "lucide-react";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -32,20 +36,23 @@ interface FiscalSummaryProps {
   onGenerateDeclaration?: (monthData: MonthlyFiscalData) => void;
 }
 
-export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclaration }: FiscalSummaryProps) {
+export function FiscalSummary({ year, clientId, invoices = [] }: FiscalSummaryProps) {
   const months = Array.from({ length: 12 }, (_, i) => i);
   // Reference date data
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
   
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
   const [monthlyData, setMonthlyData] = useState<MonthlyFiscalData[]>([]);
   const [monthlyDepreciations, setMonthlyDepreciations] = useState<Record<number, number>>({});
   const fixedAssetService = new FixedAssetService();
   
   // Add state for tax brackets
   const [taxBracketsByMonth, setTaxBracketsByMonth] = useState<Record<number, TaxBracket[]>>({});
+  
+  // Add state for declaracion modal
+  const [declaracionModalOpen, setDeclaracionModalOpen] = useState(false);
+  const { toast } = useToast();
   
   // Load depreciation data
   useEffect(() => {
@@ -297,10 +304,22 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
     return total;
   };
   
-  const handleGenerateDeclaration = () => {
-    if (onGenerateDeclaration && monthlyData[selectedMonth]) {
-      onGenerateDeclaration(monthlyData[selectedMonth]);
-    }
+  // Handle declaration save
+  const handleDeclarationSave = (declaration: Declaracion) => {
+    toast({
+      title: "Declaración guardada",
+      description: `Se ha guardado la declaración de ${getMesNombre(declaration.mes)} ${year}`,
+    });
+    setDeclaracionModalOpen(false);
+  };
+
+  // Helper function to get month name
+  const getMesNombre = (mes: string): string => {
+    const meses = [
+      "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+      "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+    ];
+    return meses[parseInt(mes) - 1] || "";
   };
 
   // Helper function to format currency
@@ -367,16 +386,16 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
               Utilidad: {formatCurrency(annualTotals.profit)}
             </Badge>
             
-            {onGenerateDeclaration && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleGenerateDeclaration}
-                className="text-xs"
-              >
-                Generar Declaración
-              </Button>
-            )}
+            {/* Simplified Create Declaration button */}
+            <Button 
+              variant="violet" 
+              size="sm" 
+              onClick={() => setDeclaracionModalOpen(true)}
+              className="text-xs flex items-center gap-1"
+            >
+              <FilePlus className="h-3.5 w-3.5" />
+              Crear Declaración
+            </Button>
           </div>
         </div>
 
@@ -857,6 +876,18 @@ export function FiscalSummary({ year, clientId, invoices = [], onGenerateDeclara
           </div>
         </div>
       </div>
+      
+      {/* Add Declaracion Modal with fiscal data */}
+      <DeclaracionModal
+        open={declaracionModalOpen}
+        onClose={() => setDeclaracionModalOpen(false)}
+        onSave={handleDeclarationSave}
+        year={year}
+        clientId={clientId}
+        fiscalData={monthlyData}
+        calculateMonthISR={calculateMonthISR}
+        getAccumulatedRetainedISR={getAccumulatedRetainedISR}
+      />
     </div>
   );
 }

@@ -206,12 +206,12 @@ export const declaracionService = {
   },
 
   /**
-   * Upload a payment receipt or related file for a declaration
+   * Upload a declaration file
    */
-  async uploadDeclaracionFile(clientId: string, declaracionId: string, file: File): Promise<string> {
+  async uploadDeclaracionFile(clientId: string, declaracionId: string, file: File, fileType: 'declaracion' | 'lineaCaptura'): Promise<string> {
     try {
       const fileExtension = file.name.split('.').pop();
-      const fileName = `${declaracionId}_${Date.now()}.${fileExtension}`;
+      const fileName = `${declaracionId}_${fileType}_${Date.now()}.${fileExtension}`;
       const storageRef = ref(storage, `clients/${clientId}/declaraciones/${fileName}`);
       
       await uploadBytes(storageRef, file);
@@ -219,38 +219,54 @@ export const declaracionService = {
       
       // Update the declaration with the file URL
       const declaracionRef = doc(db, 'clients', clientId, 'declaraciones', declaracionId);
-      await updateDoc(declaracionRef, {
-        archivoLineaCaptura: fileName,
-        urlArchivoLineaCaptura: downloadUrl,
-      });
+      
+      if (fileType === 'declaracion') {
+        await updateDoc(declaracionRef, {
+          archivoDeclaracion: fileName,
+          urlArchivoDeclaracion: downloadUrl,
+        });
+      } else {
+        await updateDoc(declaracionRef, {
+          archivoLineaCaptura: fileName,
+          urlArchivoLineaCaptura: downloadUrl,
+        });
+      }
       
       return downloadUrl;
     } catch (error) {
-      console.error('Error uploading declaration file:', error);
+      console.error(`Error uploading ${fileType} file:`, error);
       throw error;
     }
   },
 
   /**
-   * Delete a declaration file
+   * Delete a file (declaration or payment receipt)
    */
-  async deleteDeclaracionFile(clientId: string, declaracionId: string, fileName: string): Promise<void> {
+  async deleteDeclaracionFile(clientId: string, declaracionId: string, fileName: string, fileType: 'declaracion' | 'lineaCaptura'): Promise<void> {
     try {
       const storageRef = ref(storage, `clients/${clientId}/declaraciones/${fileName}`);
       await deleteObject(storageRef);
       
       // Update the declaration to remove file references
       const declaracionRef = doc(db, 'clients', clientId, 'declaraciones', declaracionId);
-      await updateDoc(declaracionRef, {
-        archivoLineaCaptura: null,
-        urlArchivoLineaCaptura: null,
-      });
+      
+      if (fileType === 'declaracion') {
+        await updateDoc(declaracionRef, {
+          archivoDeclaracion: null,
+          urlArchivoDeclaracion: null,
+        });
+      } else {
+        await updateDoc(declaracionRef, {
+          archivoLineaCaptura: null,
+          urlArchivoLineaCaptura: null,
+        });
+      }
     } catch (error) {
-      console.error('Error deleting declaration file:', error);
+      console.error(`Error deleting ${fileType} file:`, error);
       throw error;
     }
   },
-  
+
   /**
    * Check if a declaration for a specific month and year exists
    */

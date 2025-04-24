@@ -16,7 +16,7 @@ import { v4 as uuidv4 } from "uuid";
 import { Client } from "@/models/Client";
 import { clientService } from "@/services/client-service";
 import InfoClientePF from "./components/infoClientePF";
-import DeclaracionMensualPF from "@/components/declaracionMensualPF/declaracionMensualPF";
+import DeclaracionMensualPF from "@/components/declaracionMensualPF";
 import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
@@ -285,7 +285,6 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="incomes">Facturas Emitidas</TabsTrigger>
                 <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
                 <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
-                <TabsTrigger size="sm" value="pagos">Pagos</TabsTrigger>
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
               </TabsList>
@@ -383,14 +382,6 @@ export default function ClientDashboard() {
               declaraciones={[]} 
               onEdit={() => {}}
             />
-          </TabsContent>
-
-          <TabsContent value="pagos">
-            {/* Replace Card with simpler structure */}
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm border p-4">
-              <h2 className="text-xl font-semibold mb-4">Pagos</h2>
-              <p>Control de pagos y movimientos financieros.</p>
-            </div>
           </TabsContent>
 
           <TabsContent value="info">
