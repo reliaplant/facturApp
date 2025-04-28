@@ -1,9 +1,9 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, ChevronRight, Settings, Search } from "lucide-react";
+import { Plus, ChevronRight, Settings, Search, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -26,6 +26,15 @@ interface ListaClientesPFProps {
   isCreating: boolean;
 }
 
+// Define client tiers with new subtle color scheme
+const clientTiers = [
+  { id: "onboarding", name: "Onboarding", color: "bg-yellow-400" },
+  { id: "basico", name: "Básico", color: "bg-violet-300" },
+  { id: "emprendedores", name: "Emprendedores", color: "bg-violet-500" },
+  { id: "pro", name: "Pro", color: "bg-violet-800" },
+  { id: "perdidos", name: "Perdidos", color: "bg-red-500" }
+];
+
 export const ListaClientesPF = ({
   clients,
   isLoading,
@@ -43,128 +52,168 @@ export const ListaClientesPF = ({
     client.rfc.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Clientes</CardTitle>
+  // Group clients by tier (using a default tier of "onboarding" if not specified)
+  const getClientsByTier = () => {
+    const clientsByTier: Record<string, Client[]> = {};
+    
+    // Initialize empty arrays for each tier
+    clientTiers.forEach(tier => {
+      clientsByTier[tier.id] = [];
+    });
+    
+    // Distribute clients to their respective tiers
+    filteredClients.forEach(client => {
+      const tier = client.tier || "onboarding";
+      if (clientsByTier[tier]) {
+        clientsByTier[tier].push(client);
+      } else {
+        clientsByTier["onboarding"].push(client);
+      }
+    });
+    
+    return clientsByTier;
+  };
 
-        <div className="w-1/4">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
+  const clientsByTier = getClientsByTier();
+
+  return (
+    <Card className="border-0 shadow-sm">
+      {/* White header */}
+      <CardHeader className="bg-gray-100 px-7 py-2 flex flex-row items-center justify-between space-y-0 border-b border-gray-200 ">
+        <div className="flex items-center gap-4 w-full">
+          <CardTitle className="text-base">Clientes</CardTitle>
+
+          <div className="relative max-w-[250px] flex-1">
+            <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-gray-500" />
             <Input
               type="search"
-              placeholder="Buscar cliente por nombre o RFC..."
-              className="w-full pl-9"
+              placeholder="Buscar..."
+              className="w-full h-7 pl-7 text-xs"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-        </div>
-        <div className="mt-4 md:mt-0 flex gap-2">
-          <Button variant="outline" size="sm">
-            <Settings className="mr-2 h-4 w-4" />
-            Ajustes
-          </Button>
+          
+          <div className="flex gap-1.5 ml-auto">
+            <Button variant="outline" size="xs" className="h-7">
+              <Settings className="h-3.5 w-3.5 mr-1" />
+              Ajustes
+            </Button>
 
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Nuevo Cliente
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="sm:max-w-[425px]">
-              <DialogHeader>
-                <DialogTitle>Crear Nuevo Cliente</DialogTitle>
-                <DialogDescription>
-                  Ingrese los datos básicos del cliente. Podrá completar más información después.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="grid gap-4 py-4">
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="name" className="text-right">
-                    Nombre*
-                  </Label>
-                  <Input
-                    id="name"
-                    value={newClient.name}
-                    onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
-                    className="col-span-3"
-                    placeholder="Nombre completo o razón social"
-                  />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="rfc" className="text-right">
-                    RFC*
-                  </Label>
-                  <Input
-                    id="rfc"
-                    value={newClient.rfc}
-                    onChange={(e) => setNewClient({ ...newClient, rfc: e.target.value.toUpperCase() })}
-                    className="col-span-3"
-                    placeholder="XXXX000000XXX"
-                  />
-                </div>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="email" className="text-right">
-                    Email
-                  </Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={newClient.email}
-                    onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-                    className="col-span-3"
-                    placeholder="correo@ejemplo.com"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button
-                  type="submit"
-                  onClick={handleCreateClient}
-                  disabled={isCreating || !newClient.name || !newClient.rfc}
-                >
-                  {isCreating ? "Creando..." : "Crear cliente"}
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button size="xs" className="h-7">
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Nuevo Cliente
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Crear Nuevo Cliente</DialogTitle>
+                  <DialogDescription>
+                    Ingrese los datos básicos del cliente. Podrá completar más información después.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="name" className="text-right">
+                      Nombre*
+                    </Label>
+                    <Input
+                      id="name"
+                      value={newClient.name}
+                      onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
+                      className="col-span-3"
+                      placeholder="Nombre completo o razón social"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="rfc" className="text-right">
+                      RFC*
+                    </Label>
+                    <Input
+                      id="rfc"
+                      value={newClient.rfc}
+                      onChange={(e) => setNewClient({ ...newClient, rfc: e.target.value.toUpperCase() })}
+                      className="col-span-3"
+                      placeholder="XXXX000000XXX"
+                    />
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="email" className="text-right">
+                      Email
+                    </Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      value={newClient.email}
+                      onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                      className="col-span-3"
+                      placeholder="correo@ejemplo.com"
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="submit"
+                    onClick={handleCreateClient}
+                    disabled={isCreating || !newClient.name || !newClient.rfc}
+                  >
+                    {isCreating ? "Creando..." : "Crear cliente"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="p-0">
         {isLoading ? (
           <div className="flex justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-md border">
-            <div className="divide-y">
-              {filteredClients.length > 0 ? (
-                filteredClients.map((client) => (
-                  <div key={client.id} className="flex items-center justify-between p-4">
-                    <div className="space-y-1">
-                      <div className="font-medium">{client.name}</div>
-                      <div className="text-sm text-gray-500">{client.rfc}</div>
-                    </div>
-                    <Link href={`/dashboard/${client.id}`} passHref>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <ChevronRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
+          <div className="grid grid-cols-5 gap-0 bg-gray-100 dark:bg-gray-850 h-[calc(100vh-140px)] overflow-auto">
+            {clientTiers.map(tier => (
+              <div key={tier.id} className="flex flex-col border-r last:border-r-0 border-gray-300 dark:border-gray-700">
+                {/* Gray column headers */}
+                <div className="px-3 py-2 bg-gray-100 dark:bg-gray-850 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+                  <div className="flex items-center">
+                    <div className={`w-2.5 h-2.5 ${tier.color} rounded-full mr-1.5`}></div>
+                    <span className="font-medium text-xs">{tier.name}</span>
                   </div>
-                ))
-              ) : (
-                <div className="p-4 text-center text-sm text-gray-500">
-                  {searchTerm ? "No se encontraron clientes que coincidan con la búsqueda." : "No hay clientes disponibles."}
+                  <div className="flex items-center justify-center w-4 h-4 bg-white dark:bg-gray-700 rounded-full text-[10px]">
+                    {clientsByTier[tier.id].length}
+                  </div>
                 </div>
-              )}
-            </div>
+                {/* Gray content area with client cards */}
+                <div className="bg-gray-200 dark:bg-gray-850 flex-1 p-1.5 overflow-y-auto">
+                  {clientsByTier[tier.id].length > 0 ? (
+                    <div className="space-y-1.5">
+                      {clientsByTier[tier.id].map((client) => (
+                        <Link key={client.id} href={`/dashboard/${client.id}`} passHref>
+                          <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-200 dark:border-gray-700">
+                            <div className="font-medium truncate text-xs">{client.name}</div>
+                            <div className="text-[10px] text-gray-500 dark:text-gray-400">{client.rfc}</div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-16 text-gray-400 text-xs">
+                      <Users className="h-4 w-4 mb-1 opacity-40" />
+                      <span>Sin clientes</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>
-      <CardFooter>
-        <div className="text-sm text-gray-500">
+      {/* White footer */}
+      <CardFooter className="py-1.5 px-7 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="text-xs text-gray-500">
           {filteredClients.length} de {clients.length} clientes
         </div>
       </CardFooter>
