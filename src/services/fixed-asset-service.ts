@@ -3,7 +3,9 @@ import {
   FixedAsset, 
   CreateFixedAssetData, 
   UpdateFixedAssetData,
-  isFullyDepreciated
+  isFullyDepreciated,
+  MonthlyDepreciation,
+  DepreciationHistoryItem
 } from '../models/FixedAsset';
 import { 
   getFirestore, 
@@ -291,5 +293,146 @@ export class FixedAssetService {
     const batch = writeBatch(db);
     batch.delete(assetRef);
     await batch.commit();
+  }
+
+  /**
+   * Obtiene el historial de depreciación para un activo fijo específico
+   */
+  async getDepreciationHistoryForAsset(assetId: string): Promise<MonthlyDepreciation[]> {
+    try {
+      // Primero obtener el activo para conocer el clientId
+      const asset = await this.getAssetDetails(assetId);
+      if (!asset) {
+        throw new Error(`Activo con ID ${assetId} no encontrado`);
+      }
+
+      // Consultar la colección de depreciaciones para este activo
+      const depreciationsRef = collection(db, `clients/${asset.clientId}/fixedAssets/${assetId}/depreciations`);
+      const querySnapshot = await getDocs(depreciationsRef);
+
+      if (querySnapshot.empty) {
+        return []; // No hay registros de depreciación
+      }
+
+      // Convertir documentos a objetos MonthlyDepreciation
+      const depreciations: MonthlyDepreciation[] = [];
+      querySnapshot.forEach(doc => {
+        depreciations.push(doc.data() as MonthlyDepreciation);
+      });
+
+      // Ordenar por año y mes
+      return depreciations.sort((a, b) => {
+        if (a.year !== b.year) return a.year - b.year;
+        return a.month - b.month;
+      });
+    } catch (error) {
+      console.error("Error al obtener historial de depreciación:", error);
+      return []; // Retornar arreglo vacío en caso de error
+    }
+  }
+
+  /**
+   * Obtiene detalles de un activo por su ID (sin verificar clientId)
+   * Método helper para getDepreciationHistoryForAsset
+   */
+  private async getAssetDetails(assetId: string): Promise<FixedAsset | null> {
+    try {
+      // Buscar en todas las colecciones de clientes (menos eficiente pero necesario)
+      const clientsRef = collection(db, 'clients');
+      const clientsSnapshot = await getDocs(clientsRef);
+      
+      for (const clientDoc of clientsSnapshot.docs) {
+        const clientId = clientDoc.id;
+        const assetRef = doc(db, `clients/${clientId}/fixedAssets`, assetId);
+        const assetDoc = await getDoc(assetRef);
+        
+        if (assetDoc.exists()) {
+          return assetDoc.data() as FixedAsset;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Error al buscar activo:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Genera un historial simulado de depreciación para un activo fijo
+   */
+  generateDepreciationHistory(asset: FixedAsset): DepreciationHistoryItem[] {
+    if (!asset) return [];
+    
+    const result: DepreciationHistoryItem[] = [];
+    const monthlyDepreciation = this.calculateMonthlyDepreciation(asset);
+    
+    // Fecha de inicio (fecha de compra)
+    const startDate = new Date(asset.purchaseDate);
+    const startYear = startDate.getFullYear();
+    const startMonth = startDate.getMonth() + 1; // getMonth() retorna 0-11
+    
+    // Valor inicial
+    let currentValue = asset.cost;
+    let accumulatedDepreciation = 0;
+    
+    // Calcular la cantidad total de meses a depreciar
+    const totalMonths = Math.min(
+      asset.usefulLifeMonths,
+      // Si ya está totalmente depreciado, calcular meses hasta la fecha actual
+      asset.status === 'fullyDepreciated' ? 
+        this.calculateMonthsUntilFullyDepreciated(asset) : 
+        asset.usefulLifeMonths
+    );
+    
+    // Generar registro para cada mes
+    for (let i = 0; i < totalMonths; i++) {
+      // Calcular año y mes
+      const month = ((startMonth + i - 1) % 12) + 1; // 1-12
+      const year = startYear + Math.floor((startMonth + i - 1) / 12);
+      
+      // Valor antes de depreciar
+      const assetValueBefore = currentValue;
+      const accumulatedBefore = accumulatedDepreciation;
+      
+      // Aplicar depreciación
+      accumulatedDepreciation += monthlyDepreciation;
+      currentValue = Math.max(asset.cost - accumulatedDepreciation, asset.residualValue);
+      
+      // Asegurar que no exceda el valor residual
+      if (currentValue <= asset.residualValue) {
+        accumulatedDepreciation = asset.cost - asset.residualValue;
+        currentValue = asset.residualValue;
+      }
+      
+      // Agregar al resultado
+      result.push({
+        year,
+        month,
+        deprecationAmount: monthlyDepreciation,
+        accumulatedBefore,
+        accumulatedAfter: accumulatedDepreciation,
+        assetValueBefore,
+        assetValueAfter: currentValue
+      });
+      
+      // Si ya llegamos al valor residual, detenerse
+      if (currentValue <= asset.residualValue) {
+        break;
+      }
+    }
+    
+    return result;
+  }
+  
+  /**
+   * Calcula cuántos meses tomó para que un activo se depreciara completamente
+   */
+  private calculateMonthsUntilFullyDepreciated(asset: FixedAsset): number {
+    const monthlyDepreciation = this.calculateMonthlyDepreciation(asset);
+    if (monthlyDepreciation <= 0) return asset.usefulLifeMonths;
+    
+    const depreciableAmount = asset.cost - asset.residualValue;
+    return Math.ceil(depreciableAmount / monthlyDepreciation);
   }
 }
