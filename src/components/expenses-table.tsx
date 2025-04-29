@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check } from "lucide-react";
+import { Lock, Unlock, Check, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
 import { invoiceService } from "@/services/invoice-service"; // Add this import
 import { useToast } from "@/components/ui/use-toast"; // Make sure this is imported
+import { 
+  Popover, 
+  PopoverContent, 
+  PopoverTrigger 
+} from "@/components/ui/popover";
+import { categoryService } from "@/services/category-service";
+import { Category } from "@/models/Category";
 
 interface ExpensesTableProps {
   year: number;
@@ -31,6 +38,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   const [isDeductibilityEditorOpen, setIsDeductibilityEditorOpen] = useState(false);
   const [invoiceForDeductibility, setInvoiceForDeductibility] = useState<Invoice | null>(null);
   const { toast } = useToast(); // Make sure we have the toast
+  const [categories, setCategories] = useState<Category[]>([]); // Add categories state
 
   // Load/Save from/to localStorage
   useEffect(() => {
@@ -51,6 +59,11 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
       localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(updatedInvoices));
     } catch (error) { /* Ignore storage errors */ }
   }, [updatedInvoices, year]);
+
+  // Fetch categories
+  useEffect(() => {
+    categoryService.getAllCategories().then(setCategories).catch(() => {});
+  }, [year]);
   
   // Helper functions - consolidated for brevity
   const invoiceHelpers = useMemo(() => ({
@@ -506,9 +519,9 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
                   ${isS01 ? 'bg-gray-100 dark:bg-gray-800/80 text-gray-400' : 'bg-white dark:bg-gray-950'}
                   ${invoice.locked ? 'opacity-80' : ''}
                   ${isComplement ? '!bg-blue-50 dark:bg-blue-900 text-blue-600' : ''}
-                  ${hasComplement ? '!bg-blue-50/30 dark:!bg-blue-900/30 cursor-pointer' : ''}
+                  ${hasComplement ? '!bg-blue-50/30 dark:!bg-blue-900/30' : ''}
                   ${highlightedPaymentComplements.includes(invoice.uuid) ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}`}
-        onClick={hasComplement ? () => handleFindPaymentComplement(invoice) : undefined}
+        // Remove the onClick handler from the row - it should only be on the specific text
       >
         {/* Lock Button - Updated styling */}
         <td className="pl-7 px-2 py-1 align-middle text-center">
@@ -566,11 +579,20 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
                   invoiceHelpers.needsPaymentComplement(invoice) ? 'text-red-500 font-medium' : 
                   invoiceHelpers.isPaidPPDInvoice(invoice) ? 'text-blue-600 font-medium' : 'text-gray-500'
                 }`}>
-                  {invoice.formaPago} / {invoice.metodoPago}
-                  {invoiceHelpers.needsPaymentComplement(invoice) && ' ⚠️'}
-                  {invoiceHelpers.isPaidPPDInvoice(invoice) && (
-                    <Check className="h-3 w-3 inline ml-1 text-blue-600" />
+                  {invoice.formaPago} / {' '}
+                  {/* Add onClick handler directly to the PPD text when it has a complement */}
+                  {hasComplement ? (
+                    <span 
+                      className="cursor-pointer hover:underline"
+                      onClick={() => handleFindPaymentComplement(invoice)}
+                    >
+                      {invoice.metodoPago}
+                      <Check className="h-3 w-3 inline ml-1 text-blue-600" />
+                    </span>
+                  ) : (
+                    invoice.metodoPago
                   )}
+                  {invoiceHelpers.needsPaymentComplement(invoice) && ' ⚠️'}
                 </span>
               </div>
             )}
@@ -592,7 +614,51 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
         <td className="px-2 py-1 align-middle">
           {isComplement || isS01
             ? <span></span>
-            : <span className="text-sm truncate max-w-[48ch]">{invoice.categoria || 'Sin categoría'}</span>
+            : invoice.locked ? (
+              // Locked state - just show text without Popover
+              <div className="flex items-center gap-1 px-2 py-1 max-w-[200px] opacity-80">
+                <Tag className="h-3.5 w-3.5 text-gray-400" />
+                <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                  {invoice.categoria || 'Sin categoría'}
+                </span>
+              </div>
+            ) : (
+              // Unlocked state - show clickable Popover
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 max-w-[200px] transition-colors">
+                    <Tag className="h-3.5 w-3.5 text-gray-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                      {invoice.categoria || 'Sin categoría'}
+                    </span>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-1" align="start">
+                  <div className="max-h-[200px] overflow-y-auto">
+                    <div 
+                      className="text-sm px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                      onClick={() => handleSetCategory(invoice, null)}
+                    >
+                      Sin categoría
+                    </div>
+                    {categories.map(category => (
+                      <div
+                        key={category.id || ''}
+                        className={`text-sm px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer flex justify-between items-center ${
+                          invoice.categoria === category.name ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                        }`}
+                        onClick={() => handleSetCategory(invoice, category.id || null)}
+                      >
+                        <span>{category.name}</span>
+                        {invoice.categoria === category.name && (
+                          <Check className="h-4 w-4 text-blue-500" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )
           }
         </td>
 
@@ -742,8 +808,23 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     highlightedPaymentComplements,
     invoiceHelpers,
     handleToggleDeductible,
-    handleFindPaymentComplement  // Add this dependency
+    handleFindPaymentComplement,  // Add this dependency
+    categories // Add this dependency
   ]);
+
+  const handleSetCategory = useCallback(async (invoice: Invoice, categoryId: string | null) => {
+    if (invoice.locked) return;
+    
+    try {
+      const category = categoryId ? categories.find(c => c.id === categoryId) : null;
+      const categoryName = category ? category.name : '';
+      
+      const updateData: Partial<Invoice> = { categoria: categoryName };
+      
+      await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
+      handleUpdateInvoice({ ...invoice, categoria: categoryName });
+    } catch {}
+  }, [clientId, categories, handleUpdateInvoice]);
 
   return (
     <div className="space-y-2">

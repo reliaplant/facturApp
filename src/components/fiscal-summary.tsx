@@ -374,7 +374,7 @@ export function FiscalSummary({ year, clientId, invoices = [] }: FiscalSummaryPr
           </h2>
           
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Ingreso: {formatCurrency(annualTotals.income)}
             </Badge>
             <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
@@ -385,7 +385,7 @@ export function FiscalSummary({ year, clientId, invoices = [] }: FiscalSummaryPr
             }`}>
               Utilidad: {formatCurrency(annualTotals.profit)}
             </Badge>
-            
+             */}
             {/* Simplified Create Declaration button */}
             <Button 
               variant="violet" 

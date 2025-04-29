@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check } from "lucide-react";
+import { Lock, Unlock, Check, Tag } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -11,43 +11,70 @@ import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
-import { invoiceService } from "@/services/invoice-service"; // Add this import
-import { useToast } from "@/components/ui/use-toast"; // Make sure this is imported
+import { invoiceService } from "@/services/invoice-service";
+import { categoryService } from "@/services/category-service";
+import { Category } from "@/models/Category";
+import { 
+  Popover, 
+  PopoverContent, 
+  PopoverTrigger 
+} from "@/components/ui/popover";
 
 interface IncomesTableProps {
   year: number;
   invoices: Invoice[];
   disableExport?: boolean;
-  clientId: string; // Add this prop
+  clientId: string;
 }
 
 export function IncomesTable({ year, invoices = [], disableExport = false, clientId }: IncomesTableProps) {
-  // State management - grouped related state together
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  // Consolidated modal state
+  const [modalState, setModalState] = useState<{
+    selectedInvoice: Invoice | null;
+    isModalOpen: boolean;
+    isDeductibilityEditorOpen: boolean;
+    invoiceForDeductibility: Invoice | null;
+  }>({
+    selectedInvoice: null,
+    isModalOpen: false,
+    isDeductibilityEditorOpen: false,
+    invoiceForDeductibility: null
+  });
+  
+  // Other state
   const [updatedInvoices, setUpdatedInvoices] = useState<Record<string, Invoice>>({});
-  const [isDeductibilityEditorOpen, setIsDeductibilityEditorOpen] = useState(false);
-  const [invoiceForDeductibility, setInvoiceForDeductibility] = useState<Invoice | null>(null);
-  const { toast } = useToast(); // Make sure we have the toast
   const [highlightedPaymentComplements, setHighlightedPaymentComplements] = useState<string[]>([]);
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
 
-  // Load/Save from localStorage - simplified with error handling
+  // Load/Save from localStorage - simplified
   useEffect(() => {
     try {
       const savedInvoices = localStorage.getItem(`updatedEmittedInvoices_${year}`);
       if (savedInvoices) setUpdatedInvoices(JSON.parse(savedInvoices));
-    } catch (error) { /* Ignore storage errors */ }
+    } catch (error) {}
   }, [year]);
   
   useEffect(() => {
     if (Object.keys(updatedInvoices).length === 0) return;
     try {
       localStorage.setItem(`updatedEmittedInvoices_${year}`, JSON.stringify(updatedInvoices));
-    } catch (error) { /* Ignore storage errors */ }
+    } catch (error) {}
   }, [updatedInvoices, year]);
 
-  // Helper functions - memoized for better performance
+  // Fetch categories
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const categoriesData = await categoryService.getAllCategories();
+        setCategories(categoriesData);
+      } catch (error) {}
+    };
+    
+    fetchCategories();
+  }, []);
+
+  // Helper functions
   const invoiceHelpers = useMemo(() => ({
     isPaymentComplement: (invoice: Invoice) => invoice.tipoDeComprobante === 'P',
     isPaidWithComplement: (invoice: Invoice) => 
@@ -62,9 +89,16 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
                  pc.docsRelacionadoComplementoPago?.some(uuid => 
                    uuid.toUpperCase() === invoice.uuid.toUpperCase()))),
     isAnnualDeduction: (invoice: Invoice) => invoice.anual || invoice.usoCFDI?.startsWith('D'),
+    // Simplified gravados calculation
+    calculateGravados: (invoice: Invoice) => {
+      const ivaValue = invoice.impuestoTrasladado || 0;
+      const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
+      const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
+      return { gravadoISR, gravadoIVA };
+    }
   }), [invoices]);
 
-  // Date utilities - memoized
+  // Date utilities
   const dateUtils = useMemo(() => ({
     getMonth: (dateString: string): number => new Date(dateString).getMonth() + 1,
     getMonthName: (month: number): string => format(new Date(year, month - 1, 1), 'MMMM', { locale: es }),
@@ -74,8 +108,8 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     }
   }), [year]);
 
-  // Process and filter invoices - memoized
-  const { filteredInvoices, invoicesByMonth, sortedMonths, totalAmount } = useMemo(() => {
+  // Process and filter invoices 
+  const { filteredInvoices, invoicesByMonth, sortedMonths, totalAmount, monthlyTaxTotals } = useMemo(() => {
     // Merge original invoices with updated ones
     const mergedInvoices = invoices.map(invoice => updatedInvoices[invoice.uuid] || invoice);
     
@@ -90,12 +124,23 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     const total = filtered.reduce((sum, invoice) => sum + invoice.total, 0);
     const byMonth: Record<number, Invoice[]> = {};
     
+    // Initialize monthly tax totals
+    const taxTotals: Record<number, { isr: number; iva: number }> = {};
+    for (let i = 1; i <= 13; i++) taxTotals[i] = { isr: 0, iva: 0 };
+    
     filtered.forEach(invoice => {
       try {
+        // Group by month
         const month = dateUtils.getMonth(invoice.fecha);
         if (!byMonth[month]) byMonth[month] = [];
         byMonth[month].push(invoice);
-      } catch (e) { /* Skip invalid dates */ }
+        
+        // Calculate tax totals
+        if (invoice.mesDeduccion && !invoice.estaCancelado && invoice.esDeducible) {
+          taxTotals[invoice.mesDeduccion].isr += invoice.gravadoISR || invoice.subTotal;
+          taxTotals[invoice.mesDeduccion].iva += invoice.gravadoIVA || (invoice.impuestoTrasladado || 0);
+        }
+      } catch (e) {}
     });
     
     // Sort invoices within each month
@@ -106,97 +151,51 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     // Get sorted month numbers
     const months = Object.keys(byMonth).map(Number).sort((a, b) => a - b);
     
-    return { filteredInvoices: filtered, invoicesByMonth: byMonth, sortedMonths: months, totalAmount: total };
+    return { 
+      filteredInvoices: filtered, 
+      invoicesByMonth: byMonth, 
+      sortedMonths: months, 
+      totalAmount: total,
+      monthlyTaxTotals: taxTotals
+    };
   }, [invoices, updatedInvoices, year, dateUtils]);
 
-  // Calculate gravados function for consistent calculation
-  const calculateGravados = useCallback((invoice: Invoice) => {
-    const ivaValue = invoice.impuestoTrasladado || 0;
-    const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
-    const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
-    return { gravadoISR, gravadoIVA };
-  }, []);
-
-  // Tax totals calculation - memoized
-  const monthlyTaxTotals = useMemo(() => {
-    const totals: Record<number, { isr: number; iva: number }> = {};
-    
-    // Initialize all months
-    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0 };
-    
-    // Calculate totals
-    filteredInvoices.forEach(invoice => {
-      if (invoice.mesDeduccion && !invoice.estaCancelado && invoice.esDeducible) {
-        totals[invoice.mesDeduccion].isr += invoice.gravadoISR || invoice.subTotal;
-        totals[invoice.mesDeduccion].iva += invoice.gravadoIVA || (invoice.impuestoTrasladado || 0);
-      }
-    });
-    
-    return totals;
-  }, [filteredInvoices]);
-
-  // Event handlers - all using useCallback for better performance
-  const handleInvoiceClick = useCallback((invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    setIsModalOpen(true);
-  }, []);
-
+  // Event handlers
   const handleUpdateInvoice = useCallback((updatedInvoice: Invoice) => {
     setUpdatedInvoices(prev => {
       const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
-      if (selectedInvoice?.uuid === updatedInvoice.uuid) {
-        setSelectedInvoice(updatedInvoice);
+      if (modalState.selectedInvoice?.uuid === updatedInvoice.uuid) {
+        setModalState(prev => ({ ...prev, selectedInvoice: updatedInvoice }));
       }
       return newState;
     });
-  }, [selectedInvoice]);
+  }, [modalState.selectedInvoice]);
 
-  // Update the lock toggle to use the simplified method
   const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
     const newLockedStatus = !invoice.locked;
     
     try {
-      // Update Firestore with the new locked status
       await invoiceService.updateInvoice(clientId, invoice.uuid, { locked: newLockedStatus });
-      
-      // Then update local state
       handleUpdateInvoice({ ...invoice, locked: newLockedStatus });
-      
-      // Show success toast
-      toast({
-        title: newLockedStatus ? "Factura bloqueada" : "Factura desbloqueada",
-        description: "El estado de la factura se ha actualizado correctamente.",
-        variant: "default",
-      });
-    } catch (error) {
-      console.error("Error updating lock status:", error);
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el estado de la factura.",
-        variant: "destructive",
-      });
-    }
-  }, [handleUpdateInvoice, clientId, toast]);
+    } catch (error) {}
+  }, [handleUpdateInvoice, clientId]);
 
-  // Simplify the month selection handler 
   const handleMonthSelect = useCallback(async (invoiceUuid: string, month: string) => {
     const invoice = filteredInvoices.find(inv => inv.uuid === invoiceUuid);
     if (!invoice) return;
     
     const isActive = month !== "none";
-    const numericMonth = isActive ? parseInt(month) : undefined; // Change from null to undefined
+    const numericMonth = isActive ? parseInt(month) : undefined;
     
     try {
-      // Calculate gravado values if needed
       let updateData: Partial<Invoice> = {
         mesDeduccion: numericMonth,
         esDeducible: isActive
       };
       
       if (isActive) {
-        // Calculate gravado values
-        const { gravadoISR, gravadoIVA } = calculateGravados({...invoice, ...updateData});
+        const { gravadoISR, gravadoIVA } = invoiceHelpers.calculateGravados({...invoice, ...updateData});
         updateData = {
           ...updateData,
           gravadoISR,
@@ -204,35 +203,16 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           gravadoModificado: false
         };
       } else {
-        // Reset gravado values if not deductible
         updateData.gravadoISR = 0;
         updateData.gravadoIVA = 0;
         updateData.gravadoModificado = false;
       }
       
-      // Update everything in one call
       await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
-      
-      // Update local state
       handleUpdateInvoice({...invoice, ...updateData});
-      
-      // Show success notification
-      toast({
-        title: "Actualizado",
-        description: isActive ? `Factura asignada al mes ${month}` : "Factura sin mes asignado",
-        variant: "default"
-      });
-    } catch (error) {
-      console.error("Error updating month:", error);
-      toast({
-        title: "Error",
-        description: "No se pudo actualizar el mes de la factura",
-        variant: "destructive"
-      });
-    }
-  }, [filteredInvoices, calculateGravados, handleUpdateInvoice, clientId, toast]);
+    } catch (error) {}
+  }, [filteredInvoices, invoiceHelpers, handleUpdateInvoice, clientId]);
 
-  // Simplify toggle gravable handler
   const handleToggleGravable = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
     
@@ -245,12 +225,10 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
       };
       
       if (newDeductibleStatus) {
-        // Turning on deductible status
         const currentMonth = invoice.mesDeduccion || dateUtils.getMonth(new Date().toISOString());
         updateData.mesDeduccion = currentMonth;
         
-        // Calculate gravado values
-        const { gravadoISR, gravadoIVA } = calculateGravados({
+        const { gravadoISR, gravadoIVA } = invoiceHelpers.calculateGravados({
           ...invoice, 
           esDeducible: true,
           mesDeduccion: currentMonth
@@ -260,39 +238,95 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         updateData.gravadoIVA = gravadoIVA;
         updateData.gravadoModificado = false;
       } else {
-        // Turning off deductible status - reset gravado values
         updateData.gravadoISR = 0;
         updateData.gravadoIVA = 0;
         updateData.gravadoModificado = false;
       }
       
-      // Update everything in one go
+      await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
+      handleUpdateInvoice({...invoice, ...updateData});
+    } catch (error) {}
+  }, [handleUpdateInvoice, invoiceHelpers, dateUtils, clientId]);
+
+  // Modal handlers - consolidated for better performance
+  const handleModals = useCallback((action: string, invoice?: Invoice) => {
+    switch(action) {
+      case 'openPreview':
+        if (invoice) setModalState(prev => ({ 
+          ...prev, 
+          selectedInvoice: invoice, 
+          isModalOpen: true 
+        }));
+        break;
+      case 'closePreview':
+        setModalState(prev => ({ ...prev, isModalOpen: false }));
+        break;
+      case 'openDeductibility':
+        if (invoice) setModalState(prev => ({ 
+          ...prev, 
+          invoiceForDeductibility: invoice, 
+          isDeductibilityEditorOpen: true 
+        }));
+        break;
+      case 'closeDeductibility':
+        setModalState(prev => ({ ...prev, isDeductibilityEditorOpen: false }));
+        break;
+    }
+  }, []);
+
+  const handleFindPaymentComplement = useCallback((invoice: Invoice) => {
+    if (!invoiceHelpers.isPaidPPDInvoice(invoice)) return;
+    
+    const paymentComplements = invoices.filter(
+      pc => pc.tipoDeComprobante === 'P' && 
+            pc.docsRelacionadoComplementoPago?.some(
+              uuid => uuid.toUpperCase() === invoice.uuid.toUpperCase()
+            )
+    );
+    
+    if (paymentComplements.length === 0) return;
+    const paymentComplement = paymentComplements[0];
+    
+    const complementElement = document.getElementById(`payment-complement-${paymentComplement.uuid}`);
+    if (complementElement) {
+      complementElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedPaymentComplements([paymentComplement.uuid]);
+      
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+      }
+      
+      highlightTimerRef.current = setTimeout(() => {
+        setHighlightedPaymentComplements([]);
+      }, 3000);
+    }
+  }, [invoices, invoiceHelpers]);
+
+  // Add category update handler - fixed type error
+  const handleCategorySelect = useCallback(async (invoice: Invoice, categoryId: string | null) => {
+    if (invoice.locked) return;
+    
+    try {
+      // Find selected category to get name
+      const category = categoryId ? categories.find(c => c.id === categoryId) : null;
+      const categoryName = category ? category.name : '';
+      
+      // Store the category ID in a custom attribute if needed
+      const updateData: Partial<Invoice> & { categoriaId?: string | null } = {
+        categoria: categoryName,
+        categoriaId: categoryId || null // We'll add this even though it's not in the interface
+      };
+      
       await invoiceService.updateInvoice(clientId, invoice.uuid, updateData);
       
-      // Update local state
-      handleUpdateInvoice({...invoice, ...updateData});
-      
-      toast({
-        title: "Actualizado",
-        description: newDeductibleStatus ? "Factura marcada como deducible" : "Factura marcada como no deducible",
-        variant: "default"
-      });
-    } catch (error) {
-      console.error("Error updating deductible status:", error);
-      toast({
-        title: "Error", 
-        description: "No se pudo actualizar el estado de deducibilidad",
-        variant: "destructive"
-      });
-    }
-  }, [handleUpdateInvoice, calculateGravados, invoiceHelpers, dateUtils, clientId, toast]);
-
-  const handleGravadoDoubleClick = useCallback((invoice: Invoice) => {
-    if (invoice.locked || invoiceHelpers.isPaymentComplement(invoice)) return;
-    
-    setInvoiceForDeductibility(invoice);
-    setIsDeductibilityEditorOpen(true);
-  }, [invoiceHelpers]);
+      // Update local state - use a type assertion to add categoriaId
+      handleUpdateInvoice({
+        ...invoice, 
+        categoria: categoryName,
+        // Add categoriaId with type assertion
+      } as Invoice & { categoriaId?: string | null });
+    } catch (error) {}
+  }, [categories, clientId, handleUpdateInvoice]);
 
   // Auto-assign PUE invoices to their issue month
   useEffect(() => {
@@ -304,7 +338,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
       if (invoice.metodoPago === "PUE" && !invoice.mesDeduccion && !invoice.locked) {
         const month = dateUtils.getMonth(invoice.fecha);
         const baseInvoice = { ...invoice, mesDeduccion: month, esDeducible: true };
-        const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+        const { gravadoISR, gravadoIVA } = invoiceHelpers.calculateGravados(baseInvoice);
         
         updatesNeeded[invoice.uuid] = {
           ...baseInvoice,
@@ -317,46 +351,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     if (Object.keys(updatesNeeded).length > 0) {
       setUpdatedInvoices(prev => ({ ...prev, ...updatesNeeded }));
     }
-  }, [filteredInvoices, dateUtils, calculateGravados]);
+  }, [filteredInvoices, dateUtils, invoiceHelpers]);
 
-  const handleFindPaymentComplement = useCallback((invoice: Invoice) => {
-    // Only proceed if this is a PPD invoice with a payment complement
-    if (!invoiceHelpers.isPaidPPDInvoice(invoice)) return;
-    
-    // Find the payment complement invoices for this invoice
-    const paymentComplements = invoices.filter(
-      pc => pc.tipoDeComprobante === 'P' && 
-            pc.docsRelacionadoComplementoPago?.some(
-              uuid => uuid.toUpperCase() === invoice.uuid.toUpperCase()
-            )
-    );
-    
-    if (paymentComplements.length === 0) return;
-    
-    // Get the first payment complement
-    const paymentComplement = paymentComplements[0];
-    
-    // Scroll to the payment complement element
-    const complementElement = document.getElementById(`payment-complement-${paymentComplement.uuid}`);
-    if (complementElement) {
-      complementElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      
-      // Highlight the payment complement
-      setHighlightedPaymentComplements([paymentComplement.uuid]);
-      
-      // Clear previous timer if exists
-      if (highlightTimerRef.current) {
-        clearTimeout(highlightTimerRef.current);
-      }
-      
-      // Set timeout to remove highlight after 3 seconds
-      highlightTimerRef.current = setTimeout(() => {
-        setHighlightedPaymentComplements([]);
-      }, 3000);
-    }
-  }, [invoices, invoiceHelpers]);
-  
-  // Clean up the timer on component unmount
+  // Cleanup highlight timer
   useEffect(() => {
     return () => {
       if (highlightTimerRef.current) {
@@ -365,8 +362,8 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     };
   }, []);
 
-  // Render invoice row - extracted and memoized
-  const renderInvoiceRow = useCallback((invoice: Invoice) => {
+  // Render invoice row - extracted and memoized using React.memo pattern
+  const InvoiceRow = React.memo(({ invoice }: { invoice: Invoice }) => {
     const isComplement = invoiceHelpers.isPaymentComplement(invoice);
     const hasComplement = !isComplement && invoice.metodoPago === 'PPD' && invoiceHelpers.isPaidWithComplement(invoice);
     
@@ -406,7 +403,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
             <span>{format(new Date(invoice.fecha), 'dd/MM/yyyy')}</span>
             <button 
               className="text-blue-500 hover:text-blue-700 text-xs text-left"
-              onClick={() => handleInvoiceClick(invoice)}
+              onClick={() => handleModals('openPreview', invoice)}
             >
               {invoice.uuid.substring(0, 8)}... ({invoice.tipoDeComprobante})
             </button>
@@ -453,7 +450,54 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           }
         </td>
         <td className="px-2 py-1 align-middle">
-          {isComplement ? <span></span> : <span className="text-sm">{invoice.categoria || 'Sin categoría'}</span>}
+          {isComplement ? <span></span> : (
+            invoice.locked ? (
+              // Locked state - just show text without Popover
+              <div className="flex items-center gap-1 px-2 py-1 max-w-[200px] opacity-80">
+                <Tag className="h-3.5 w-3.5 text-gray-400" />
+                <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
+                  {invoice.categoria || 'Sin categoría'}
+                </span>
+              </div>
+            ) : (
+              // Unlocked state - show clickable Popover
+              <Popover>
+                <PopoverTrigger asChild>
+                  <div className="flex items-center gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 max-w-[200px] transition-colors">
+                    <Tag className="h-3.5 w-3.5 text-gray-500" />
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                      {invoice.categoria || 'Sin categoría'}
+                    </span>
+                  </div>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-1" align="start">
+                  <div className="max-h-[200px] overflow-y-auto">
+                    <div 
+                      className="text-sm px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
+                      onClick={() => handleCategorySelect(invoice, null)}
+                    >
+                      Sin categoría
+                    </div>
+                    {categories.map(category => (
+                      <div
+                        key={category.id || ''}
+                        className={`text-sm px-2 py-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer flex justify-between items-center ${
+                          // Compare with category.id directly instead of using categoriaId
+                          invoice.categoria === category.name ? 'bg-blue-50 dark:bg-blue-900/30' : ''
+                        }`}
+                        onClick={() => handleCategorySelect(invoice, category.id || null)}
+                      >
+                        <span>{category.name}</span>
+                        {invoice.categoria === category.name && (
+                          <Check className="h-4 w-4 text-blue-500" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )
+          )}
         </td>
 
         {/* Amount Cells */}
@@ -524,7 +568,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         {/* Gravado Values */}
         <td 
           className="px-2 py-1 align-middle text-right cursor-pointer"
-          onDoubleClick={() => !isComplement && handleGravadoDoubleClick(invoice)}
+          onDoubleClick={() => !isComplement && !invoice.locked && handleModals('openDeductibility', invoice)}
         >
           {isComplement ? <span></span> : (
             <span>
@@ -537,7 +581,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         </td>
         <td 
           className="pr-7 px-2 py-1 align-middle text-right cursor-pointer"
-          onDoubleClick={() => !isComplement && handleGravadoDoubleClick(invoice)}
+          onDoubleClick={() => !isComplement && !invoice.locked && handleModals('openDeductibility', invoice)}
         >
           {isComplement ? <span></span> : (
             <span>
@@ -550,17 +594,10 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         </td>
       </tr>
     );
-  }, [
-    dateUtils,
-    handleGravadoDoubleClick,
-    handleInvoiceClick,
-    handleLockToggle,
-    handleMonthSelect,
-    handleToggleGravable,
-    invoiceHelpers,
-    highlightedPaymentComplements,  // Add this dependency
-    handleFindPaymentComplement     // Add this dependency
-  ]);
+  });
+  
+  // Avoid re-renders for the memo component
+  InvoiceRow.displayName = 'InvoiceRow';
 
   return (
     <div className="space-y-2">
@@ -609,7 +646,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
                         <td colSpan={13} className="pl-7 px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
                       </tr>
                       
-                      {invoicesByMonth[month].map(renderInvoiceRow)}
+                      {invoicesByMonth[month].map(invoice => (
+                        <InvoiceRow key={invoice.uuid} invoice={invoice} />
+                      ))}
                       
                       {/* Monthly Totals */}
                       <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
@@ -635,16 +674,16 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
 
       {/* Modals */}
       <InvoicePreviewModal
-        invoice={selectedInvoice}
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        invoice={modalState.selectedInvoice}
+        isOpen={modalState.isModalOpen}
+        onClose={() => handleModals('closePreview')}
         onUpdate={handleUpdateInvoice}
       />
       
       <InvoiceDeductibilityEditor
-        invoice={invoiceForDeductibility}
-        isOpen={isDeductibilityEditorOpen}
-        onClose={() => setIsDeductibilityEditorOpen(false)}
+        invoice={modalState.invoiceForDeductibility}
+        isOpen={modalState.isDeductibilityEditorOpen}
+        onClose={() => handleModals('closeDeductibility')}
         onSave={handleUpdateInvoice}
       />
     </div>
