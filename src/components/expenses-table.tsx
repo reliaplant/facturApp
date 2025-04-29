@@ -198,7 +198,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     if (!invoice) return;
     
     const isDeducible = month !== "none";
-    const numericMonth = isDeducible ? parseInt(month) : null;
+    const numericMonth = isDeducible ? parseInt(month) : undefined;
     
     try {
       let updateData: Partial<Invoice> = {
@@ -584,7 +584,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
             : isS01 ? (
               <span className="text-sm text-gray-400 italic">Sin efectos fiscales</span>
             ) : (
-              <span className="text-sm truncate max-w-[48ch]">{invoice.concepto || invoice.descripcion || 'Sin concepto'}</span>
+              <span className="text-sm truncate max-w-[48ch]">{invoice.concepto || 'Sin concepto'}</span>
             )}
         </td>
         
@@ -635,12 +635,12 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
             <span></span>
           ) : (
             <div className="flex flex-col items-center">
-              <Select
-                value={invoice.mesDeduccion?.toString() || "none"}
-                onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
-                onClick={(e) => e.stopPropagation()}
-                disabled={invoice.locked}
-              >
+              <div onClick={(e) => e.stopPropagation()}>
+                <Select
+                  value={invoice.mesDeduccion?.toString() || "none"}
+                  onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
+                  disabled={invoice.locked}
+                >
                 <SelectTrigger className={`h-7 w-24 text-xs mx-auto ${needsComplement ? 'text-red-500' : ''}`}>
                   <SelectValue placeholder="-" />
                 </SelectTrigger>
@@ -660,7 +660,8 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
                     );
                   })}
                 </SelectContent>
-              </Select>
+                </Select>
+              </div>
             </div>
           )}
         </td>

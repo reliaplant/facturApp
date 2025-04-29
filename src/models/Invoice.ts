@@ -55,7 +55,11 @@ export interface Invoice {
   docsRelacionadoComplementoPago: string[]; // UUIDs de documentos relacionados en complemento de pago
   ejercicioFiscal: number; // Año fiscal (derivado de la fecha)
   noCertificado?: string; // Número de certificado
-
+  
+  // Add the missing anual property
+  anual?: boolean; // Indica si es una deducción anual
+  concepto?: string; // Concepto de la factura
+  categoria?: string; // Categoría de la factura
   // Add a new field for the "Gravado IVA" column
 }
 
