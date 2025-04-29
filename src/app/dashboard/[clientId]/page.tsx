@@ -394,7 +394,6 @@ export default function ClientDashboard() {
                 Contenido del checklist en construcción. Aquí se mostrarán las tareas pendientes y completadas.
               </p>
               {/* Pass the clientRfc prop */}
-              <SatTestComponent clientRfc={client.rfc} />
             </div>
           </TabsContent>
 
@@ -402,7 +401,11 @@ export default function ClientDashboard() {
           <TabsContent value="sat">
             <div className="bg-white dark:bg-gray-800 p-6 rounded-md shadow-sm">
               <h2 className="text-xl font-semibold mb-4">Prueba de Conexión SAT</h2>
-              <SatTestComponent clientRfc={client.rfc} />
+              
+              <SatTestComponent 
+                clientRfc={client.rfc} 
+                claveFielUrl={client.claveFielUrl} 
+              />
             </div>
           </TabsContent>
         </Tabs>
