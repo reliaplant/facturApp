@@ -8,9 +8,7 @@ import OPFUploader from './OPFUploader';
 import FielDocumentsSection from './sections/fiel';
 import { LoadingSkeleton } from './sections/LoadingSkeleton';
 import PersonalInfoSection from './sections/PersonalInfoSection';
-import FiscalInfoSection from './sections/FiscalInfoSection';
 import AddressSection from './sections/AddressSection';
-import StatusSection from './sections/StatusSection';
 import ActivitiesSection from './sections/ActivitiesSection';
 import ObligationsSection from './sections/ObligationsSection';
 import TasksSection from './sections/TasksSection';
@@ -37,7 +35,7 @@ export interface SectionProps {
   isEditing: boolean;
   saving: boolean;
   toggleEditMode: () => void;
-  handleInputChange: (field: string, value: any, nestedObj?: string, nestedField?: string) => void;
+  handleInputChange: (field: keyof Client, value: any, nestedObj?: keyof Client, nestedField?: string) => void;
   saveChanges: () => void;
 }
 
@@ -83,9 +81,9 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
         // Ensure required fields are present
         const validClient = ensureRequiredFields(clientData);
         setClient(validClient);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching client data:', err);
-        setError(`Error al cargar la información del cliente: ${err.message || 'Error desconocido'}`);
+        setError(`Error al cargar la información del cliente: ${err?.message || 'Error desconocido'}`);
       } finally {
         setLoading(false);
       }
@@ -109,6 +107,8 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
       curp: clientData.curp || '',
       nombres: clientData.nombres || '',
       primerApellido: clientData.primerApellido || '',
+      // Add name if it doesn't exist
+      name: clientData.name || `${clientData.nombres || ''} ${clientData.primerApellido || ''}`.trim(),
       fechaInicioOperaciones: clientData.fechaInicioOperaciones || new Date().toISOString(),
       estatusEnElPadron: clientData.estatusEnElPadron || 'ACTIVO',
       fechaUltimoCambioEstado: clientData.fechaUltimoCambioEstado || new Date().toISOString(),
@@ -176,9 +176,9 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
   };
 
   const handleInputChange = (
-    field: string, 
+    field: keyof Client, 
     value: string | number | boolean, 
-    nestedObj?: string, 
+    nestedObj?: keyof Client, 
     nestedField?: string
   ) => {
     if (!editClient) return;
@@ -187,14 +187,18 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
     
     if (nestedObj && nestedField) {
       if (!updatedClient[nestedObj]) {
-        updatedClient[nestedObj] = {};
+        // Type assertion to help TypeScript understand this is a valid operation
+        (updatedClient[nestedObj] as any) = {};
       }
-      updatedClient[nestedObj] = {
-        ...updatedClient[nestedObj],
+      
+      // Use type assertion to safely update the nested object
+      (updatedClient[nestedObj] as any) = {
+        ...(updatedClient[nestedObj] as any),
         [nestedField]: value
       };
     } else {
-      updatedClient[field] = value;
+      // For top-level properties
+      (updatedClient as any)[field] = value;
     }
     
     setEditClient(updatedClient);
@@ -300,7 +304,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
           {/* Personal Info Section */}
           <PersonalInfoSection 
             client={client}
-            editClient={editClient}
+            editClient={editClient!}
             isEditing={editMode.personal}
             saving={saving}
             toggleEditMode={() => toggleEditMode('personal')}
@@ -311,7 +315,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
           {/* Address Section */}
           <AddressSection 
             client={client}
-            editClient={editClient}
+            editClient={editClient!}
             isEditing={editMode.address}
             saving={saving}
             toggleEditMode={() => toggleEditMode('address')}
@@ -322,7 +326,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
           {/* Activities Section */}
           <ActivitiesSection 
             client={client}
-            editClient={editClient}
+            editClient={editClient!}
             isEditing={editMode.activities}
             saving={saving}
             toggleEditMode={() => toggleEditMode('activities')}
@@ -333,7 +337,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
           {/* Obligations Section */}
           <ObligationsSection 
             client={client}
-            editClient={editClient}
+            editClient={editClient!}
             isEditing={editMode.obligations}
             saving={saving}
             toggleEditMode={() => toggleEditMode('obligations')}
@@ -350,7 +354,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
           {client.plan && (
             <PlanSection 
               client={client}
-              editClient={editClient}
+              editClient={editClient!}
               isEditing={editMode.plan}
               saving={saving}
               toggleEditMode={() => toggleEditMode('plan')}

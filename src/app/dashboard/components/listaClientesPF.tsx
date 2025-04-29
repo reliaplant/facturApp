@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, ChevronRight, Settings, Search, Users } from "lucide-react";
+import { Plus, Search, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -26,7 +26,7 @@ interface ListaClientesPFProps {
   isCreating: boolean;
 }
 
-// Define client tiers with new subtle color scheme
+// Client tiers with color scheme
 const clientTiers = [
   { id: "onboarding", name: "Onboarding", color: "bg-yellow-400" },
   { id: "basico", name: "Básico", color: "bg-violet-300" },
@@ -47,12 +47,27 @@ export const ListaClientesPF = ({
   handleCreateClient,
   isCreating,
 }: ListaClientesPFProps) => {
-  const filteredClients = clients.filter(client =>
-    client.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    client.rfc.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredClients = clients.filter(client => {
+    // Handle clients with either name pattern
+    let clientName = '';
+    
+    // Use name field if available
+    if (client.name) {
+      clientName = client.name.toLowerCase();
+    } 
+    // Otherwise construct from nombres and apellidos
+    else if (client.nombres || client.primerApellido) {
+      clientName = `${client.nombres || ''} ${client.primerApellido || ''}`.toLowerCase().trim();
+    }
+    
+    const clientRfc = client.rfc ? client.rfc.toLowerCase() : '';
+    
+    return searchTerm === '' || 
+           clientName.includes(searchTerm.toLowerCase()) || 
+           clientRfc.includes(searchTerm.toLowerCase());
+  });
 
-  // Group clients by tier (using a default tier of "onboarding" if not specified)
+  // Group clients by tier
   const getClientsByTier = () => {
     const clientsByTier: Record<string, Client[]> = {};
     
@@ -78,7 +93,6 @@ export const ListaClientesPF = ({
 
   return (
     <Card className="border-0 shadow-sm">
-      {/* White header */}
       <CardHeader className="bg-gray-100 px-7 py-2 flex flex-row items-center justify-between space-y-0 border-b border-gray-200 ">
         <div className="flex items-center gap-4 w-full">
           <CardTitle className="text-base">Clientes</CardTitle>
@@ -95,11 +109,6 @@ export const ListaClientesPF = ({
           </div>
           
           <div className="flex gap-1.5 ml-auto">
-            <Button variant="outline" size="xs" className="h-7">
-              <Settings className="h-3.5 w-3.5 mr-1" />
-              Ajustes
-            </Button>
-
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <DialogTrigger asChild>
                 <Button size="xs" className="h-7">
@@ -111,7 +120,7 @@ export const ListaClientesPF = ({
                 <DialogHeader>
                   <DialogTitle>Crear Nuevo Cliente</DialogTitle>
                   <DialogDescription>
-                    Ingrese los datos básicos del cliente. Podrá completar más información después.
+                    Ingrese los datos básicos del cliente.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -176,7 +185,6 @@ export const ListaClientesPF = ({
           <div className="grid grid-cols-5 gap-0 bg-gray-100 dark:bg-gray-850 h-[calc(100vh-140px)] overflow-auto">
             {clientTiers.map(tier => (
               <div key={tier.id} className="flex flex-col border-r last:border-r-0 border-gray-300 dark:border-gray-700">
-                {/* Gray column headers */}
                 <div className="px-3 py-2 bg-gray-100 dark:bg-gray-850 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
                   <div className="flex items-center">
                     <div className={`w-2.5 h-2.5 ${tier.color} rounded-full mr-1.5`}></div>
@@ -186,14 +194,15 @@ export const ListaClientesPF = ({
                     {clientsByTier[tier.id].length}
                   </div>
                 </div>
-                {/* Gray content area with client cards */}
                 <div className="bg-gray-200 dark:bg-gray-850 flex-1 p-1.5 overflow-y-auto">
                   {clientsByTier[tier.id].length > 0 ? (
                     <div className="space-y-1.5">
                       {clientsByTier[tier.id].map((client) => (
                         <Link key={client.id} href={`/dashboard/${client.id}`} passHref>
                           <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-200 dark:border-gray-700">
-                            <div className="font-medium truncate text-xs">{client.name}</div>
+                            <div className="font-medium truncate text-xs">
+                              {client.name || `${client.nombres || ''} ${client.primerApellido || ''}`.trim()}
+                            </div>
                             <div className="text-[10px] text-gray-500 dark:text-gray-400">{client.rfc}</div>
                           </div>
                         </Link>
@@ -211,7 +220,6 @@ export const ListaClientesPF = ({
           </div>
         )}
       </CardContent>
-      {/* White footer */}
       <CardFooter className="py-1.5 px-7 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="text-xs text-gray-500">
           {filteredClients.length} de {clients.length} clientes

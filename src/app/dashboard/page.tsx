@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useToast } from "@/components/ui/use-toast";
 import { clientService } from "@/services/client-service";
 import { Client } from "@/models/Client";
 import { ListaClientesPF } from "./components/listaClientesPF";
@@ -19,9 +18,7 @@ export default function DashboardPage() {
   });
   const [isCreating, setIsCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("personaFisica");
-  // Add a mock logged-in user state
   const [loggedInUser] = useState({ name: "Ana Rodríguez", email: "ana@example.com" });
-  const { toast } = useToast();
 
   useEffect(() => {
     async function loadClients() {
@@ -29,24 +26,13 @@ export default function DashboardPage() {
       try {
         const firebaseClients = await clientService.getAllClients();
         
-        // Add temporary tier assignment for demonstration
-        // This should eventually come from the database
         const clientsWithTiers = firebaseClients.map((client, index) => {
-          // Assign tiers in a round-robin fashion for demonstration
           const tiers = ["onboarding", "basico", "emprendedores", "pro", "perdidos"];
           const tier = tiers[index % tiers.length];
           return { ...client, tier };
         });
         
         setClients(clientsWithTiers);
-
-        if (firebaseClients.length === 0) {
-          toast({
-            title: "No se encontraron clientes",
-            description: "No hay clientes en la base de datos. Se mostrarán datos de ejemplo.",
-            variant: "default",
-          });
-        }
       } catch (error) {
         console.error("Error loading clients:", error);
       } finally {
@@ -55,45 +41,25 @@ export default function DashboardPage() {
     }
 
     loadClients();
-  }, [toast]);
+  }, []);
 
   const handleCreateClient = async () => {
     if (!newClient.name || !newClient.rfc) {
-      toast({
-        title: "Campos requeridos",
-        description: "El nombre y RFC son obligatorios.",
-        variant: "destructive",
-      });
       return;
     }
 
     setIsCreating(true);
     try {
-      // Create the client data object with proper typing
-      const clientData: {
-        name: string;
-        rfc: string;
-        email?: string;
-        tier?: string;
-      } = {
+      // Simple client data with just name
+      const clientData = {
         name: newClient.name,
         rfc: newClient.rfc,
-        tier: "onboarding" // New clients start in onboarding
+        tier: "onboarding",
+        email: newClient.email && newClient.email.trim() !== '' ? newClient.email : undefined
       };
 
-      // Only add email if it's not empty
-      if (newClient.email && newClient.email.trim() !== '') {
-        clientData.email = newClient.email;
-      }
-
       const testClient = await clientService.createClient(clientData);
-
       setClients(prev => [...prev, testClient]);
-
-      toast({
-        title: "Cliente creado",
-        description: `${testClient.name} ha sido añadido correctamente.`,
-      });
 
       // Reset form and close dialog
       setNewClient({
@@ -104,11 +70,6 @@ export default function DashboardPage() {
       setIsDialogOpen(false);
     } catch (error) {
       console.error("Error creating client:", error);
-      toast({
-        title: "Error",
-        description: "No se pudo crear el cliente. Revise los datos e intente nuevamente.",
-        variant: "destructive",
-      });
     } finally {
       setIsCreating(false);
     }
@@ -116,7 +77,7 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Combined Header with Tabs */}
+      {/* Header */}
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b-2 border-gray-200">
         <div className="w-full px-7 pr-7 py-0">
           <div className="flex justify-between items-center">
@@ -125,7 +86,6 @@ export default function DashboardPage() {
                 Kontia
               </h1>
               
-              {/* Move tabs into the first bar */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
                 <TabsList size="default" className="overflow-x-auto bg-transparent">
                   <TabsTrigger size="default" value="personaFisica">Clientes PF</TabsTrigger>
@@ -134,7 +94,7 @@ export default function DashboardPage() {
               </Tabs>
             </div>
             
-            {/* User info with avatar */}
+            {/* User info */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 pl-3 border-gray-200 dark:border-gray-700">
                 <div className="text-xs font-medium text-gray-700 dark:text-gray-300 hidden sm:block">
@@ -149,7 +109,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Main Content */}
+      {/* Content */}
       <main className="w-full">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="personaFisica">

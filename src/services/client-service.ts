@@ -22,10 +22,7 @@ const storage = getStorage(app);
 export interface CreateClientData {
   rfc: string;
   curp?: string;
-  nombres: string;
-  primerApellido: string;
-  segundoApellido?: string;
-  nombreComercial?: string;
+  name: string;  // Simplified to just 'name'
   email?: string;
   telefono?: string;
 }
@@ -38,13 +35,15 @@ export const clientService = {
     try {
       const clientId = clientData.rfc;
       
-      // Create a base client object with required fields
+      // Create a client object with both name fields for compatibility
       const newClient: Client = {
         id: clientId,
         rfc: clientData.rfc,
         curp: clientData.curp || '',
-        nombres: clientData.nombres,
-        primerApellido: clientData.primerApellido,
+        // Set both the new name field and the required name fields
+        name: clientData.name,
+        nombres: clientData.name.split(' ')[0] || clientData.name, // First part as nombres
+        primerApellido: clientData.name.split(' ').slice(1).join(' ') || 'N/A', // Rest as primerApellido or default
         fechaInicioOperaciones: new Date().toISOString(),
         estatusEnElPadron: 'ACTIVO',
         fechaUltimoCambioEstado: new Date().toISOString(),
@@ -66,9 +65,7 @@ export const clientService = {
         updatedAt: new Date().toISOString()
       };
       
-      // Add optional fields if they exist
-      if (clientData.segundoApellido) newClient.segundoApellido = clientData.segundoApellido;
-      if (clientData.nombreComercial) newClient.nombreComercial = clientData.nombreComercial;
+      // Add optional fields
       if (clientData.email) newClient.email = clientData.email;
       if (clientData.telefono) newClient.telefono = clientData.telefono;
       
@@ -89,22 +86,24 @@ export const clientService = {
         return null;
       }
       
-      console.log(`Attempting to fetch client with ID: ${clientId}`);
       const clientRef = doc(db, 'clients', clientId);
       const clientDoc = await getDoc(clientRef);
       
       if (clientDoc.exists()) {
-        console.log(`Client document found: ${clientId}`);
         const data = clientDoc.data() as Client;
-        return {
+        
+        // Ensure the name field exists for backward compatibility
+        const clientData = {
           ...data,
-          id: clientId, // Ensure ID is always set
+          id: clientId,
+          // Add name field if it doesn't exist
+          name: data.name || `${data.nombres || ''} ${data.primerApellido || ''}`.trim(),
           actividadesEconomicas: data.actividadesEconomicas || [],
           obligaciones: data.obligaciones || [],
           listaPendientes: data.listaPendientes || []
         };
-      } else {
-        console.log(`No client document found with ID: ${clientId}`);
+        
+        return clientData;
       }
       
       return null;
@@ -143,12 +142,19 @@ export const clientService = {
   async getAllClients(): Promise<Client[]> {
     try {
       const clientsRef = collection(db, 'clients');
-      const q = query(clientsRef, orderBy('name'));
+      // Use rfc for ordering in case name isn't available on all documents
+      const q = query(clientsRef, orderBy('rfc'));
       const querySnapshot = await getDocs(q);
       
       const clients: Client[] = [];
       querySnapshot.forEach((doc) => {
-        clients.push(doc.data() as Client);
+        const data = doc.data() as Client;
+        // Ensure each client has a name field
+        clients.push({
+          ...data,
+          id: doc.id,
+          name: data.name || `${data.nombres || ''} ${data.primerApellido || ''}`.trim()
+        });
       });
       
       return clients;
@@ -190,7 +196,6 @@ export const clientService = {
         updateData.inactiveDate = new Date().toISOString();
         updateData.inactiveReason = reason || 'No reason provided';
       } else {
-        // If reactivating, clear inactive data
         updateData.inactiveDate = null;
         updateData.inactiveReason = null;
       }
@@ -260,7 +265,7 @@ export const clientService = {
     }
   },
 
-  // Add this method to your existing clientService
+  // Delete file from storage
   async deleteFileFromStorage(filePath: string): Promise<void> {
     try {
       const fileRef = ref(storage, filePath);
@@ -272,7 +277,7 @@ export const clientService = {
     }
   },
 
-  // Helper function to sanitize objects for Firestore (replace undefined with null)
+  // Helper function to sanitize objects for Firestore
   _sanitizeForFirestore(obj: any): any {
     if (obj === undefined) return null;
     if (obj === null) return null;
@@ -294,39 +299,5 @@ export const clientService = {
     }
     
     return sanitized;
-  },
-
-  // Get mock clients for development
-  getMockClients(): Client[] {
-    return [
-      {
-        id: 'MOCK123456789',
-        rfc: 'MOCK123456789',
-        curp: 'MOCKURP123456789XXX',
-        nombres: 'Cliente',
-        primerApellido: 'De',
-        segundoApellido: 'Prueba',
-        name: 'Cliente De Prueba', // Added for display
-        fechaInicioOperaciones: '2020-01-01T00:00:00.000Z',
-        estatusEnElPadron: 'ACTIVO',
-        fechaUltimoCambioEstado: '2020-01-01T00:00:00.000Z',
-        ultimaActualizacionDatos: '2023-01-01T00:00:00.000Z',
-        address: {
-          nombreColonia: 'Centro',
-          nombreLocalidad: 'Ciudad de México',
-          municipio: 'Cuauhtémoc',
-          nombreEntidadFederativa: 'Ciudad de México'
-        },
-        actividadesEconomicas: [],
-        obligaciones: [],
-        estatusPago: 'PENDIENTE',
-        estatusCliente: 'ACTIVO',
-        estatusDeclaracion: 'PENDIENTE',
-        estatusDeclaracionPagoCliente: 'PENDIENTE',
-        isActive: true,
-        createdAt: '2023-01-01T00:00:00.000Z',
-        updatedAt: '2023-01-01T00:00:00.000Z'
-      }
-    ];
   }
 };

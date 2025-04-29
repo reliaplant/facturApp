@@ -145,12 +145,31 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             // Fix: Get the latest client data and merge with our updates before notifying parent
             const updatedClientData = await clientService.getClientById(client.id);
             if (updatedClientData) {
-                // Merge our local updates with the freshly fetched client data
-                const mergedClient = {
-                    ...updatedClientData,
-                    [type + 'Url']: result.url,
-                    [type + 'Date']: result.date
+                // Create a typed object and then add properties with proper type assertions
+                const mergedClient: Client = {
+                    ...updatedClientData
                 };
+                
+                // Safely set the dynamic properties
+                if (type === 'cer') {
+                    mergedClient.cerUrl = result.url;
+                    mergedClient.cerDate = result.date;
+                } else if (type === 'acuseCer') {
+                    mergedClient.acuseCerUrl = result.url;
+                    mergedClient.acuseCerDate = result.date;
+                } else if (type === 'keyCer') {
+                    mergedClient.keyCerUrl = result.url;
+                    mergedClient.keyCerDate = result.date;
+                } else if (type === 'renCer') {
+                    mergedClient.renCerUrl = result.url;
+                    mergedClient.renCerDate = result.date;
+                } else if (type === 'cartaManifiesto') {
+                    mergedClient.cartaManifiestoUrl = result.url;
+                    mergedClient.cartaManifiestoDate = result.date;
+                } else if (type === 'claveFiel') {
+                    mergedClient.claveFielUrl = result.url;
+                    mergedClient.claveFielDate = result.date;
+                }
 
                 // Notify parent component with complete client data
                 onClientUpdated(mergedClient);
@@ -183,7 +202,7 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                 claveFielDate: currentDate
             }));
 
-            onClientUpdated();
+            onClientUpdated(localClient);
         } catch (error) {
             console.error("Error saving clave FIEL:", error);
         }
@@ -248,11 +267,30 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             // Update the client in the database
             await clientService.updateClient(client.id, updateData);
 
-            // Update local state with the changes
+            // Update local state with the changes - using type-safe approach
             const updatedLocalClient = { ...localClient };
-            Object.keys(updateData).forEach(key => {
-                updatedLocalClient[key] = null;
-            });
+            
+            // Use undefined instead of null to comply with Client type definition
+            if (type === 'cer') {
+                updatedLocalClient.cerUrl = undefined;
+                updatedLocalClient.cerDate = undefined;
+            } else if (type === 'acuseCer') {
+                updatedLocalClient.acuseCerUrl = undefined;
+                updatedLocalClient.acuseCerDate = undefined;
+            } else if (type === 'keyCer') {
+                updatedLocalClient.keyCerUrl = undefined;
+                updatedLocalClient.keyCerDate = undefined;
+            } else if (type === 'renCer') {
+                updatedLocalClient.renCerUrl = undefined;
+                updatedLocalClient.renCerDate = undefined;
+            } else if (type === 'claveFiel') {
+                updatedLocalClient.claveFielUrl = undefined;
+                updatedLocalClient.claveFielDate = undefined;
+            } else if (type === 'cartaManifiesto') {
+                updatedLocalClient.cartaManifiestoUrl = undefined;
+                updatedLocalClient.cartaManifiestoDate = undefined;
+            }
+            
             setLocalClient(updatedLocalClient);
 
             // Notify parent component with the updated client

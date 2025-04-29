@@ -6,8 +6,13 @@ export interface Client {
   primerApellido: string;
   segundoApellido?: string;
   nombreComercial?: string;
+  // Add name field for simpler access
+  name?: string;
   email?: string;
   telefono?: string;
+  
+  // For client categorization in dashboard
+  tier?: string;
   
   // Fiscal information
   fechaInicioOperaciones: string;
