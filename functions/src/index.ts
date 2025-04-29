@@ -1,78 +1,85 @@
-/**
- * Import function triggers from their respective submodules:
- *
- * import {onCall} from "firebase-functions/v2/https";
- * import {onDocumentWritten} from "firebase-functions/v2/firestore";
- *
- * See a full list of supported triggers at https://firebase.google.com/docs/functions
- */
+/* eslint-disable
+  object-curly-spacing,
+  comma-dangle,
+  max-len,
+  valid-jsdoc,
+  @typescript-eslint/no-explicit-any,
+  @typescript-eslint/no-unused-vars
+*/
 
-import {onRequest, onCall} from "firebase-functions/v2/https";
+import { onCall } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
-import {getFirestore} from "firebase-admin/firestore";
-import {initializeApp} from "firebase-admin/app";
+import { initializeApp } from "firebase-admin/app";
+import { getStorage } from "firebase-admin/storage";
 
-// Initialize Firebase Admin
 initializeApp();
-const db = getFirestore();
 
-// Start writing functions
-// https://firebase.google.com/docs/functions/typescript
+/**
+ * Función que verifica la existencia y acceso a los archivos FIEL
+ */
+export const autenticarSAT = onCall(
+  { timeoutSeconds: 60 },
+  async (request) => {
+    try {
+      const rfc = request.data.rfc;
+      if (!rfc || typeof rfc !== "string") {
+        throw new Error("RFC inválido");
+      }
+      logger.info(`Verificando archivos FIEL para RFC: ${rfc}`);
 
-export const helloWorld = onRequest((request, response) => {
-  logger.info("Hello logs!", {structuredData: true});
-  response.send("Hello from Firebase!");
-});
+      // Construir ruta directa a los archivos FIEL
+      const fielPath = `clients/${rfc}/fiel`;
+      logger.info(`Buscando archivos en ruta: ${fielPath}`);
 
-// Add the autenticarSAT function that's referenced in the sat-test-component
-export const autenticarSAT = onCall(async (request) => {
-  const clientRfc = request.data.rfc;
+      const bucket = getStorage().bucket();
 
-  logger.info(`Processing SAT authentication for RFC: ${clientRfc}`,
-    {structuredData: true});
+      // Intentar descargar los archivos
+      let cerFile;
+      let keyFile;
+      let passFile;
 
-  try {
-    // Query the client document from Firestore using the RFC
-    const clientsRef = db.collection("clients");
-    const query = clientsRef.where("rfc", "==", clientRfc);
-    const clientSnapshot = await query.get();
+      try {
+        [cerFile] = await bucket.file(`${fielPath}/certificado.cer`).download();
+        logger.info(`Certificado recuperado: ${cerFile.length} bytes`);
+      } catch (error) {
+        logger.error("Error al recuperar certificado:", error);
+        throw new Error("No se pudo recuperar el archivo de certificado");
+      }
 
-    if (clientSnapshot.empty) {
-      logger.error(`No client found with RFC: ${clientRfc}`);
+      try {
+        [keyFile] = await bucket.file(`${fielPath}/llave.key`).download();
+        logger.info(`Llave recuperada: ${keyFile.length} bytes`);
+      } catch (error) {
+        logger.error("Error al recuperar llave:", error);
+        throw new Error("No se pudo recuperar el archivo de llave");
+      }
+
+      try {
+        [passFile] = await bucket.file(`${fielPath}/clave.txt`).download();
+        const passwordText = passFile.toString().trim();
+        logger.info(`Clave recuperada: "${passwordText}"`);
+      } catch (error) {
+        logger.error("Error al recuperar clave:", error);
+        throw new Error("No se pudo recuperar el archivo de clave");
+      }
+
       return {
-        status: "error",
-        message: `No se encontró cliente con RFC: ${clientRfc}`,
+        success: true,
+        message: "Archivos FIEL recuperados correctamente",
+        details: {
+          certificadoSize: cerFile.length,
+          llaveSize: keyFile.length,
+          passwordSize: passFile.length,
+          claveRecuperada: true,
+          rutaUtilizada: fielPath
+        }
+      };
+    } catch (err: any) {
+      logger.error("Error en la verificación FIEL:", err);
+      return {
+        success: false,
+        error: err.message || "Error desconocido"
       };
     }
-
-    // Get the first matching client
-    const clientData = clientSnapshot.docs[0].data();
-    const claveFielUrl = clientData.claveFielUrl;
-
-    if (!claveFielUrl) {
-      logger.error(`No FIEL key found for client: ${clientRfc}`);
-      return {
-        status: "error",
-        message: "No se encontró clave FIEL para este cliente",
-      };
-    }
-
-    logger.info(`Using FIEL key URL from Firestore: ${claveFielUrl}`);
-
-    // This is a placeholder implementation
-    return {
-      status: "success",
-      message: `Autenticación simulada para: ${clientRfc}`,
-      timestamp: new Date().toISOString(),
-    };
-  } catch (error: unknown) {
-    // Type assertion or check
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error(`Error in autenticarSAT: ${errorMessage}`);
-    return {
-      status: "error",
-      message: "Error al procesar la autenticación",
-      error: errorMessage,
-    };
   }
-});
+);
