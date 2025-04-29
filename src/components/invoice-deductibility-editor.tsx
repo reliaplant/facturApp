@@ -139,7 +139,7 @@ export function InvoiceDeductibilityEditor({
                   {Array.from({ length: 12 }, (_, i) => {
                     const monthNum = i+1;
                     const needsWarning = invoice.metodoPago === 'PPD' && 
-                      !(invoice.pagadoConComplementos?.length > 0);
+                      !((invoice.pagadoConComplementos || []).length > 0);
                     
                     return (
                       <SelectItem key={monthNum} value={monthNum.toString()}>
@@ -147,6 +147,7 @@ export function InvoiceDeductibilityEditor({
                       </SelectItem>
                     );
                   })}
+                  <SelectItem value="13">ANUAL</SelectItem>
                 </SelectContent>
               </Select>
             </div>

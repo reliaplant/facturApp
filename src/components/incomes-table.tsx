@@ -185,7 +185,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     if (!invoice) return;
     
     const isActive = month !== "none";
-    const numericMonth = isActive ? parseInt(month) : null;
+    const numericMonth = isActive ? parseInt(month) : undefined; // Change from null to undefined
     
     try {
       // Calculate gravado values if needed
@@ -449,7 +449,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         <td className="px-2 py-1 align-middle">
           {isComplement 
             ? <span className="text-gray-400">Comp. de Pago</span>
-            : <span className="text-sm">{invoice.concepto || invoice.descripcion || 'Sin concepto'}</span>
+            : <span className="text-sm">{invoice.concepto || 'Sin concepto'}</span>
           }
         </td>
         <td className="px-2 py-1 align-middle">
@@ -479,7 +479,6 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
             <Select
               value={invoice.mesDeduccion?.toString() || "none"}
               onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
-              onClick={(e) => e.stopPropagation()}
               disabled={invoice.locked}
             >
               <SelectTrigger className={`h-7 w-20 text-xs mx-auto 

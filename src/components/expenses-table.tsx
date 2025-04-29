@@ -198,7 +198,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     if (!invoice) return;
     
     const isDeducible = month !== "none";
-    const numericMonth = isDeducible ? parseInt(month) : undefined;
+    const numericMonth = isDeducible ? parseInt(month) : undefined; // Change from null to undefined
     
     try {
       let updateData: Partial<Invoice> = {

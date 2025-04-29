@@ -212,10 +212,7 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         if (comprobante.EstadoComprobante && (
             comprobante.EstadoComprobante.toUpperCase() === 'CANCELADO' || 
             comprobante.EstadoComprobante.toUpperCase() === 'CANCELLED')) {
-          // If we know it's cancelled but don't have a date, use the timestamp from the digital stamp
-          if (!fechaCancelacion && timbreFiscal && timbreFiscal.FechaTimbrado) {
-            fechaCancelacion = timbreFiscal.FechaTimbrado;
-          }
+
         }
         
         // Check for cancellation date attribute directly on comprobante (newer CFDIs)

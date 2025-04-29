@@ -2,7 +2,7 @@
  * Modelo que representa una factura CFDI
  */
 export interface Invoice {
-
+  id: string; // ID único de la factura
   idCliente: string; // ID del cliente al que pertenece
   fechaCreacion: string; // Fecha de creación en el sistema
   fechaActualizacion: string; // Fecha de última actualización
