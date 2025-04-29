@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { clientService } from "@/services/client-service";
 import { Client } from "@/models/Client";
 import { ListaClientesPF } from "./components/listaClientesPF";
+import { Configuracion } from "./components/Configuracion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function DashboardPage() {
@@ -90,6 +91,7 @@ export default function DashboardPage() {
                 <TabsList size="default" className="overflow-x-auto bg-transparent">
                   <TabsTrigger size="default" value="personaFisica">Clientes PF</TabsTrigger>
                   <TabsTrigger size="default" value="personaMoral">Clientes PM</TabsTrigger>
+                  <TabsTrigger size="default" value="configuracion">Configuración</TabsTrigger>
                 </TabsList>
               </Tabs>
             </div>
@@ -138,6 +140,10 @@ export default function DashboardPage() {
                 La sección de personas morales está en desarrollo.
               </p>
             </div>
+          </TabsContent>
+          
+          <TabsContent value="configuracion">
+            <Configuracion />
           </TabsContent>
         </Tabs>
       </main>

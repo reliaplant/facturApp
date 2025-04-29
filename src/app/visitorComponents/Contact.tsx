@@ -48,7 +48,7 @@ export default function Contact() {
                 href="mailto:contacto@kontia.mx"
                 className="text-white text-lg hover:text-purple-300 transition-colors"
               >
-                info@kontia.mx
+                info`@kontia.mx
               </a>
             </div>
           </div>
