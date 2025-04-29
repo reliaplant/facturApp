@@ -21,6 +21,7 @@ import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
 import { invoiceService } from "@/services/invoice-service"; // Add this import
+import SatTestComponent from "@/components/sat-test-component";
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -274,6 +275,8 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
                 <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger>
+                <TabsTrigger size="sm" value="sat">SAT test</TabsTrigger>
+
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-1.5">
@@ -390,6 +393,16 @@ export default function ClientDashboard() {
               <p className="text-gray-600 dark:text-gray-300">
                 Contenido del checklist en construcción. Aquí se mostrarán las tareas pendientes y completadas.
               </p>
+              {/* Pass the clientRfc prop */}
+              <SatTestComponent clientRfc={client.rfc} />
+            </div>
+          </TabsContent>
+
+          {/* Add a missing tab content for the "sat" tab */}
+          <TabsContent value="sat">
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-md shadow-sm">
+              <h2 className="text-xl font-semibold mb-4">Prueba de Conexión SAT</h2>
+              <SatTestComponent clientRfc={client.rfc} />
             </div>
           </TabsContent>
         </Tabs>
