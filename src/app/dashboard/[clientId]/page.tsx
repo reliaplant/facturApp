@@ -24,7 +24,7 @@ import { invoiceService } from "@/services/invoice-service"; // Add this import
 
 export default function ClientDashboard() {
   const params = useParams();
-  const clientId = params.clientId as string;
+  const clientId = params?.clientId as string || '';
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -55,30 +55,16 @@ export default function ClientDashboard() {
           const clientInvoices = await invoiceService.getInvoices(clientId);
           setInvoices(clientInvoices);
         } else {
-          // If we can't find the client in Firestore, try using mock data for development
-          const mockClients = clientService.getMockClients();
-          const mockClient = mockClients.find(c => c.id === clientId);
-          if (mockClient) {
-            setClient(mockClient);
-          } else {
-            toast({
-              title: "Error",
-              description: "No se encontró el cliente solicitado.",
-              variant: "destructive",
-            });
-          }
+          toast({
+            title: "Error",
+            description: "No se encontró el cliente solicitado.",
+            variant: "destructive",
+          });
         }
       } catch (error) {
-        // Fallback to mock client data if there's an error
-        const mockClients = clientService.getMockClients();
-        const mockClient = mockClients.find(c => c.id === clientId);
-        if (mockClient) {
-          setClient(mockClient);
-        }
-
         toast({
           title: "Error de conexión",
-          description: "Se está usando información de ejemplo mientras se restablece la conexión.",
+          description: "No se pudo cargar la información del cliente.",
           variant: "destructive",
         });
       }
@@ -352,7 +338,7 @@ export default function ClientDashboard() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="fiscal">
             <FiscalSummary 
-              clientId={Array.isArray(params.clientId) ? params.clientId[0] : params.clientId}
+              clientId={clientId}
               year={selectedYear}
               invoices={invoices}
             />
@@ -394,8 +380,7 @@ export default function ClientDashboard() {
 
           <TabsContent value="info">
             <InfoClientePF 
-              initialClient={client} 
-              clientId={params.clientId} 
+              clientId={clientId} 
             />
           </TabsContent>
 
