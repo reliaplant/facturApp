@@ -1,5 +1,7 @@
 import { FaLinkedin, FaTwitter, FaInstagram } from 'react-icons/fa';
 import ContactButton from './ContactButton';
+import Image from 'next/image';
+import Link from 'next/link';
 
 export default function Footer() {
   const links = {
@@ -48,20 +50,26 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-6 gap-x-8 gap-y-16 border-t border-gray-200 pt-16">
           {/* Larger column for main services */}
           <div className="md:col-span-2">
-            <h3 className="text-2xl font-bold text-gray-900 mb-6">
-              Contis
-            </h3>
+            <Link href="/" className="block mb-6">
+              <Image 
+                src="/assets/logoKontia.png" 
+                alt="Kontia Logo" 
+                width={140} 
+                height={50} 
+                priority
+              />
+            </Link>
             <p className="text-gray-600 mb-6">
               Simplificamos tus finanzas para que te enfoques en lo que más importa: hacer crecer tu negocio.
             </p>
             <div className="flex space-x-5">
-              <a href="#" className="text-gray-400 hover:text-sky-500">
+              <a href="#" className="text-gray-400 hover:text-violet-500">
                 <FaLinkedin className="h-6 w-6" />
               </a>
-              <a href="#" className="text-gray-400 hover:text-sky-500">
+              <a href="#" className="text-gray-400 hover:text-violet-500">
                 <FaTwitter className="h-6 w-6" />
               </a>
-              <a href="#" className="text-gray-400 hover:text-sky-500">
+              <a href="#" className="text-gray-400 hover:text-violet-500">
                 <FaInstagram className="h-6 w-6" />
               </a>
             </div>
@@ -75,7 +83,7 @@ export default function Footer() {
             <ul className="space-y-4">
               {links.personaFisica.map((link) => (
                 <li key={link.title}>
-                  <a href={link.href} className="text-sm hover:text-sky-500 transition-colors">
+                  <a href={link.href} className="text-sm hover:text-violet-500 transition-colors">
                     {link.title}
                   </a>
                 </li>
@@ -90,7 +98,7 @@ export default function Footer() {
             <ul className="space-y-4">
               {links.personaMoral.map((link) => (
                 <li key={link.title}>
-                  <a href={link.href} className="text-sm hover:text-sky-500 transition-colors">
+                  <a href={link.href} className="text-sm hover:text-violet-500 transition-colors">
                     {link.title}
                   </a>
                 </li>
@@ -105,7 +113,7 @@ export default function Footer() {
             <ul className="space-y-4">
               {links.empresa.map((link) => (
                 <li key={link.title}>
-                  <a href={link.href} className="text-sm hover:text-sky-500 transition-colors">
+                  <a href={link.href} className="text-sm hover:text-violet-500 transition-colors">
                     {link.title}
                   </a>
                 </li>
@@ -120,7 +128,7 @@ export default function Footer() {
             <ul className="space-y-4">
               {links.legal.map((link) => (
                 <li key={link.title}>
-                  <a href={link.href} className="text-sm hover:text-sky-500 transition-colors">
+                  <a href={link.href} className="text-sm hover:text-violet-500 transition-colors">
                     {link.title}
                   </a>
                 </li>
@@ -133,16 +141,16 @@ export default function Footer() {
         <div className="mt-16 pt-8 border-t border-gray-200">
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
             <p className="text-sm text-gray-500">
-              © {new Date().getFullYear()} Contis. Todos los derechos reservados.
+              © {new Date().getFullYear()} Kontia. Todos los derechos reservados.
             </p>
             <div className="flex space-x-6">
-              <a href="#" className="text-gray-400 hover:text-sky-500 transition-colors">
+              <a href="#" className="text-gray-400 hover:text-violet-500 transition-colors">
                 Términos
               </a>
-              <a href="#" className="text-gray-400 hover:text-sky-500 transition-colors">
+              <a href="#" className="text-gray-400 hover:text-violet-500 transition-colors">
                 Privacidad
               </a>
-              <a href="#" className="text-gray-400 hover:text-sky-500 transition-colors">
+              <a href="#" className="text-gray-400 hover:text-violet-500 transition-colors">
                 Cookies
               </a>
             </div>

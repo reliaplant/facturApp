@@ -45,10 +45,10 @@ export default function Contact() {
 
               {/* Contact Email */}
               <a 
-                href="mailto:contacto@contis.mx"
+                href="mailto:contacto@kontia.mx"
                 className="text-white text-lg hover:text-purple-300 transition-colors"
               >
-                contacto@contis.mx
+                info@kontia.mx
               </a>
             </div>
           </div>
