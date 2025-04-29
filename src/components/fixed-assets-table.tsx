@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { FileText } from "lucide-react";
 import { FixedAssetService } from "@/services/fixed-asset-service";
 import { FixedAsset } from "@/models/FixedAsset";
-import { formatCurrency } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
 // Import components
@@ -114,6 +113,7 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                     let totalMonths = asset.usefulLifeMonths || 60; // Valor predeterminado 60 meses (5 años)
                     const elapsedMonths = calculateElapsedMonths(
                       asset.purchaseDate, 
+                      asset.depreciationStartDate,
                       asset.disposalDate
                     );
                     

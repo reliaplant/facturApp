@@ -34,6 +34,7 @@ export interface FixedAsset {
   // Metadatos
   createdAt: string;
   updatedAt: string;
+  depreciationStartDate?: string; // Fecha de inicio de la depreciación
 }
 
 /**
@@ -83,6 +84,7 @@ export interface CreateFixedAssetData {
   residualValue: number;
   invoiceNumber?: string;
   notes?: string;
+  depreciationStartDate?: string; // Fecha de inicio de la depreciación
 }
 
 /**

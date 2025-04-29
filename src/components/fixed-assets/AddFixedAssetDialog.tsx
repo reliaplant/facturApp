@@ -26,8 +26,7 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
     invoiceNumber: '',
     notes: '',
     // Asegurar que tenemos todos los campos necesarios que podrían requerirse en el backend
-    fiscalCategory: 'other', // Valor por defecto
-    deductionRate: 20 // Valor por defecto
+
   });
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -103,8 +102,6 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
         residualValue: 0,
         invoiceNumber: '',
         notes: '',
-        fiscalCategory: 'other',
-        deductionRate: 20
       });
       onAssetAdded();
     } catch (error) {

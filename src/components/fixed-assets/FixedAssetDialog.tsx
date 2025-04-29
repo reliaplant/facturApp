@@ -83,21 +83,30 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess }: FixedAssetDialo
     
     // Actualizar costo puede requerir actualizar valor deducible
     if (name === 'cost') {
-      const newCost = parseFloat(value);
+      const newCost = parseFloat(value) || 0;
       if (formData.deductibleValue && formData.deductibleValue > newCost) {
         setFormData(prev => ({ 
           ...prev, 
-          [name]: type === 'number' ? parseFloat(value) : value,
+          cost: newCost, // Always set as number to match the expected type
           deductibleValue: newCost 
         }));
         return;
       }
     }
     
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'number' ? parseFloat(value) : value
-    }));
+    // Handle numeric fields properly
+    if (name === 'cost' || name === 'deductibleValue' || name === 'usefulLifeMonths') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: parseFloat(value) || 0 // Ensure it's always a number, default to 0 if invalid
+      }));
+    } else {
+      // For non-numeric fields, use the string value directly
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const handleSelectChange = (name: string, value: string) => {
@@ -183,18 +192,18 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess }: FixedAssetDialo
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-    <DialogTrigger asChild>
-      {isEditMode ? (
-        <Button variant="outline" size="xs" onClick={() => setIsOpen(true)}>
-        <Pencil className="h-3 w-4 mr-1" />
-        Editar
-        </Button>
-      ) : (
-        <Button size="sm" onClick={() => setIsOpen(true)}>
-        <Plus className="h-3 w-4 mr-1" />
-        Nuevo Activo
-        </Button>
-      )}
+      <DialogTrigger asChild>
+        {isEditMode ? (
+          <Button variant="outline" size="sm" onClick={() => setIsOpen(true)}>
+            <Pencil className="h-3 w-4 mr-1" />
+            Editar
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => setIsOpen(true)}>
+            <Plus className="h-3 w-4 mr-1" />
+            Nuevo Activo
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>

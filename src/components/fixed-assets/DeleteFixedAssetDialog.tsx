@@ -1,80 +1,80 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogDescription, 
-  DialogFooter, 
-  DialogHeader, 
-  DialogTitle
-} from "@/components/ui/dialog";
-import { toast } from "@/components/ui/use-toast";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Trash2 } from "lucide-react";
 import { FixedAsset } from "@/models/FixedAsset";
 import { FixedAssetService } from "@/services/fixed-asset-service";
-import { formatCurrency } from "@/lib/utils";
-
-const fixedAssetService = new FixedAssetService();
+import { formatDate } from "./utils";
 
 interface DeleteFixedAssetDialogProps {
   asset: FixedAsset;
   onAssetDeleted: () => void;
 }
 
-export const DeleteFixedAssetDialog = ({ asset, onAssetDeleted }: DeleteFixedAssetDialogProps) => {
+const fixedAssetService = new FixedAssetService();
+
+export function DeleteFixedAssetDialog({ asset, onAssetDeleted }: DeleteFixedAssetDialogProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleDelete = async () => {
+    setIsDeleting(true);
+    setError(null);
+    
     try {
-      setIsLoading(true);
       await fixedAssetService.deleteFixedAsset(asset.clientId, asset.id);
-      toast({
-        title: "Activo eliminado",
-        description: `Se ha eliminado "${asset.name}" correctamente.`,
-      });
       setIsOpen(false);
       onAssetDeleted();
-    } catch (error) {
-      console.error("Error al eliminar activo:", error);
-      toast({
-        title: "Error",
-        description: "No se pudo eliminar el activo. Intente nuevamente.",
-        variant: "destructive",
-      });
+    } catch (err) {
+      console.error("Error deleting asset:", err);
+      setError("No se pudo eliminar el activo. Intente nuevamente.");
     } finally {
-      setIsLoading(false);
+      setIsDeleting(false);
     }
   };
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <Button variant="danger" size="xs" onClick={() => setIsOpen(true)}>
-        <Trash2 className="h-4 w-4" />
-      </Button>
-      
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50">
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </DialogTrigger>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
           <DialogTitle>Eliminar Activo Fijo</DialogTitle>
           <DialogDescription>
-            ¿Está seguro que desea eliminar el activo "{asset.name}"?
-            Esta acción no se puede deshacer.
+            Esta acción no se puede deshacer. El activo será eliminado permanentemente.
           </DialogDescription>
         </DialogHeader>
-        
-        <DialogFooter className="mt-4">
-          <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isLoading}>
+        <div className="py-4">
+          <p className="mb-2">¿Está seguro que desea eliminar el siguiente activo?</p>
+          <div className="bg-gray-50 p-3 rounded-md">
+            <p className="font-semibold">{asset.name}</p>
+            <p className="text-sm text-gray-500">
+              {asset.type.charAt(0).toUpperCase() + asset.type.slice(1)} • 
+              Adquirido el {formatDate(asset.purchaseDate)} • 
+              ${asset.cost.toLocaleString('es-MX')}
+            </p>
+          </div>
+          {error && (
+            <p className="mt-2 text-sm text-red-500">{error}</p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsOpen(false)} disabled={isDeleting}>
             Cancelar
           </Button>
-          <Button
-            variant="destructive"
-            onClick={handleDelete}
-            disabled={isLoading}
+          <Button 
+            variant="destructive" 
+            onClick={handleDelete} 
+            disabled={isDeleting}
           >
-            {isLoading ? "Eliminando..." : "Eliminar"}
+            {isDeleting ? "Eliminando..." : "Eliminar"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
-};
+}

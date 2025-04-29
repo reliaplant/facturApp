@@ -1,15 +1,32 @@
 import { MonthlyDepreciation } from "@/models/MonthlyDepreciation";
 import { FixedAsset } from "@/models/FixedAsset";
+import { format, parseISO } from "date-fns";
+import { es } from "date-fns/locale";
 
-// Formato para mostrar fechas
-export const formatDate = (dateStr: string): string => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('es-MX', { 
-    day: 'numeric', 
-    month: 'short', 
-    year: 'numeric' 
-  });
-};
+/**
+ * Formats a date string to a localized display format
+ */
+export function formatDate(dateString: string): string {
+  try {
+    if (!dateString) return "-";
+    const date = parseISO(dateString);
+    return format(date, "dd/MM/yyyy", { locale: es });
+  } catch (error) {
+    console.error("Error formatting date:", error);
+    return dateString || "-";
+  }
+}
+
+/**
+ * Format a number as currency
+ */
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("es-MX", {
+    style: "currency",
+    currency: "MXN",
+    minimumFractionDigits: 2,
+  }).format(amount);
+}
 
 // Catálogo de categorías fiscales con sus tasas de depreciación anual por defecto
 export const FISCAL_CATEGORIES = [
@@ -106,32 +123,6 @@ export const calculateAnnualDepreciation = (
     case 'straightLine':
       return (asset.cost - asset.residualValue) / usefulLifeYears;
     
-    case 'doubleDecline': {
-      // Calcular el valor al inicio del año
-      let currentValue = asset.cost;
-      const annualRate = 2 / usefulLifeYears;
-      
-      // Depreciar hasta el año anterior al solicitado
-      for (let i = 0; i < yearsSinceAcquisition; i++) {
-        currentValue = Math.max(
-          asset.residualValue, 
-          currentValue - (currentValue * annualRate)
-        );
-      }
-      
-      // Depreciación para el año solicitado
-      return Math.min(
-        currentValue - asset.residualValue,
-        currentValue * annualRate
-      );
-    }
-    
-    case 'sumOfYears': {
-      const sumOfYears = (usefulLifeYears * (usefulLifeYears + 1)) / 2;
-      const yearsRemaining = usefulLifeYears - yearsSinceAcquisition;
-      
-      return ((asset.cost - asset.residualValue) * yearsRemaining) / sumOfYears;
-    }
     
     default:
       return (asset.cost - asset.residualValue) / usefulLifeYears;
