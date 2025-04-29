@@ -49,6 +49,8 @@ export function ExportInvoicesExcel({
       "Nombre Emisor": invoice.nombreEmisor,
       "Lugar Expedición": invoice.lugarExpedicion || "",
       "Régimen Fiscal": invoice.regimenFiscal || "",
+      "Concepto": invoice.concepto || "",
+      "Categoría": invoice.categoria || "",
       "Serie": invoice.serie || "",
       "Folio": invoice.folio || "",
       "UUID": invoice.uuid,
@@ -68,10 +70,13 @@ export function ExportInvoicesExcel({
       "Cancelado": invoice.estaCancelado ? "Sí" : "No",
       "Cobrado": invoice.esDeducible ? "Sí" : "No",
       "Mes Cobro": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
-      "Gravado": invoice.Gravado || 0,
+      "Deducción Anual": invoice.anual ? "Sí" : "No",
+      "Gravado ISR": invoice.gravadoISR || 0,
+      "Gravado IVA": invoice.gravadoIVA || 0,
       "Tasa 0%": invoice.Tasa0 || 0,
       "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
-      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || ""
+      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
+      "Bloqueado": invoice.locked ? "Sí" : "No"
     }));
     
     const createReceivedData = (items: Invoice[]) => sortInvoices(items).map(invoice => ({
@@ -83,6 +88,8 @@ export function ExportInvoicesExcel({
       "UUID": invoice.uuid,
       "Tipo Comprobante": invoice.tipoDeComprobante || "",
       "Uso CFDI": invoice.usoCFDI,
+      "Concepto": invoice.concepto || "",
+      "Categoría": invoice.categoria || "",
       "Método de Pago": invoice.metodoPago,
       "Forma de Pago": invoice.formaPago,
       "Subtotal": invoice.subTotal,
@@ -92,12 +99,16 @@ export function ExportInvoicesExcel({
       "Total": invoice.total,
       "Es Deducible": invoice.esDeducible ? "Sí" : "No",
       "Mes Deducción": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
-      "Gravado": invoice.Gravado || 0,
+      "Deducción Anual": invoice.anual ? "Sí" : "No",
+      "Gravado ISR": invoice.gravadoISR || 0,
+      "Gravado IVA": invoice.gravadoIVA || 0,
       "Tasa 0%": invoice.Tasa0 || 0,
       "Exento": invoice.Exento || 0,
       "Cancelado": invoice.estaCancelado ? "Sí" : "No",
       "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
-      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || ""
+      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
+      "Bloqueado": invoice.locked ? "Sí" : "No",
+      "Notas de Deducibilidad": invoice.notasDeducibilidad || ""
     }));
 
     return { createEmittedData, createReceivedData };
