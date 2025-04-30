@@ -21,6 +21,7 @@
     "@radix-ui/react-slot": "^1.0.2",
     "@radix-ui/react-tabs": "^1.0.4",
     "@radix-ui/react-tooltip": "^1.2.0",
+    "@xmldom/xmldom": "^0.9.8",
     "axios": "^1.9.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
@@ -43,6 +44,7 @@
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^9.0.1",
     "xlsx": "^0.18.5",
+    "xml-c14n": "^0.0.6",
     "xml-crypto": "^6.1.2"
   },
   "devDependencies": {
