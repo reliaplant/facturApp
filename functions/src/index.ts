@@ -56,32 +56,62 @@ export const autenticarSAT = onCall(
       const xmlPath = `${fielPath}/ultimo_request_${Date.now()}.xml`;
       await bucket.file(xmlPath).save(soapXml).catch((err) => logger.warn(`Failed to save XML: ${err}`));
 
-      // Enviar al SAT
-      const response = await axios.post(
-        "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/Autenticacion/Autenticacion.svc",
-        soapXml,
-        {
-          headers: {
-            "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "" // Try empty SOAPAction or completely removing this header
-          },
-          timeout: 30000
+      // Enviar al SAT with better error handling
+      let response;
+      try {
+        response = await axios.post(
+          "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/Autenticacion/Autenticacion.svc",
+          soapXml,
+          {
+            headers: {
+              "Content-Type": "text/xml; charset=utf-8",
+              // Add the SOAPAction that appears in the example from the video
+              "SOAPAction": "http://DescargaMasivaTerceros.sat.gob.mx/IAutenticacion/Autentica"
+            },
+            timeout: 30000,
+            // Add this to get more detailed error responses
+            validateStatus: function(status) {
+              return status < 600; // Accept all responses to examine error details
+            }
+          }
+        );
+
+        logger.info(`SAT response status: ${response.status}`);
+
+        // Save response even if it's an error
+        const respPath = `${fielPath}/ultima_respuesta_${Date.now()}.xml`;
+        await bucket.file(respPath).save(response.data).catch((err) =>
+          logger.warn(`Failed to save response: ${err}`)
+        );
+
+        if (response.status >= 400) {
+          logger.error(`SAT error response: ${JSON.stringify(response.data)}`);
+          throw new Error(`SAT returned error ${response.status}: ${response.statusText}`);
         }
-      );
 
-      const respPath = `${fielPath}/ultima_respuesta_${Date.now()}.xml`;
-      await bucket.file(respPath).save(response.data).catch((err) => logger.warn(`Failed to save response: ${err}`));
-
-      const token = extraerTokenDeSoap(response.data);
-      return {
-        success: true,
-        token,
-        requestXmlPath: xmlPath,
-        responseXmlPath: respPath
-      };
+        const token = extraerTokenDeSoap(response.data);
+        return {
+          success: true,
+          token,
+          requestXmlPath: xmlPath,
+          responseXmlPath: respPath
+        };
+      } catch (axiosError: any) {
+        logger.error("Error en la comunicación con SAT:", axiosError);
+        if (axiosError.response) {
+          logger.error(`Status: ${axiosError.response.status}`);
+          logger.error(`Headers: ${JSON.stringify(axiosError.response.headers)}`);
+          logger.error(`Data: ${JSON.stringify(axiosError.response.data)}`);
+        }
+        throw axiosError;
+      }
     } catch (err: any) {
       logger.error("Error en autenticarSAT:", err);
-      return { success: false, error: err.message };
+      return {
+        success: false,
+        error: err.message,
+        stack: err.stack
+      };
     }
   }
 );
@@ -121,13 +151,14 @@ function generarSoapAutenticacion(
     unlinkSync(tmp);
   }
 
-  // 4. XML canónico del Timestamp
-  const timestampXml = `<u:Timestamp xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd" u:Id="${timestampId}"><u:Created>${created}</u:Created><u:Expires>${expires}</u:Expires></u:Timestamp>`;
+  // 4. XML canónico del Timestamp - Ensure exact format as in video
+  // Don't add namespace in the exact XML that gets digested - critical difference
+  const timestampXml = `<u:Timestamp u:Id="${timestampId}"><u:Created>${created}</u:Created><u:Expires>${expires}</u:Expires></u:Timestamp>`;
 
   // 5. Digest SHA1
   const digestValue = crypto.createHash("sha1").update(timestampXml).digest("base64");
 
-  // 6. SignedInfo canónico
+  // 6. SignedInfo canónico - Match indentation exactly as in video example
   const signedInfo = `<SignedInfo>
           <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
           <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
@@ -145,9 +176,19 @@ function generarSoapAutenticacion(
   signer.update(signedInfo);
   const signatureValue = signer.sign(privateKeyPem, "base64");
 
-  // 8. Armar Signature XML
+  // 8. Armar Signature XML - This needs to match exactly with the video example
   const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-        ${signedInfo}
+        <SignedInfo>
+          <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+          <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+          <Reference URI="#${timestampId}">
+            <Transforms>
+              <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+            </Transforms>
+            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
+            <DigestValue>${digestValue}</DigestValue>
+          </Reference>
+        </SignedInfo>
         <SignatureValue>
           ${signatureValue}
         </SignatureValue>
