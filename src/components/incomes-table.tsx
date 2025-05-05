@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check, Tag } from "lucide-react";
+import { Lock, Unlock, Check, Tag, RefreshCw } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -328,31 +328,6 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     } catch (error) {}
   }, [categories, clientId, handleUpdateInvoice]);
 
-  // Auto-assign PUE invoices to their issue month
-  useEffect(() => {
-    if (filteredInvoices.length === 0) return;
-    
-    const updatesNeeded: Record<string, Invoice> = {};
-    
-    filteredInvoices.forEach(invoice => {
-      if (invoice.metodoPago === "PUE" && !invoice.mesDeduccion && !invoice.locked) {
-        const month = dateUtils.getMonth(invoice.fecha);
-        const baseInvoice = { ...invoice, mesDeduccion: month, esDeducible: true };
-        const { gravadoISR, gravadoIVA } = invoiceHelpers.calculateGravados(baseInvoice);
-        
-        updatesNeeded[invoice.uuid] = {
-          ...baseInvoice,
-          gravadoISR,
-          gravadoIVA
-        };
-      }
-    });
-    
-    if (Object.keys(updatesNeeded).length > 0) {
-      setUpdatedInvoices(prev => ({ ...prev, ...updatesNeeded }));
-    }
-  }, [filteredInvoices, dateUtils, invoiceHelpers]);
-
   // Cleanup highlight timer
   useEffect(() => {
     return () => {
@@ -612,6 +587,16 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
             <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
             </Badge>
+            
+            {/* Add a simple button that doesn't do anything yet */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center whitespace-nowrap"
+            >
+              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+              Sincronizar
+            </Button>
             
             {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Ingresos_${year}.xlsx`} />}
           </div>

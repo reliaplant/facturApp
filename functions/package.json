@@ -15,6 +15,7 @@
   },
   "main": "lib/index.js",
   "dependencies": {
+    "@nodecfdi/sat-ws-descarga-masiva": "^1.0.1",
     "axios": "^1.9.0",
     "firebase-admin": "^12.6.0",
     "firebase-functions": "^6.0.1",

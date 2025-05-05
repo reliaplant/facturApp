@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@heroicons/react": "^2.2.0",
+    "@nodecfdi/sat-ws-descarga-masiva": "^1.0.1",
     "@radix-ui/react-alert-dialog": "^1.1.11",
     "@radix-ui/react-checkbox": "^1.1.5",
     "@radix-ui/react-dialog": "^1.0.5",

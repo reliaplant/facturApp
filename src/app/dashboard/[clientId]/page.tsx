@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useEffect, useRef } from "react"; // Add React import and useRef
+import React, { useState, useEffect, useRef, useCallback } from "react"; // Add React import and useRef
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -21,7 +21,8 @@ import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
 import { invoiceService } from "@/services/invoice-service"; // Add this import
-import SatTestComponent from "@/components/sat-test-component";
+import SatRequests from "@/components/sat-requests";
+import Proveedores from "@/components/proveedores"; // Add this import
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -33,7 +34,7 @@ export default function ClientDashboard() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [activeTab, setActiveTab] = useState<string>("fiscal");
   const { toast } = useToast();
-  
+
   // Fix the ref - use imported useRef hook directly
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -43,15 +44,28 @@ export default function ClientDashboard() {
   // Add a state for tracking saving process
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
+  // Add state to track when supplier changes are made
+  const [supplierChangeCounter, setSupplierChangeCounter] = useState(0);
+  const [lastInvoiceRefresh, setLastInvoiceRefresh] = useState(Date.now());
+
+  // Add a visible status message to make it clear when data is clean
+  const [uploadStatus, setUploadStatus] = useState("");
+
   // Load client data and invoices on component mount
   useEffect(() => {
+    // DON'T clear ALL localStorage - just prevent auto-evaluation during initial load
+    // This was too aggressive and prevented editing
+    console.log("Dashboard initialized - editing should be preserved");
+
+    console.log("🧹 Dashboard: Cleared ALL localStorage data to prevent auto-evaluation");
+
     const fetchClientData = async () => {
       try {
         const clientData = await clientService.getClientById(clientId);
-        
+
         if (clientData) {
           setClient(clientData);
-          
+
           // Also fetch the client's invoices - now using invoiceService
           const clientInvoices = await invoiceService.getInvoices(clientId);
           setInvoices(clientInvoices);
@@ -74,79 +88,112 @@ export default function ClientDashboard() {
     fetchClientData();
   }, [clientId, toast]);
 
-  // Updated file upload handler to better handle duplicate detection
+  // Add a callback function to handle supplier updates
+  const handleSupplierUpdated = useCallback(() => {
+    console.log("🔄 Supplier update detected, triggering data refresh");
+    setSupplierChangeCounter(prev => prev + 1);
+    // We'll use this counter to trigger a refresh of invoice data
+  }, []);
+
+  // Modify the useEffect to also respond to supplier changes
+  useEffect(() => {
+    const fetchClientData = async () => {
+      if (!clientId) return;
+      
+      setIsRefreshing(true);
+      try {
+        // Fetch client data as before
+        const clientData = await clientService.getClientById(clientId);
+        if (clientData) {
+          setClient(clientData);
+          
+          console.log("📊 Fetching invoice data after supplier change");
+          const clientInvoices = await invoiceService.getInvoices(clientId);
+          setInvoices(clientInvoices);
+          setLastInvoiceRefresh(Date.now());
+        }
+      } catch (error) {
+        console.error("Error fetching data:", error);
+        toast({
+          title: "Error de conexión",
+          description: "No se pudo actualizar la información después del cambio de proveedor.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsRefreshing(false);
+      }
+    };
+
+    fetchClientData();
+  }, [clientId, supplierChangeCounter, toast]); // Add supplierChangeCounter to dependencies
+
+  // Modified file upload handler with MUCH stronger prevention of auto-evaluation
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!client || !event.target.files || event.target.files.length === 0) return;
 
     const files = Array.from(event.target.files);
     setIsLoading(true);
-    
-    try {
-      // Step 1: Process CFDI files
-      console.log("Processing CFDI files...");
-      const processedInvoices = await processCFDIFiles(files, clientId, client.rfc);
-      console.log(`Successfully processed ${processedInvoices.length} invoices`);
+    setUploadStatus("Procesando archivos XML...");
 
+    try {
+      // Process CFDI files - additional logging to verify no auto-evaluation
+      console.log("🔍 Processing CFDI files - NO auto-evaluation will be applied");
+      const processedInvoices = await processCFDIFiles(files, clientId, client.rfc);
+      
+      // Log first invoice to confirm no deductibility values are set
       if (processedInvoices.length > 0) {
-        // Step 2: Save to Firestore - now using invoiceService
+        // Verify and log multiple invoices to confirm no deductibility values
+        processedInvoices.slice(0, Math.min(3, processedInvoices.length)).forEach((inv, i) => {
+          console.log(`Invoice ${i+1}/${processedInvoices.length} deductibility check:`, {
+            uuid: inv.uuid.substring(0, 8),
+            rfcEmisor: inv.rfcEmisor,
+            esDeducible: inv.esDeducible === undefined ? 'UNDEFINED ✓' : `SET! (${inv.esDeducible})`,
+            mesDeduccion: inv.mesDeduccion === undefined ? 'UNDEFINED ✓' : `SET! (${inv.mesDeduccion})`,
+          });
+          
+          // If any values are set, make them undefined to ensure they're not auto-evaluated
+          if (inv.esDeducible !== undefined || inv.mesDeduccion !== undefined) {
+            console.warn(`⚠️ Resetting deductibility for invoice ${inv.uuid.substring(0, 8)}`);
+            inv.esDeducible = undefined;
+            inv.mesDeduccion = undefined;
+            inv.gravadoISR = undefined;
+            inv.gravadoIVA = undefined;
+          }
+        });
+      }
+      
+      setUploadStatus("Guardando facturas sin evaluación automática...");
+      
+      if (processedInvoices.length > 0) {
+        // Save to Firestore - explicitly prevent auto-evaluation
         setIsSaving(true);
-        
+
         try {
-          console.log("Saving invoices to Firestore...");
+          console.log("💾 Saving invoices to Firestore WITHOUT deductibility values");
           const result = await invoiceService.saveInvoices(clientId, processedInvoices);
-          
-          // The saveClientInvoices now returns an object with counts
-          const { savedIds, existingIds, errors } = result;
-          
-          // Prepare detailed status message
+
+          // Prepare status message
           let statusDetails = [];
-          if (savedIds && savedIds.length > 0) {
-            statusDetails.push(`${savedIds.length} nueva(s)`);
+          if (result.savedIds && result.savedIds.length > 0) {
+            statusDetails.push(`${result.savedIds.length} nueva(s)`);
           }
-          if (existingIds && existingIds.length > 0) {
-            statusDetails.push(`${existingIds.length} ya existente(s)`);
+          if (result.existingIds && result.existingIds.length > 0) {
+            statusDetails.push(`${result.existingIds.length} ya existente(s)`);
           }
-          if (errors && errors > 0) {
-            statusDetails.push(`${errors} con error(es)`);
+          if (result.errors && result.errors > 0) {
+            statusDetails.push(`${result.errors} con error(es)`);
           }
+
+          setUploadStatus("Actualizando interfaz...");
           
-          // Step 3: Refresh invoices list - now using invoiceService
-          try {
-            console.log("Refreshing invoices list...");
-            const updatedInvoices = await invoiceService.getInvoices(clientId);
-            setInvoices(updatedInvoices);
-            console.log(`Loaded ${updatedInvoices.length} invoices from Firestore`);
-            
-            if (savedIds && savedIds.length > 0) {
-              toast({
-                title: "Facturas procesadas",
-                description: `Resultado: ${statusDetails.join(", ")}.`,
-                variant: savedIds.length > 0 ? "default" : "default"
-              });
-            } else if (existingIds && existingIds.length > 0 && (savedIds?.length === 0 || !savedIds)) {
-              toast({
-                title: "Aviso",
-                description: "No se guardaron nuevas facturas. Todas las facturas ya existían en el sistema.",
-                variant: "default",
-              });
-            } else {
-              toast({
-                title: "Aviso",
-                description: "No se pudieron guardar las facturas. Verifique los logs para más detalles.",
-                variant: "destructive",
-              });
-            }
-          } catch (refreshError) {
-            console.error("Error refreshing invoices:", refreshError);
-            // Even if refresh fails, show save results
-            toast({
-              title: "Facturas procesadas",
-              description: `Resultado: ${statusDetails.join(", ")}. No se pudieron cargar las actualizaciones.`,
-              variant: "default",
-            });
-          }
+          // Always reload the full page after adding new invoices
+          // This ensures we get completely fresh data without any stale values
+          console.log("🔄 Forcing full page refresh to ensure clean data");
+          window.location.reload();
+          
         } catch (saveError) {
           console.error("Error saving invoices:", saveError);
+          setUploadStatus("");
           toast({
             title: "Error al guardar",
             description: "Se procesaron los archivos pero no se pudieron guardar en la base de datos.",
@@ -154,6 +201,7 @@ export default function ClientDashboard() {
           });
         }
       } else {
+        setUploadStatus("");
         toast({
           title: "Aviso",
           description: "No se pudieron procesar facturas válidas de los archivos seleccionados.",
@@ -162,6 +210,7 @@ export default function ClientDashboard() {
       }
     } catch (error) {
       console.error("Error processing files:", error);
+      setUploadStatus("");
       toast({
         title: "Error al procesar archivos",
         description: "Ocurrió un error al leer o procesar los archivos XML.",
@@ -170,6 +219,7 @@ export default function ClientDashboard() {
     } finally {
       setIsLoading(false);
       setIsSaving(false);
+      setUploadStatus("");
       // Reset the file input
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
@@ -211,13 +261,13 @@ export default function ClientDashboard() {
   const getYearFilteredInvoices = () => {
     const yearStart = new Date(selectedYear, 0, 1);
     const yearEnd = new Date(selectedYear, 11, 31);
-    
+
     return invoices.filter(inv => {
       const invDate = new Date(inv.fecha);
       return invDate >= yearStart && invDate <= yearEnd;
     });
   };
-  
+
   const yearInvoices = getYearFilteredInvoices();
   const emittedInvoices = yearInvoices.filter(inv => !inv.recibida);
   const receivedInvoices = yearInvoices.filter(inv => inv.recibida);
@@ -239,16 +289,14 @@ export default function ClientDashboard() {
                   Volver
                 </Button>
               </Link>
-              <h1 className=" font-bold text-gray-900 dark:text-white">
+              <h1 className="font-bold text-gray-900 dark:text-white">
                 {client.name} <span className="font-normal">({client.rfc})</span>
               </h1>
             </div>
-            
+
             {/* Add user info with avatar */}
             <div className="flex items-center gap-3">
-
-              
-              <div className="flex items-center gap-2  pl-3 border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-2 pl-3 border-gray-200 dark:border-gray-700">
                 <div className="text-xs font-medium text-gray-700 dark:text-gray-300 hidden sm:block">
                   {loggedInUser.name}
                 </div>
@@ -261,6 +309,13 @@ export default function ClientDashboard() {
         </div>
       </header>
 
+      {/* Add status message when uploading */}
+      {uploadStatus && (
+        <div className="fixed top-0 left-0 right-0 bg-blue-500 text-white text-center py-2 z-50">
+          {uploadStatus}
+        </div>
+      )}
+
       {/* Segunda barra - Tabs y botones */}
       <div className="bg-white dark:bg-gray-800 shadow-sm border-t border-b-2 border-gray-200 dark:border-gray-700">
         <div className="w-full px-3 pr-7 py-0">
@@ -271,6 +326,7 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="fiscal">Cédula Fiscal</TabsTrigger>
                 <TabsTrigger size="sm" value="incomes">Facturas Emitidas</TabsTrigger>
                 <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
+                <TabsTrigger size="sm" value="proveedores">Proveedores</TabsTrigger>
                 <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
@@ -282,7 +338,7 @@ export default function ClientDashboard() {
             <div className="flex items-center gap-1.5">
 
 
-            <Button
+              <Button
                 variant="gray800"
                 size="sm"
                 onClick={handleRefreshData}
@@ -301,7 +357,7 @@ export default function ClientDashboard() {
                 <FileUp className="h-3.5 w-3.5 mr-1" />
                 {isLoading ? "Procesando..." : isSaving ? "Guardando..." : "Subir"}
               </Button>
-              
+
               {/* Hidden file input */}
               <input
                 type="file"
@@ -321,15 +377,15 @@ export default function ClientDashboard() {
                 buttonLabel="Exportar"
               />
 
-   {/* Explicitly add size="sm" to YearSelector */}
-   <YearSelector 
-                selectedYear={selectedYear} 
-                onYearChange={setSelectedYear} 
+              {/* Explicitly add size="sm" to YearSelector */}
+              <YearSelector
+                selectedYear={selectedYear}
+                onYearChange={setSelectedYear}
                 size="sm"
               />
 
-              
-           
+
+
             </div>
           </div>
         </div>
@@ -340,7 +396,7 @@ export default function ClientDashboard() {
         {/* Contenido de las tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsContent value="fiscal">
-            <FiscalSummary 
+            <FiscalSummary
               clientId={clientId}
               year={selectedYear}
               invoices={invoices}
@@ -358,6 +414,7 @@ export default function ClientDashboard() {
 
           <TabsContent value="expenses">
             <ExpensesTable
+              key={`expenses-${lastInvoiceRefresh}`} // Use lastInvoiceRefresh instead of Date.now() to prevent continuous remounting
               year={selectedYear}
               invoices={invoices.filter(inv => inv.recibida)}
               disableExport={true} // Add this prop to hide the export button
@@ -366,11 +423,11 @@ export default function ClientDashboard() {
           </TabsContent>
 
           <TabsContent value="declaraciones">
-            <DeclaracionMensualPF 
+            <DeclaracionMensualPF
               clientId={clientId}
               selectedYear={selectedYear}
-              declaraciones={[]} 
-              onEdit={() => {}}
+              declaraciones={[]}
+              onEdit={() => { }}
             />
           </TabsContent>
 
@@ -382,8 +439,8 @@ export default function ClientDashboard() {
           </TabsContent>
 
           <TabsContent value="info">
-            <InfoClientePF 
-              clientId={clientId} 
+            <InfoClientePF
+              clientId={clientId}
             />
           </TabsContent>
 
@@ -399,14 +456,19 @@ export default function ClientDashboard() {
 
           {/* Add a missing tab content for the "sat" tab */}
           <TabsContent value="sat">
-            <div className="bg-white dark:bg-gray-800 p-6 rounded-md shadow-sm">
-              <h2 className="text-xl font-semibold mb-4">Prueba de Conexión SAT</h2>
-              
-              <SatTestComponent 
-                clientRfc={client.rfc} 
-                claveFielUrl={client.claveFielUrl} 
-              />
+            <div className="">
+
+              <SatRequests clientRfc={client.rfc} />
+
             </div>
+          </TabsContent>
+
+          {/* Add the Proveedores tab content */}
+          <TabsContent value="proveedores">
+            <Proveedores 
+              clientId={clientId} 
+              onSupplierUpdated={handleSupplierUpdated} // Pass this callback to Proveedores
+            />
           </TabsContent>
         </Tabs>
       </main>

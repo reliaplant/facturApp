@@ -230,7 +230,6 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       
       // Determine if it's an annual deduction based on usoCFDI
       const usoCFDI = receptor.UsoCFDI || 'G03';
-      const isAnnual = usoCFDI.startsWith('D');
       
       // Crear objeto factura con solo los campos definidos en la interfaz
       const invoice: Invoice = {
@@ -247,7 +246,8 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         domicilioFiscalReceptor: ensureDefined(receptor.DomicilioFiscalReceptor, ''),
         regimenFiscalReceptor: ensureDefined(receptor.RegimenFiscalReceptor, ''),
         usoCFDI: ensureDefined(usoCFDI, 'G03'),
-        anual: isAnnual,
+        // Remove default deductibility values
+        anual: undefined, // Don't set this automatically
         rfcEmisor: ensureDefined(rfcEmisor, ''),
         nombreEmisor: ensureDefined(emisor.Nombre, ''),
         lugarExpedicion: ensureDefined(comprobante.LugarExpedicion, ''),
@@ -275,7 +275,10 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         Exento: ensureDefined(exento, 0),
         noCertificado: ensureDefined(comprobante.NoCertificado, ''),
         ejercicioFiscal: ensureDefined(ejercicioFiscal, new Date().getFullYear()),
-        esDeducible: false,
+        // IMPORTANT: Don't set deductibility status or month - keep these undefined 
+        // so they need explicit evaluation
+        esDeducible: undefined,
+        mesDeduccion: undefined,
         docsRelacionadoComplementoPago: ensureDefined(docsRelacionados, [])
       };
       

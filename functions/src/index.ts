@@ -7,253 +7,414 @@
   @typescript-eslint/no-unused-vars
 */
 
-import { onCall } from "firebase-functions/v2/https";
+import { onCall, HttpsError } from "firebase-functions/v2/https";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
-import axios from "axios";
-import { readFileSync, writeFileSync, unlinkSync } from "fs";
-import { v4 as uuidv4 } from "uuid";
-import * as forge from "node-forge";
-import * as crypto from "crypto";
+
+import {
+  Fiel,
+  HttpsWebClient,
+  FielRequestBuilder,
+  Service,
+  ServiceEndpoints,
+  QueryParameters,
+  DateTimePeriod,
+  DownloadType,
+  RequestType,
+  CfdiPackageReader,
+  OpenZipFileException,
+} from "@nodecfdi/sat-ws-descarga-masiva";
 
 initializeApp();
 
 /**
- * Función que autentica con el SAT usando el estándar WS-Security
+ * Función que valida la FIEL y presenta la consulta al SAT en un solo paso.
  */
-export const autenticarSAT = onCall(
-  { timeoutSeconds: 60 },
-  async (request) => {
-    try {
-      const rfc = request.data.rfc;
-      if (!rfc || typeof rfc !== "string") {
-        throw new Error("RFC inválido");
-      }
-      logger.info(`Iniciando autenticación SAT para RFC: ${rfc}`);
+export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
+  const rfc = req.data.rfc;
+  const downloadType = req.data.downloadType || "issued"; // Default to "issued" if not provided
 
-      const fielPath = `clients/${rfc}/fiel`;
-      const bucket = getStorage().bucket();
+  // Get and validate date range
+  const from = req.data.from || `${new Date().getFullYear()}-01-01 00:00:00`;
+  const to = req.data.to || `${new Date().getFullYear()}-12-31 23:59:59`;
 
-      // Descargar archivos FIEL
-      let cerBuf: Buffer;
-      let keyBuf: Buffer;
-      let passText: string;
-      try {
-        [cerBuf] = await bucket.file(`${fielPath}/certificado.cer`).download();
-        [keyBuf] = await bucket.file(`${fielPath}/llave.key`).download();
-        const [passBuf] = await bucket.file(`${fielPath}/clave.txt`).download();
-        passText = passBuf.toString("utf8").trim();
-      } catch (e: any) {
-        logger.error("Error al descargar archivos FIEL:", e);
-        throw new Error("No se pudieron descargar los archivos FIEL");
-      }
+  // Log the date range
+  logger.info(`📅 Rango de fechas para consulta: ${from} - ${to}`);
 
-      // Generar y guardar XML
-      // Generar XML SOAP con WS-Security
-      const soapXml = generarSoapAutenticacion(cerBuf, keyBuf, passText);
+  // Validate request parameters
+  if (downloadType !== "issued" && downloadType !== "received") {
+    throw new HttpsError("invalid-argument", "Tipo de descarga inválido. Usa 'issued' o 'received'.");
+  }
+  if (!rfc || typeof rfc !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un RFC válido");
+  }
 
-      const xmlPath = `${fielPath}/ultimo_request_${Date.now()}.xml`;
-      await bucket.file(xmlPath).save(soapXml).catch((err) => logger.warn(`Failed to save XML: ${err}`));
+  logger.info(`🔍 Descargando FIEL para RFC ${rfc} (tipo: ${downloadType})`);
+  const bucket = getStorage().bucket();
+  let cerBuf: Buffer;
+  let keyBuf: Buffer;
+  let pwdBuf: Buffer;
 
-      // Enviar al SAT with better error handling
-      let response;
-      try {
-        response = await axios.post(
-          "https://cfdidescargamasivasolicitud.clouda.sat.gob.mx/Autenticacion/Autenticacion.svc",
-          soapXml,
-          {
-            headers: {
-              "Content-Type": "text/xml; charset=utf-8",
-              // Add the SOAPAction that appears in the example from the video
-              "SOAPAction": "http://DescargaMasivaTerceros.sat.gob.mx/IAutenticacion/Autentica"
-            },
-            timeout: 30000,
-            // Add this to get more detailed error responses
-            validateStatus: function(status) {
-              return status < 600; // Accept all responses to examine error details
-            }
-          }
-        );
+  try {
+    [cerBuf] = await bucket.file(`clients/${rfc}/fiel/certificado.cer`).download();
+    [keyBuf] = await bucket.file(`clients/${rfc}/fiel/llave.key`).download();
+    [pwdBuf] = await bucket.file(`clients/${rfc}/fiel/clave.txt`).download();
+  } catch (e: any) {
+    logger.error("❌ Error al descargar los archivos FIEL:", e);
+    throw new HttpsError("not-found", "No se pudieron descargar los archivos FIEL");
+  }
 
-        logger.info(`SAT response status: ${response.status}`);
+  const pass = pwdBuf.toString("utf8").trim();
+  let fielObj: Fiel;
 
-        // Save response even if it's an error
-        const respPath = `${fielPath}/ultima_respuesta_${Date.now()}.xml`;
-        await bucket.file(respPath).save(response.data).catch((err) =>
-          logger.warn(`Failed to save response: ${err}`)
-        );
+  try {
+    const cerBin = cerBuf.toString("binary");
+    const keyBin = keyBuf.toString("binary");
+    fielObj = Fiel.create(cerBin, keyBin, pass);
+  } catch (e: any) {
+    logger.error("❌ Error al crear el objeto Fiel:", e);
+    throw new HttpsError(
+      "data-loss",
+      "Los archivos FIEL son inválidos o la contraseña no coincide"
+    );
+  }
 
-        if (response.status >= 400) {
-          logger.error(`SAT error response: ${JSON.stringify(response.data)}`);
-          throw new Error(`SAT returned error ${response.status}: ${response.statusText}`);
-        }
+  if (!fielObj.isValid()) {
+    logger.error("❌ La FIEL no está vigente o es de tipo CSD");
+    throw new HttpsError(
+      "failed-precondition",
+      "La FIEL no está vigente o es de tipo CSD"
+    );
+  }
 
-        const token = extraerTokenDeSoap(response.data);
-        return {
-          success: true,
-          token,
-          requestXmlPath: xmlPath,
-          responseXmlPath: respPath
-        };
-      } catch (axiosError: any) {
-        logger.error("Error en la comunicación con SAT:", axiosError);
-        if (axiosError.response) {
-          logger.error(`Status: ${axiosError.response.status}`);
-          logger.error(`Headers: ${JSON.stringify(axiosError.response.headers)}`);
-          logger.error(`Data: ${JSON.stringify(axiosError.response.data)}`);
-        }
-        throw axiosError;
-      }
-    } catch (err: any) {
-      logger.error("Error en autenticarSAT:", err);
+  logger.info("✅ FIEL válida. Presentando consulta al SAT...");
+
+  // ———————— FASE 2: presentar la consulta ————————
+  // 1️⃣ Web client y builder
+  const webClient = new HttpsWebClient();
+  const requestBuilder = new FielRequestBuilder(fielObj);
+
+  // 2️⃣ Servicio apuntando a CFDI
+  const service = new Service(
+    requestBuilder,
+    webClient,
+    undefined,
+    ServiceEndpoints.cfdi()
+  );
+
+  // 3️⃣ Parámetros de la consulta con fechas proporcionadas
+  const periodo = DateTimePeriod.createFromValues(from, to);
+
+  // Use the provided downloadType parameter
+  const downloadTypeObj = new DownloadType(downloadType); // "issued" or "received"
+  const requestType = new RequestType("xml"); // xml
+
+  const params = QueryParameters.create(periodo)
+    .withDownloadType(downloadTypeObj)
+    .withRequestType(requestType);
+
+  // 4️⃣ Lanza la consulta
+  let query;
+  try {
+    query = await service.query(params);
+  } catch (e: any) {
+    logger.error("❌ Error al llamar a service.query:", e);
+    throw new HttpsError("internal", "Fallo en la consulta al SAT");
+  }
+
+  if (!query.getStatus().isAccepted()) {
+    const msg = query.getStatus().getMessage();
+    logger.error(`❌ SAT rechazó la petición: ${msg}`);
+    throw new HttpsError("failed-precondition", `SAT rechazó: ${msg}`);
+  }
+
+  const requestId = query.getRequestId();
+  logger.info("✅ Consulta aceptada. RequestId =", requestId);
+
+  // ————— FASE 3: verificar la consulta —————
+  let verify;
+  try {
+    verify = await service.verify(requestId);
+  } catch (e: any) {
+    logger.error("❌ Error en service.verify:", e);
+    throw new HttpsError("internal", "Fallo al verificar la consulta");
+  }
+
+  // 3.1 Revisar estado general de la verificación
+  if (!verify.getStatus().isAccepted()) {
+    const msg = verify.getStatus().getMessage();
+    logger.error(`❌ Verificación SAT rechazada: ${msg}`);
+    throw new HttpsError("failed-precondition", `Verificación rechazada: ${msg}`);
+  }
+
+  // 3.2 Revisar el progreso de generación de paquetes
+  const statusReq = verify.getStatusRequest();
+  if (
+    statusReq.isTypeOf("Expired") ||
+    statusReq.isTypeOf("Failure") ||
+    statusReq.isTypeOf("Rejected")
+  ) {
+    logger.error(`❌ Solicitud ${requestId} no se puede completar (status: ${statusReq.constructor.name})`);
+    throw new HttpsError("failed-precondition", `La solicitud ${requestId} no se puede completar`);
+  }
+
+  if (
+    statusReq.isTypeOf("InProgress") ||
+    statusReq.isTypeOf("Accepted")
+  ) {
+    logger.info(`ℹ️ Solicitud ${requestId} aún en proceso`);
+    return {
+      success: true,
+      requestId,
+      status: "in_progress"
+    };
+  }
+
+  // 3.3 Cuando ya está lista
+  if (statusReq.isTypeOf("Finished")) {
+    const packageIds = verify.getPackageIds();
+    logger.info(`✅ Solicitud ${requestId} terminó. Paquetes: ${packageIds.join(", ")}`);
+    return {
+      success: true,
+      requestId,
+      status: "finished",
+      packageIds
+    };
+  }
+
+  // Estado inesperado
+  logger.error(`❌ Estado inesperado de la solicitud: ${statusReq.constructor.name}`);
+  throw new HttpsError("internal", `Estado inesperado: ${statusReq.constructor.name}`);
+});
+
+/**
+ * Función para verificar el estado de una solicitud
+ */
+export const verificarSolicitud = onCall({ timeoutSeconds: 60 }, async (req) => {
+  const rfc = req.data.rfc;
+  const requestId = req.data.requestId;
+
+  if (!rfc || typeof rfc !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un RFC válido");
+  }
+
+  if (!requestId || typeof requestId !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un ID de solicitud válido");
+  }
+
+  logger.info(`🔍 Verificando solicitud ${requestId} para RFC ${rfc}`);
+
+  // Obtener FIEL
+  const bucket = getStorage().bucket();
+  let cerBuf: Buffer;
+  let keyBuf: Buffer;
+  let pwdBuf: Buffer;
+
+  try {
+    [cerBuf] = await bucket.file(`clients/${rfc}/fiel/certificado.cer`).download();
+    [keyBuf] = await bucket.file(`clients/${rfc}/fiel/llave.key`).download();
+    [pwdBuf] = await bucket.file(`clients/${rfc}/fiel/clave.txt`).download();
+  } catch (e: any) {
+    logger.error("❌ Error al descargar los archivos FIEL:", e);
+    throw new HttpsError("not-found", "No se pudieron descargar los archivos FIEL");
+  }
+
+  const pass = pwdBuf.toString("utf8").trim();
+  let fielObj: Fiel;
+
+  try {
+    const cerBin = cerBuf.toString("binary");
+    const keyBin = keyBuf.toString("binary");
+    fielObj = Fiel.create(cerBin, keyBin, pass);
+  } catch (e: any) {
+    logger.error("❌ Error al crear el objeto Fiel:", e);
+    throw new HttpsError(
+      "data-loss",
+      "Los archivos FIEL son inválidos o la contraseña no coincide"
+    );
+  }
+
+  if (!fielObj.isValid()) {
+    logger.error("❌ La FIEL no está vigente o es de tipo CSD");
+    throw new HttpsError(
+      "failed-precondition",
+      "La FIEL no está vigente o es de tipo CSD"
+    );
+  }
+
+  // Crear el servicio
+  const webClient = new HttpsWebClient();
+  const requestBuilder = new FielRequestBuilder(fielObj);
+  const service = new Service(
+    requestBuilder,
+    webClient,
+    undefined,
+    ServiceEndpoints.cfdi()
+  );
+
+  // Verificar la solicitud
+  try {
+    const verify = await service.verify(requestId);
+
+    if (!verify.getStatus().isAccepted()) {
+      const msg = verify.getStatus().getMessage();
+      logger.error(`❌ Verificación SAT rechazada: ${msg}`);
+      throw new HttpsError("failed-precondition", `Verificación rechazada: ${msg}`);
+    }
+
+    const statusReq = verify.getStatusRequest();
+    const statusValue = statusReq.getValue();
+
+    if (statusReq.isTypeOf("Expired") ||
+        statusReq.isTypeOf("Failure") ||
+        statusReq.isTypeOf("Rejected")) {
+      logger.warn(`⚠️ Solicitud ${requestId} no se puede completar (status: ${statusValue})`);
       return {
-        success: false,
-        error: err.message,
-        stack: err.stack
+        success: true,
+        status: statusValue,
+        error: "La solicitud no se puede completar"
       };
     }
+
+    if (statusReq.isTypeOf("InProgress") || statusReq.isTypeOf("Accepted")) {
+      logger.info(`ℹ️ Solicitud ${requestId} aún en proceso`);
+      return {
+        success: true,
+        status: statusValue,
+        inProgress: true
+      };
+    }
+
+    if (statusReq.isTypeOf("Finished")) {
+      const packageIds = verify.getPackageIds();
+      logger.info(`✅ Solicitud ${requestId} terminó. Paquetes: ${packageIds.join(", ")}`);
+      return {
+        success: true,
+        status: statusValue,
+        packageIds,
+        inProgress: false
+      };
+    }
+
+    // Estado inesperado
+    logger.warn(`⚠️ Estado inesperado: ${statusValue}`);
+    return {
+      success: true,
+      status: statusValue,
+      message: "Estado no reconocido"
+    };
+  } catch (err: any) {
+    logger.error("❌ Error verificando solicitud:", err);
+    throw new HttpsError("internal", `Error al verificar: ${err.message}`);
   }
-);
+});
 
-/**
- * Genera el XML SOAP con WS-Security para autenticación SAT
- */
-function generarSoapAutenticacion(
-  certificateBuffer: Buffer,
-  privateKeyBuffer: Buffer,
-  password: string
-): string {
-  // 1. IDs y timestamps
-  const correlationId = uuidv4();
-  const securityTokenId = `uuid-${uuidv4()}-1`; // Key difference: Add "-1" suffix to security token ID to match pattern in examples
-  const timestampId = "_0";
-  const now = new Date();
-  const created = now.toISOString().replace(/\.\d+Z$/, ""); // Format timestamp exactly like the video example (no Z in time)
-  const expires = new Date(now.getTime() + 5 * 60 * 1000).toISOString().replace(/\.\d+Z$/, ""); // Format timestamp exactly like the video example (no Z in time)
+export const descargarPaquetes = onCall({ timeoutSeconds: 120 }, async (req) => {
+  const rfc = req.data.rfc;
+  const packageIds = req.data.packageIds as string[];
+  if (!rfc || typeof rfc !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un RFC válido");
+  }
+  if (!Array.isArray(packageIds) || packageIds.some((id) => typeof id !== "string")) {
+    throw new HttpsError("invalid-argument", "Debes enviar un array de packageIds");
+  }
 
-  // 2. Certificado en Base64 (sin espacios)
-  const certificateBase64 = certificateBuffer.toString("base64").trim();
+  logger.info(`📥 Descargando paquetes [${packageIds.join(", ")}] para RFC=${rfc}`);
 
-  // 3. Obtener PEM de la llave privada
-  let privateKeyPem: string;
+  // Preparar cliente SAT y FIEL
+  const bucket = getStorage().bucket();
+  let cerBuf: Buffer;
+  let keyBuf: Buffer;
+  let pwdBuf: Buffer;
   try {
-    const der = forge.util.createBuffer(privateKeyBuffer.toString("binary"));
-    const asn1 = forge.asn1.fromDer(der);
-    const info = forge.pki.decryptPrivateKeyInfo(asn1, password);
-    if (!info) throw new Error();
-    privateKeyPem = forge.pki.privateKeyToPem(forge.pki.privateKeyFromAsn1(info));
-  } catch {
-    // fallback simple
-    const tmp = `/tmp/key-${uuidv4()}.pem`;
-    writeFileSync(tmp, privateKeyBuffer);
-    privateKeyPem = readFileSync(tmp, "utf8");
-    unlinkSync(tmp);
+    [cerBuf] = await bucket.file(`clients/${rfc}/fiel/certificado.cer`).download();
+    [keyBuf] = await bucket.file(`clients/${rfc}/fiel/llave.key`).download();
+    [pwdBuf] = await bucket.file(`clients/${rfc}/fiel/clave.txt`).download();
+  } catch (e: any) {
+    logger.error("❌ Error al descargar FIEL:", e);
+    throw new HttpsError("not-found", "No se pudieron descargar los archivos FIEL");
+  }
+  const fielObj = Fiel.create(cerBuf.toString("binary"), keyBuf.toString("binary"), pwdBuf.toString("utf8").trim());
+  const service = new Service(
+    new FielRequestBuilder(fielObj),
+    new HttpsWebClient(),
+    undefined,
+    ServiceEndpoints.cfdi()
+  );
+
+  const savedPaths: string[] = [];
+  for (const pkgId of packageIds) {
+    try {
+      const dl = await service.download(pkgId);
+      if (!dl.getStatus().isAccepted()) {
+        logger.warn(`⚠️ Paquete ${pkgId} rechazado: ${dl.getStatus().getMessage()}`);
+        continue;
+      }
+      const content = Buffer.from(dl.getPackageContent(), "base64");
+      const path = `clients/${rfc}/packages/${pkgId}.zip`;
+      await bucket.file(path).save(content);
+      savedPaths.push(path);
+      logger.info(`✅ Paquete ${pkgId} guardado en ${path}`);
+    } catch (e: any) {
+      logger.error(`❌ Error descargando paquete ${pkgId}:`, e);
+    }
   }
 
-  // 4. XML canónico del Timestamp - Ensure exact format as in video
-  // Don't add namespace in the exact XML that gets digested - critical difference
-  const timestampXml = `<u:Timestamp u:Id="${timestampId}"><u:Created>${created}</u:Created><u:Expires>${expires}</u:Expires></u:Timestamp>`;
+  return { success: true, savedPaths };
+});
 
-  // 5. Digest SHA1
-  const digestValue = crypto.createHash("sha1").update(timestampXml).digest("base64");
+export const procesarPaquete = onCall({ timeoutSeconds: 120 }, async (req) => {
+  const rfc = req.data.rfc;
+  const packageId = req.data.packageId;
 
-  // 6. SignedInfo canónico - Match indentation exactly as in video example
-  const signedInfo = `<SignedInfo>
-          <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-          <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
-          <Reference URI="#${timestampId}">
-            <Transforms>
-              <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-            </Transforms>
-            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
-            <DigestValue>${digestValue}</DigestValue>
-          </Reference>
-        </SignedInfo>`;
+  if (!rfc || typeof rfc !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un RFC válido");
+  }
+  if (!packageId || typeof packageId !== "string") {
+    throw new HttpsError("invalid-argument", "Debes enviar un packageId válido");
+  }
 
-  // 7. Firmar SignedInfo
-  const signer = crypto.createSign("RSA-SHA1");
-  signer.update(signedInfo);
-  const signatureValue = signer.sign(privateKeyPem, "base64");
+  logger.info(`📂 Procesando paquete ${packageId} para RFC=${rfc}`);
 
-  // 8. Armar Signature XML - This needs to match exactly with the video example
-  const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
-        <SignedInfo>
-          <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-          <SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
-          <Reference URI="#${timestampId}">
-            <Transforms>
-              <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
-            </Transforms>
-            <DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/>
-            <DigestValue>${digestValue}</DigestValue>
-          </Reference>
-        </SignedInfo>
-        <SignatureValue>
-          ${signatureValue}
-        </SignatureValue>
-        <KeyInfo>
-          <o:SecurityTokenReference xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-secext-1.0.xsd">
-            <o:Reference ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3"
-                         URI="#${securityTokenId}"/>
-          </o:SecurityTokenReference>
-        </KeyInfo>
-      </Signature>`;
+  const bucket = getStorage().bucket();
+  const zipPath = `clients/${rfc}/packages/${packageId}.zip`;
+  let zipBuf: Buffer;
 
-  // 9. Retornar sobre completo
-  return createSoapEnvelope(
-    timestampId,
-    created,
-    expires,
-    securityTokenId,
-    certificateBase64,
-    signatureXml,
-    correlationId
-  );
-}
+  // 1️⃣ Descarga el ZIP
+  try {
+    [zipBuf] = await bucket.file(zipPath).download();
+  } catch (e: any) {
+    logger.error("❌ Error al descargar el ZIP:", e);
+    throw new HttpsError("not-found", "No se encontró el paquete ZIP");
+  }
 
-/**
- * Construye el sobre SOAP EXACTO al ejemplo del video
- */
-function createSoapEnvelope(
-  timestampId: string,
-  created: string,
-  expires: string,
-  securityTokenId: string,
-  certificateBase64: string,
-  signatureXml: string,
-  correlationId: string
-): string {
-  // Modified to match the format from the video example (more minimal)
-  return `<?xml version="1.0"?>
-<s:Envelope xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
-            xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
-  <s:Header>
-    <o:Security xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-                s:mustUnderstand="1">
-      <u:Timestamp u:Id="${timestampId}">
-        <u:Created>${created}</u:Created>
-        <u:Expires>${expires}</u:Expires>
-      </u:Timestamp>
-      <o:BinarySecurityToken u:Id="${securityTokenId}"
-                             EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary"
-                             ValueType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3">
-        ${certificateBase64}
-      </o:BinarySecurityToken>
-      ${signatureXml}
-    </o:Security>
-  </s:Header>
-  <s:Body>
-    <Autentica xmlns="http://DescargaMasivaTerceros.gob.mx"/>
-  </s:Body>
-</s:Envelope>`;
-}
+  // 2️⃣ Crear reader en memoria — ¡pasa Base64, no Buffer!
+  let reader: CfdiPackageReader;
+  try {
+    const zipBase64 = zipBuf.toString("base64");
+    reader = await CfdiPackageReader.createFromContents(zipBase64);
+  } catch (err: any) {
+    const msg = (err as OpenZipFileException).message || err.message;
+    logger.error("❌ No se pudo abrir el paquete como ZIP:", msg);
+    throw new HttpsError("internal", `ZIP inválido: ${msg}`);
+  }
 
-/**
- * Extrae el token de la respuesta SOAP
- */
-function extraerTokenDeSoap(soapResponse: string): string {
-  const m = soapResponse.match(/<AutenticaResult>(.*?)<\/AutenticaResult>/s);
-  if (!m) throw new Error("No se encontró AutenticaResult");
-  return m[1].trim();
-}
+  // 3️⃣ Extraer cada CFDI y guardarlo en Cloud Storage
+  const savedPaths: string[] = [];
+  for await (const cfdiMap of reader.cfdis()) {
+    for (const [name, content] of cfdiMap) {
+      const xmlPath = `clients/${rfc}/cfdis/${packageId}/${name}.xml`;
+      try {
+        // content ya es string UTF-8
+        await bucket.file(xmlPath).save(Buffer.from(content, "utf8"));
+        savedPaths.push(xmlPath);
+        logger.info(`✅ Guardado CFDI ${name} en ${xmlPath}`);
+      } catch (e: any) {
+        logger.error(`❌ Error guardando ${name}:`, e);
+      }
+    }
+  }
+
+  return { success: true, savedPaths };
+});
