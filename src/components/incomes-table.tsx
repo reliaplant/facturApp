@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check, Tag, RefreshCw } from "lucide-react";
+import { Lock, Unlock, Check, Tag, RefreshCw, Calculator } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -19,6 +19,7 @@ import {
   PopoverContent, 
   PopoverTrigger 
 } from "@/components/ui/popover";
+import { useToast } from "@/components/ui/use-toast";
 
 interface IncomesTableProps {
   year: number;
@@ -46,6 +47,8 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
   const [highlightedPaymentComplements, setHighlightedPaymentComplements] = useState<string[]>([]);
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const { toast } = useToast();
 
   // Load/Save from localStorage - simplified
   useEffect(() => {
@@ -337,6 +340,52 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     };
   }, []);
 
+  // Add income evaluation handler
+  const handleEvaluateIncome = async () => {
+    setIsEvaluating(true);
+    try {
+      console.log("Starting income evaluation...");
+      const result = await invoiceService.evaluateIncome(clientId);
+      console.log("Income evaluation completed:", result);
+      
+      toast({
+        title: "Evaluación completada",
+        description: `Se encontraron ${result.processed + result.skipped} facturas: 
+                     ${result.processed} evaluadas (desbloqueadas)`,
+        variant: "default"
+      });
+      
+      // If updates were made, refresh the local data
+      if (result.updated > 0) {
+        try {
+          console.log("Refreshing invoice data after updates...");
+          const refreshedInvoices = await invoiceService.getInvoices(clientId);
+          
+          const updatedMap: Record<string, Invoice> = {};
+          refreshedInvoices.forEach(invoice => {
+            if (!invoice.recibida) {
+              updatedMap[invoice.uuid] = invoice;
+            }
+          });
+          
+          setUpdatedInvoices(updatedMap);
+          console.log("Invoice data refreshed successfully");
+        } catch (refreshError) {
+          console.error("Error refreshing invoices:", refreshError);
+        }
+      }
+    } catch (error) {
+      console.error("Error evaluating income:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo completar la evaluación de ingresos.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsEvaluating(false);
+    }
+  };
+
   // Render invoice row - extracted and memoized using React.memo pattern
   const InvoiceRow = React.memo(({ invoice }: { invoice: Invoice }) => {
     const isComplement = invoiceHelpers.isPaymentComplement(invoice);
@@ -588,16 +637,19 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
               Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
             </Badge>
             
-            {/* Add a simple button that doesn't do anything yet */}
+            {/* Add income evaluation button */}
             <Button
               variant="outline"
               size="sm"
               className="flex items-center whitespace-nowrap"
+              onClick={handleEvaluateIncome}
+              disabled={isEvaluating}
             >
-              <RefreshCw className="h-3.5 w-3.5 mr-1" />
-              Sincronizar
+              <Calculator className={`h-3.5 w-3.5 mr-1 ${isEvaluating ? "animate-spin" : ""}`} />
+              {isEvaluating ? "Evaluando..." : "Evaluar Ingresos"}
             </Button>
             
+
             {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Ingresos_${year}.xlsx`} />}
           </div>
         </div>

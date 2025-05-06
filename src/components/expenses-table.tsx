@@ -200,13 +200,44 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     setIsModalOpen(true);
   }, []);
 
-  const handleUpdateInvoice = useCallback((updatedInvoice: Invoice) => {
-    setUpdatedInvoices(prev => {
-      const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
-      if (selectedInvoice?.uuid === updatedInvoice.uuid) setSelectedInvoice(updatedInvoice);
-      return newState;
+  const handleUpdateInvoice = useCallback(async (updatedInvoice: Invoice) => {
+    // Add logging to trace the problem
+    console.log("Saving invoice to Firebase:", updatedInvoice.uuid, {
+      esDeducible: updatedInvoice.esDeducible,
+      mesDeduccion: updatedInvoice.mesDeduccion,
+      gravadoISR: updatedInvoice.gravadoISR,
+      gravadoIVA: updatedInvoice.gravadoIVA,
+      gravadoModificado: updatedInvoice.gravadoModificado
     });
-  }, [selectedInvoice]);
+    
+    try {
+      // CRITICAL FIX: First save to Firebase to ensure values are stored
+      await invoiceService.updateInvoice(clientId, updatedInvoice.uuid, {
+        esDeducible: updatedInvoice.esDeducible,
+        mesDeduccion: updatedInvoice.mesDeduccion,
+        gravadoISR: updatedInvoice.gravadoISR,
+        gravadoIVA: updatedInvoice.gravadoIVA,
+        gravadoModificado: updatedInvoice.gravadoModificado,
+        notasDeducibilidad: updatedInvoice.notasDeducibilidad
+      });
+      
+      // Then update local state AFTER successful Firebase save
+      setUpdatedInvoices(prev => {
+        const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
+        if (selectedInvoice?.uuid === updatedInvoice.uuid) setSelectedInvoice(updatedInvoice);
+        return newState;
+      });
+      
+      console.log("Invoice updated successfully in Firebase:", updatedInvoice.uuid);
+    } catch (error) {
+      console.error("Error saving invoice to Firebase:", error);
+      toast({
+        title: "Error al guardar",
+        description: "No se pudieron guardar los cambios en la base de datos.",
+        variant: "destructive"
+      });
+    }
+  }, [clientId, selectedInvoice, toast]);
 
   const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();

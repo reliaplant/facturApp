@@ -67,18 +67,41 @@ export function InvoiceDeductibilityEditor({
   const handleSave = () => {
     if (!invoice) return;
     
+    // Calculate what the values should be automatically
+    const { gravadoISR: calculatedISR, gravadoIVA: calculatedIVA } = calculateGravados(invoice);
+    
+    // Check if values were modified from the calculated values
+    const isModified = 
+      Math.abs((formData.gravadoISR || 0) - (calculatedISR || 0)) > 0.01 ||
+      Math.abs((formData.gravadoIVA || 0) - (calculatedIVA || 0)) > 0.01;
+    
+    console.log("Saving invoice with modified gravado values:", {
+      calculatedISR,
+      calculatedIVA,
+      formISR: formData.gravadoISR,
+      formIVA: formData.gravadoIVA,
+      isModified
+    });
+    
     const updatedInvoice: Invoice = {
       ...invoice,
       esDeducible: formData.esDeducible,
       mesDeduccion: formData.mesDeduccion === "none" ? undefined : parseInt(formData.mesDeduccion),
       gravadoISR: formData.esDeducible ? formData.gravadoISR : 0,
       gravadoIVA: formData.esDeducible ? formData.gravadoIVA : 0,
-      gravadoModificado: formData.gravadoModificado,
+      // IMPORTANT: This flag must be set explicitly to true when values differ
+      gravadoModificado: isModified,
       notasDeducibilidad: formData.notasDeducibilidad
     };
     
+    console.log("Saving to Firebase with values:", {
+      gravadoISR: updatedInvoice.gravadoISR,
+      gravadoIVA: updatedInvoice.gravadoIVA,
+      gravadoModificado: updatedInvoice.gravadoModificado
+    });
+    
     onSave(updatedInvoice);
-    onClose(); // Add this line to close the dialog after saving
+    onClose();
   };
 
   // Handle reset to recalculate values based on invoice data

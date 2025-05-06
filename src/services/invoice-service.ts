@@ -288,18 +288,149 @@ export const invoiceService = {
   },
 
   /**
+   * Helper: Calculate gravado values based on invoice data
+   */
+  _calculateGravados(invoice: Invoice) {
+    if (invoice.anual || invoice.usoCFDI?.startsWith('D')) {
+      return { gravadoIVA: 0, gravadoISR: 0 };
+    }
+    
+    const ivaValue = invoice.impuestoTrasladado || 0;
+    const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
+    const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
+    
+    return { gravadoIVA, gravadoISR };
+  },
+  
+  /**
+   * Helper: Build payment complement map for checking PPD invoices
+   */
+  async _buildPaymentComplementMap(clientId: string): Promise<Map<string, Date[]>> {
+    const paymentMap = new Map<string, Date[]>();
+    const paymentComplements = await this.getInvoices(clientId);
+    
+    paymentComplements
+      .filter(inv => inv.tipoDeComprobante === 'P')
+      .forEach(pc => {
+        if (!pc.docsRelacionadoComplementoPago) return;
+        
+        pc.docsRelacionadoComplementoPago.forEach(uuid => {
+          const key = uuid.toUpperCase();
+          const paymentDate = new Date(pc.fecha);
+          
+          if (!paymentMap.has(key)) {
+            paymentMap.set(key, [paymentDate]);
+          } else {
+            paymentMap.get(key)?.push(paymentDate);
+          }
+        });
+      });
+    
+    return paymentMap;
+  },
+  
+  /**
+   * Helper: Check if invoice has payment complement
+   */
+  _hasPaymentComplement(invoice: Invoice, paymentMap: Map<string, Date[]>): boolean {
+    return (!!invoice.pagadoConComplementos && invoice.pagadoConComplementos.length > 0) ||
+      paymentMap.has(invoice.uuid.toUpperCase());
+  },
+  
+  /**
+   * Helper: Determine deductibility for a single invoice
+   */
+  _determineInvoiceDeductibility(
+    invoice: Invoice, 
+    supplierIsDeductible: boolean,
+    paymentMap: Map<string, Date[]>
+  ): {shouldBeDeductible: boolean, deductionMonth: number | undefined} {
+    // Check if invoice has payment complement
+    const hasPayment = this._hasPaymentComplement(invoice, paymentMap);
+    
+    // Donation invoices (D prefix)
+    if (invoice.usoCFDI?.startsWith('D')) {
+      if (invoice.metodoPago === 'PUE') {
+        return {
+          shouldBeDeductible: true, 
+          deductionMonth: new Date(invoice.fecha).getMonth() + 1
+        };
+      } else if (invoice.metodoPago === 'PPD' && hasPayment) {
+        const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
+        const month = paymentDates && paymentDates.length > 0
+          ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
+          : 13;
+        return { shouldBeDeductible: true, deductionMonth: month };
+      }
+      return { shouldBeDeductible: false, deductionMonth: undefined };
+    }
+    
+    // Regular invoices
+    if (invoice.metodoPago === 'PUE') {
+      return {
+        shouldBeDeductible: supplierIsDeductible,
+        deductionMonth: supplierIsDeductible ? new Date(invoice.fecha).getMonth() + 1 : undefined
+      };
+    } else if (invoice.metodoPago === 'PPD' && hasPayment) {
+      const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
+      const month = paymentDates && paymentDates.length > 0
+        ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
+        : new Date(invoice.fecha).getMonth() + 1;
+      return { 
+        shouldBeDeductible: supplierIsDeductible, 
+        deductionMonth: supplierIsDeductible ? month : undefined 
+      };
+    }
+    
+    // Default: Not deductible
+    return { shouldBeDeductible: false, deductionMonth: undefined };
+  },
+
+  /**
+   * Helper: Determine income recognition for a single invoice
+   * For issued invoices (income), follows these rules:
+   * - PUE: Recognized in the month of issue
+   * - PPD: Recognized when payment complement exists
+   */
+  _determineInvoiceIncome(
+    invoice: Invoice,
+    paymentMap: Map<string, Date[]>
+  ): {shouldBeRecognized: boolean, recognitionMonth: number | undefined} {
+    // Check if invoice has payment complement
+    const hasPayment = this._hasPaymentComplement(invoice, paymentMap);
+    
+    // PUE invoices are recognized immediately
+    if (invoice.metodoPago === 'PUE') {
+      const month = new Date(invoice.fecha).getMonth() + 1;
+      return { shouldBeRecognized: true, recognitionMonth: month };
+    } 
+    // PPD invoices are recognized when payment is received
+    else if (invoice.metodoPago === 'PPD' && hasPayment) {
+      const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
+      // Use the month of the earliest payment
+      const month = paymentDates && paymentDates.length > 0
+        ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
+        : new Date(invoice.fecha).getMonth() + 1;
+      return { shouldBeRecognized: true, recognitionMonth: month };
+    }
+    
+    // Default: Not recognized without payment complement
+    return { shouldBeRecognized: false, recognitionMonth: undefined };
+  },
+
+  /**
    * Update supplier's deductible status
    */
   async updateSupplierDeductible(clientId: string, rfc: string, isDeductible: boolean): Promise<void> {
     try {
-      // First, update the supplier's deductibility status
+      // 1. Update supplier status
       const supplierRef = doc(db, 'clients', clientId, 'suppliers', rfc);
       await updateDoc(supplierRef, { 
         isDeductible,
         lastUpdated: new Date().toISOString()
       });
       
-      // Get invoices for this supplier that might need evaluation
+      // 2. Get eligible invoices
       const invoicesRef = collection(db, 'clients', clientId, 'cfdi');
       const q = query(
         invoicesRef, 
@@ -308,153 +439,66 @@ export const invoiceService = {
       );
       
       const querySnapshot = await getDocs(q);
+      if (querySnapshot.empty) return;
       
-      // Don't continue if no invoices found
-      if (querySnapshot.empty) {
-        return;
-      }
-      
-      // Collect eligible invoices (excluding locked, payment complements, etc.)
       const eligibleInvoices: Invoice[] = [];
-      querySnapshot.forEach((doc) => {
+      querySnapshot.forEach(doc => {
         const invoice = doc.data() as Invoice;
-        if (
-          !invoice.locked && 
-          invoice.tipoDeComprobante !== 'P' && 
-          !invoice.usoCFDI?.startsWith('C') && 
-          !invoice.usoCFDI?.startsWith('S')
-        ) {
+        if (!invoice.locked && 
+            invoice.tipoDeComprobante !== 'P' && 
+            !invoice.usoCFDI?.startsWith('C') && 
+            !invoice.usoCFDI?.startsWith('S')) {
           eligibleInvoices.push(invoice);
         }
       });
       
-      if (eligibleInvoices.length === 0) {
-        return;
-      }
+      if (eligibleInvoices.length === 0) return;
       
-      console.log(`Found ${eligibleInvoices.length} eligible invoices for supplier ${rfc} to update deductibility`);
+      // 3. Get payment complement data
+      const paymentMap = await this._buildPaymentComplementMap(clientId);
       
-      // Prepare batch to update these invoices
+      // 4. Prepare batch update
       const batch = writeBatch(db);
       
-      // Get payment complement data for checking if PPD invoices have payment complements
-      const paymentComplements = await this.getInvoices(clientId);
-      const paymentMap = new Map<string, Date[]>();
-      
-      paymentComplements
-        .filter(inv => inv.tipoDeComprobante === 'P')
-        .forEach(pc => {
-          if (!pc.docsRelacionadoComplementoPago) return;
-          
-          pc.docsRelacionadoComplementoPago.forEach(uuid => {
-            const key = uuid.toUpperCase();
-            const paymentDate = new Date(pc.fecha);
-            
-            if (!paymentMap.has(key)) {
-              paymentMap.set(key, [paymentDate]);
-            } else {
-              paymentMap.get(key)?.push(paymentDate);
-            }
-          });
-        });
-      
-      const hasPaymentComplement = (invoice: Invoice) => 
-        (!!invoice.pagadoConComplementos && invoice.pagadoConComplementos.length > 0) ||
-        paymentMap.has(invoice.uuid.toUpperCase());
-        
-      // Helper function to calculate gravados
-      const calculateGravados = (invoice: Invoice) => {
-        if (invoice.anual || invoice.usoCFDI?.startsWith('D')) {
-          return { gravadoIVA: 0, gravadoISR: 0 };
-        }
-        
-        const ivaValue = invoice.impuestoTrasladado || 0;
-        const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
-        const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
-        
-        return { gravadoIVA, gravadoISR };
-      };
-      
-      // Process each invoice based on the new deductibility status
+      // 5. Process each invoice and update batch
       for (const invoice of eligibleInvoices) {
-        const invoiceRef = doc(db, 'clients', clientId, 'cfdi', invoice.uuid);
-        let updateData: Partial<Invoice> = {};
-        let shouldBeDeductible = false;
-        let deductionMonth: number | undefined;
+        // Determine new deductibility status
+        const { shouldBeDeductible, deductionMonth } = 
+          this._determineInvoiceDeductibility(invoice, isDeductible, paymentMap);
         
-        // Determine if invoice should be deductible based on supplier status and invoice properties
-        if (invoice.usoCFDI?.startsWith('D')) {
-          // Type D special rules (same as before)
-          if (invoice.metodoPago === 'PUE') {
-            shouldBeDeductible = true;
-            deductionMonth = new Date(invoice.fecha).getMonth() + 1;
-          } else if (invoice.metodoPago === 'PPD' && hasPaymentComplement(invoice)) {
-            shouldBeDeductible = true;
-            const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
-            deductionMonth = paymentDates && paymentDates.length > 0
-              ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-              : 13;
-          } else {
-            shouldBeDeductible = false;
-            deductionMonth = undefined;
-          }
-        } else {
-          // Regular invoices use supplier deductibility status
-          if (invoice.metodoPago === 'PUE') {
-            deductionMonth = new Date(invoice.fecha).getMonth() + 1;
-            shouldBeDeductible = isDeductible; // Use the new supplier deductibility status
-          } else if (invoice.metodoPago === 'PPD' && hasPaymentComplement(invoice)) {
-            const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
-            deductionMonth = paymentDates && paymentDates.length > 0
-              ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-              : new Date(invoice.fecha).getMonth() + 1;
-            shouldBeDeductible = isDeductible; // Use the new supplier deductibility status
-          } else {
-            shouldBeDeductible = false;
-            deductionMonth = undefined;
-          }
-        }
-        
-        // Only update if the deductibility status or month would change
+        // Only update if status would change
         if (invoice.esDeducible !== shouldBeDeductible || invoice.mesDeduccion !== deductionMonth) {
-          updateData = {
+          let updateData: Partial<Invoice> = {
             esDeducible: shouldBeDeductible,
             mesDeduccion: deductionMonth
           };
           
-          if (shouldBeDeductible) {
-            // IMPORTANT: Check gravadoModificado flag before updating gravado values
-            if (invoice.gravadoModificado !== true) {
-              const baseInvoice = { ...invoice, ...updateData };
-              const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-              updateData.gravadoISR = gravadoISR;
-              updateData.gravadoIVA = gravadoIVA;
-              updateData.gravadoModificado = false;
-            } else {
-              // Skip updating gravado values completely if manually modified
-              console.log(`Preserving manually modified gravado values for ${invoice.uuid}`);
-            }
-          } else {
-            // Only reset if not manually modified
-            if (invoice.gravadoModificado !== true) {
-              updateData.gravadoISR = 0;
-              updateData.gravadoIVA = 0;
-              updateData.gravadoModificado = false;
-            } else {
-              // Don't modify manually set values
-              console.log(`Preserving manually modified gravado values for ${invoice.uuid} despite deactivation`);
-            }
+          // Handle gravado values, respecting manually modified ones
+          if (shouldBeDeductible && invoice.gravadoModificado !== true) {
+            const { gravadoISR, gravadoIVA } = this._calculateGravados({...invoice, ...updateData});
+            updateData.gravadoISR = gravadoISR;
+            updateData.gravadoIVA = gravadoIVA;
+            updateData.gravadoModificado = false;
+          } else if (!shouldBeDeductible && invoice.gravadoModificado !== true) {
+            updateData.gravadoISR = 0;
+            updateData.gravadoIVA = 0;
+            updateData.gravadoModificado = false;
           }
           
-          batch.update(invoiceRef, this._sanitizeForFirestore({
-            ...updateData,
-            updatedAt: new Date().toISOString()
-          }));
+          // Add to batch
+          batch.update(
+            doc(db, 'clients', clientId, 'cfdi', invoice.uuid), 
+            this._sanitizeForFirestore({
+              ...updateData,
+              updatedAt: new Date().toISOString()
+            })
+          );
         }
       }
       
-      // Commit the batch if there are updates
+      // 6. Commit all changes
       await batch.commit();
+      
     } catch (error) {
       console.error("Error updating supplier deductible status:", error);
       throw error;
@@ -828,6 +872,131 @@ export const invoiceService = {
       return { processed, updated, unchanged, skipped: skippedCount };
     } catch (error) {
       console.error("ERROR IN DEDUCTIBILITY EVALUATION:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Evaluates income recognition for all unlocked issued invoices (income/revenue)
+   */
+  async evaluateIncome(clientId: string): Promise<{
+    processed: number;
+    updated: number;
+    unchanged: number;
+    skipped: number;
+  }> {
+    try {
+      // 1. Get all invoices that need evaluation
+      console.log("Step 1: Getting invoices to evaluate");
+      const invoices = await this.getInvoices(clientId);
+      
+      // Log how many invoices are locked so we can verify the filter is working
+      const lockedCount = invoices.filter(inv => !inv.recibida && inv.locked).length;
+      console.log(`Found ${lockedCount} locked income invoices that will be skipped`);
+      
+      // Only evaluate issued (not received) invoices
+      const eligibleInvoices = invoices.filter(invoice => 
+        !invoice.recibida && // This is the key difference - we want issued invoices
+        !invoice.locked && 
+        invoice.tipoDeComprobante !== 'P' &&
+        !invoice.usoCFDI?.startsWith('C')
+      );
+      
+      const skippedCount = invoices.filter(inv => !inv.recibida).length - eligibleInvoices.length;
+      console.log(`Found ${eligibleInvoices.length} eligible income invoices for evaluation`);
+      
+      if (eligibleInvoices.length === 0) {
+        return { processed: 0, updated: 0, unchanged: 0, skipped: skippedCount };
+      }
+      
+      // 2. Get payment complement information
+      console.log("Step 2: Mapping payment complements");
+      const paymentMap = await this._buildPaymentComplementMap(clientId);
+      
+      // 3. Batch update preparation
+      const batch = writeBatch(db);
+      let processed = 0;
+      let updated = 0;
+      let unchanged = 0;
+      
+      // 4. Process each invoice individually
+      for (const invoice of eligibleInvoices) {
+        processed++;
+        console.log(`\n------- Processing invoice ${invoice.uuid} -------`);
+        console.log(`To: ${invoice.rfcReceptor}, Method: ${invoice.metodoPago}`);
+        
+        // Skip manually modified invoices
+        if (invoice.gravadoModificado === true) {
+          console.log(`🖐️ Invoice has manually modified values - preserving them`);
+          unchanged++;
+          continue;
+        }
+        
+        // Get current status - for income, esDeducible means recognized income
+        const currentStatus = {
+          isRecognized: invoice.esDeducible === true,
+          month: invoice.mesDeduccion
+        };
+        console.log(`Current status: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}`);
+        
+        // Determine if this invoice should be recognized as income
+        const { shouldBeRecognized, recognitionMonth } = 
+          this._determineInvoiceIncome(invoice, paymentMap);
+        
+        // Check if update is needed
+        const needsUpdate = currentStatus.isRecognized !== shouldBeRecognized || 
+                           currentStatus.month !== recognitionMonth;
+        
+        console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"}`);
+        console.log(`- From: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}`);
+        console.log(`- To:   Recognized=${shouldBeRecognized}, Month=${recognitionMonth}`);
+        
+        if (needsUpdate) {
+          const invoiceRef = doc(db, 'clients', clientId, 'cfdi', invoice.uuid);
+          const updateData: Partial<Invoice> = {
+            esDeducible: shouldBeRecognized,
+            mesDeduccion: recognitionMonth
+          };
+          
+          // Set gravado values based on recognition - for income, this represents taxable income
+          if (shouldBeRecognized) {
+            // For issued invoices, gravadoISR is the net income (subtract retentions)
+            const baseAmount = invoice.subTotal || 0;
+            const isrWithheld = invoice.isrRetenido || 0;
+            const ivaWithheld = invoice.ivaRetenido || 0;
+            
+            // Calculate "gravado" values - these represent taxable amounts for income invoices
+            updateData.gravadoISR = Math.round((baseAmount - isrWithheld) * 100) / 100;
+            updateData.gravadoIVA = Math.round(baseAmount * 0.16 * 100) / 100; // Estimate IVA at 16%
+            updateData.gravadoModificado = false;
+          } else {
+            updateData.gravadoISR = 0;
+            updateData.gravadoIVA = 0;
+            updateData.gravadoModificado = false;
+          }
+          
+          batch.update(invoiceRef, this._sanitizeForFirestore({
+            ...updateData,
+            updatedAt: new Date().toISOString()
+          }));
+          updated++;
+        } else {
+          unchanged++;
+        }
+      }
+      
+      // 5. Commit all changes
+      console.log(`\nCommitting changes: ${updated} updates, ${unchanged} unchanged`);
+      if (updated > 0) {
+        await batch.commit();
+        console.log("Batch committed successfully");
+      } else {
+        console.log("No updates needed, skipping batch commit");
+      }
+      
+      return { processed, updated, unchanged, skipped: skippedCount };
+    } catch (error) {
+      console.error("ERROR IN INCOME EVALUATION:", error);
       throw error;
     }
   }
