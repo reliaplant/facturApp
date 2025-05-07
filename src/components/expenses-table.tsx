@@ -905,7 +905,7 @@ const handleEvaluateDeductibility = async () => {
             
             {/* Deductibility evaluation button */}
             <Button
-              variant="outline"
+              variant="black"
               size="sm"
               className="flex items-center whitespace-nowrap"
               onClick={handleEvaluateDeductibility}

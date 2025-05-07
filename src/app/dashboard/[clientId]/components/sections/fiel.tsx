@@ -11,9 +11,7 @@ import {
     Trash2,
     Upload,
     X,
-    CheckCircle2,
-    Copy,
-    ClipboardCheck  // Add ClipboardCheck icon
+    CheckCircle2
 } from 'lucide-react';
 
 
@@ -23,7 +21,7 @@ interface FielProps {
 }
 
 type DocumentType = 'cer' | 'acuseCer' | 'keyCer' | 'renCer' | 'claveFiel' | 'cartaManifiesto';
-type ActionType = 'download' | 'delete' | 'upload' | 'viewKey' | 'editKey';
+type ActionType = 'download' | 'delete' | 'upload';
 
 interface DocumentInfo {
     label: string;
@@ -31,6 +29,7 @@ interface DocumentInfo {
     url?: string;
     date?: string;
     isPrivate: boolean;
+    accept: string;
 }
 
 const formatDate = (dateString: string) => {
@@ -44,23 +43,62 @@ const MASTER_PASSWORD = "Nenito";
 export default function FielDocumentsSection({ client, onClientUpdated }: FielProps) {
     const [isUploading, setIsUploading] = useState<DocumentType | null>(null);
     const [localClient, setLocalClient] = useState<Client>(client);
-    const [claveFieldValue, setClaveFieldValue] = useState('');
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
     const [pendingAction, setPendingAction] = useState<{ type: ActionType, docType: DocumentType } | null>(null);
     const [password, setPassword] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [editKeyModalOpen, setEditKeyModalOpen] = useState(false);
-    const [copySuccess, setCopySuccess] = useState<string | null>(null);
 
     // Define document types
     const documents: DocumentInfo[] = [
-        { label: 'Certificado (.cer):', type: 'cer', url: localClient.cerUrl, date: localClient.cerDate, isPrivate: false },
-        { label: 'Clave privada (.key):', type: 'keyCer', url: localClient.keyCerUrl, date: localClient.keyCerDate, isPrivate: true },
-        { label: 'Contraseña de clave privada (texto):', type: 'claveFiel', url: localClient.claveFielUrl, date: localClient.claveFielDate, isPrivate: true },
-        { label: 'Renovación (.ren)', type: 'renCer', url: localClient.renCerUrl, date: localClient.renCerDate, isPrivate: false },
-        { label: 'Acuse Renovación (PDF)', type: 'acuseCer', url: localClient.acuseCerUrl, date: localClient.acuseCerDate, isPrivate: false },
-        { label: 'Carta Manifiesto (PDF)', type: 'cartaManifiesto', url: localClient.cartaManifiestoUrl, date: localClient.cartaManifiestoDate, isPrivate: false },
+        { 
+            label: 'Certificado (.cer):', 
+            type: 'cer', 
+            url: localClient.cerUrl, 
+            date: localClient.cerDate, 
+            isPrivate: false,
+            accept: '.cer'
+        },
+        { 
+            label: 'Clave privada (.key):', 
+            type: 'keyCer', 
+            url: localClient.keyCerUrl, 
+            date: localClient.keyCerDate, 
+            isPrivate: true,
+            accept: '.key'
+        },
+        { 
+            label: 'Contraseña de clave privada (.txt):', 
+            type: 'claveFiel', 
+            url: localClient.claveFielUrl, 
+            date: localClient.claveFielDate, 
+            isPrivate: true,
+            accept: '.txt'
+        },
+        { 
+            label: 'Renovación (.ren)', 
+            type: 'renCer', 
+            url: localClient.renCerUrl, 
+            date: localClient.renCerDate, 
+            isPrivate: false,
+            accept: '.ren'
+        },
+        { 
+            label: 'Acuse Renovación (PDF)', 
+            type: 'acuseCer', 
+            url: localClient.acuseCerUrl, 
+            date: localClient.acuseCerDate, 
+            isPrivate: false,
+            accept: '.pdf'
+        },
+        { 
+            label: 'Carta Manifiesto (PDF)', 
+            type: 'cartaManifiesto', 
+            url: localClient.cartaManifiestoUrl, 
+            date: localClient.cartaManifiestoDate, 
+            isPrivate: false,
+            accept: '.pdf'
+        },
     ];
 
     useEffect(() => {
@@ -103,11 +141,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             case 'delete':
                 handleDelete(docType);
                 break;
-            case 'viewKey':
-                break;
-            case 'editKey':
-                setEditKeyModalOpen(true);
-                break;
         }
 
         setPendingAction(null);
@@ -138,6 +171,9 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                 } else if (type === 'cartaManifiesto') {
                     updated.cartaManifiestoUrl = result.url;
                     updated.cartaManifiestoDate = result.date;
+                } else if (type === 'claveFiel') {
+                    updated.claveFielUrl = result.url;
+                    updated.claveFielDate = result.date;
                 }
                 return updated;
             });
@@ -185,29 +221,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
         }
     };
 
-    const handleEditClaveField = async () => {
-        try {
-            // We're saving the text directly as the URL for the clave field
-            const currentDate = new Date().toISOString();
-            const clientRef = {
-                claveFielUrl: claveFieldValue,
-                claveFielDate: currentDate
-            };
-
-            await clientService.updateClient(client.id, clientRef);
-
-            setLocalClient(prev => ({
-                ...prev,
-                claveFielUrl: claveFieldValue,
-                claveFielDate: currentDate
-            }));
-
-            onClientUpdated(localClient);
-        } catch (error) {
-            console.error("Error saving clave FIEL:", error);
-        }
-    };
-
     const handleDownload = (type: DocumentType) => {
         const doc = documents.find(d => d.type === type);
         if (doc && doc.url) {
@@ -247,22 +260,16 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                     break;
             }
             
-            // For the clave text field, we only need to update the database
-            // For actual files, we need to delete from storage first
-            if (type !== 'claveFiel') {
-                // Only try to delete a file if it's not the claveFiel (which is just text)
-                const doc = documents.find(d => d.type === type);
-                if (!doc || !doc.url) {
-                    console.warn(`No URL found for ${type} document - nothing to delete`);
-                    return;
-                }
-                
-                // Delete the file from storage first
-                await clientService.deleteFileFromStorage(doc.url);
-                console.log(`Deleted file from storage: ${doc.url}`);
-            } else {
-                console.log(`Removing claveFiel text from client document (no storage deletion needed)`);
+            // Get the URL to delete from storage
+            const doc = documents.find(d => d.type === type);
+            if (!doc || !doc.url) {
+                console.warn(`No URL found for ${type} document - nothing to delete`);
+                return;
             }
+            
+            // Delete the file from storage first
+            await clientService.deleteFileFromStorage(doc.url);
+            console.log(`Deleted file from storage: ${doc.url}`);
 
             // Update the client in the database
             await clientService.updateClient(client.id, updateData);
@@ -302,17 +309,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
         }
     };
 
-    // Add clipboard copy function
-    const handleCopyToClipboard = async (text: string) => {
-        try {
-            await navigator.clipboard.writeText(text);
-            setCopySuccess('claveFiel');
-            setTimeout(() => setCopySuccess(null), 2000); // Reset after 2 seconds
-        } catch (err) {
-            console.error('Failed to copy text: ', err);
-        }
-    };
-
     return (
         <>
             {/* Main Card */}
@@ -349,9 +345,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
 
                                     return (
                                         <tr key={doc.type} className="border-b hover:bg-gray-50">
-                                            {/* Status Cell */}
-
-
                                             {/* Document Name Cell */}
                                             <td className="py-1 px-3 font-medium">
                                                 <div className='flex flex-row gap-4 items-center'>
@@ -391,28 +384,14 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                                         <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
                                                     ) : (
                                                         <>
-                                                            {doc.type === 'claveFiel' ? (
-                                                                // Edit button for claveFiel
-                                                                <button
-                                                                    className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                                                                    title="Editar clave"
-                                                                    onClick={() => {
-                                                                        setClaveFieldValue(localClient.claveFielUrl || '');
-                                                                        initiateAction('editKey', doc.type);
-                                                                    }}
-                                                                >
-                                                                    <Edit className="h-4 w-4" />
-                                                                </button>
-                                                            ) : (
-                                                                // Upload button for files
-                                                                <label
-                                                                    htmlFor={`file-${doc.type}`}
-                                                                    className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer"
-                                                                    title="Subir archivo"
-                                                                >
-                                                                    <Upload className="h-4 w-4" />
-                                                                </label>
-                                                            )}
+                                                            {/* Upload button for all document types */}
+                                                            <label
+                                                                htmlFor={`file-${doc.type}`}
+                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer"
+                                                                title="Subir archivo"
+                                                            >
+                                                                <Upload className="h-4 w-4" />
+                                                            </label>
 
                                                             <input
                                                                 id={`file-${doc.type}`}
@@ -424,34 +403,19 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                                                     }
                                                                 }}
                                                                 disabled={isUploading !== null}
-                                                                accept=".pdf,.jpg,.jpeg,.png,.cer,.key"
+                                                                accept={doc.accept}
                                                             />
 
                                                             {hasFile && (
                                                                 <>
-                                                                    {doc.type === 'claveFiel' ? (
-                                                                        // Copy button for claveFiel instead of download
-                                                                        <button
-                                                                            className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                                                                            title="Copiar contraseña"
-                                                                            onClick={() => handleCopyToClipboard(doc.url || '')}
-                                                                        >
-                                                                            {copySuccess === 'claveFiel' ? (
-                                                                                <ClipboardCheck className="h-4 w-4 text-green-500" />
-                                                                            ) : (
-                                                                                <Copy className="h-4 w-4" />
-                                                                            )}
-                                                                        </button>
-                                                                    ) : (
-                                                                        // Regular download button for other files
-                                                                        <button
-                                                                            className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                                                                            title="Descargar archivo"
-                                                                            onClick={() => initiateAction('download', doc.type)}
-                                                                        >
-                                                                            <Download className="h-4 w-4" />
-                                                                        </button>
-                                                                    )}
+                                                                    {/* Download button for all document types */}
+                                                                    <button
+                                                                        className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
+                                                                        title="Descargar archivo"
+                                                                        onClick={() => initiateAction('download', doc.type)}
+                                                                    >
+                                                                        <Download className="h-4 w-4" />
+                                                                    </button>
                                                                     <button
                                                                         className="h-8 w-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50"
                                                                         title="Eliminar archivo"
@@ -528,53 +492,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                 onClick={verifyPassword}
                             >
                                 Verificar
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Clave FIEL Edit Modal */}
-            {editKeyModalOpen && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-white rounded-lg max-w-md w-full p-6 relative">
-                        <button
-                            onClick={() => setEditKeyModalOpen(false)}
-                            className="absolute top-2 right-2 p-1 rounded-full hover:bg-gray-100"
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-
-                        <div className="mb-4">
-                            <h3 className="text-lg font-semibold">Editar Clave FIEL</h3>
-                            <p className="text-sm text-gray-500">Ingrese la nueva clave FIEL.</p>
-                        </div>
-
-                        <div className="py-4">
-                            <input
-                                type="text"
-                                value={claveFieldValue}
-                                onChange={(e) => setClaveFieldValue(e.target.value)}
-                                placeholder="Clave FIEL"
-                                className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
-                        </div>
-
-                        <div className="flex justify-end gap-2">
-                            <button
-                                className="px-4 py-2 border rounded-md text-gray-700 hover:bg-gray-50"
-                                onClick={() => setEditKeyModalOpen(false)}
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
-                                onClick={() => {
-                                    handleEditClaveField();
-                                    setEditKeyModalOpen(false);
-                                }}
-                            >
-                                Guardar
                             </button>
                         </div>
                     </div>

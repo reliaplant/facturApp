@@ -69,9 +69,9 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
           </h2>
           
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Total: ${totalCost.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Badge>
+            </Badge> */}
             
             <FixedAssetDialog clientId={clientId} onSuccess={loadAssets} />
           </div>

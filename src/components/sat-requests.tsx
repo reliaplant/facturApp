@@ -497,7 +497,7 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button 
-                  variant="violet" 
+                  variant="black" 
                   size="sm" 
                   disabled={isLoading}
                   className="flex items-center whitespace-nowrap"

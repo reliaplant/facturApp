@@ -101,17 +101,31 @@ export default function OPFUploader({ clientId, onClientUpdate, client }: OPFUpl
       <div className="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
         <h3 className="">Opinión de Cumplimiento Fiscal</h3>
         
-        
+        {/* Always show upload button in header */}
+        <div className="flex items-center space-x-2">
+          <input
+            type="file"
+            id="opf-upload"
+            accept="application/pdf"
+            onChange={handleFileUpload}
+            className="hidden"
+          />
+          <label
+            htmlFor="opf-upload"
+            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 cursor-pointer"
+          >
+            {uploading ? 'Subiendo...' : client?.lastOPFUrl ? 'Reemplazar OPF' : 'Subir OPF'}
+          </label>
+        </div>
       </div>
       
       {error && (
-        <div className="text-red-600 text-sm mb-3">{error}</div>
+        <div className="text-red-600 text-sm mb-3 px-3 pt-2">{error}</div>
       )}
 
       <div className="bg-white p-3 text-sm ">
         {client?.lastOPFUrl ? (
           <div className="flex flex-col md:flex-row md:items-center gap-3">
-           
             <div className="flex items-center gap-2">
               <FiDownload className="h-5 w-5 text-blue-500" />
               <button 
@@ -136,26 +150,14 @@ export default function OPFUploader({ clientId, onClientUpdate, client }: OPFUpl
                   ? ' (hoy)'
                   : ` (${Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))} días atrás)`}
                 </span>
-                <div className="flex items-center space-x-2">
-          <input
-            type="file"
-            id="opf-upload"
-            accept="application/pdf"
-            onChange={handleFileUpload}
-            className="hidden"
-          />
-          <label
-            htmlFor="opf-upload"
-            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 cursor-pointer"
-          >
-            {uploading ? 'Subiendo...' : client?.lastOPFUrl ? 'Reemplazar OPF' : 'Subir OPF'}
-          </label>
-        </div>
               </div>
             )}
           </div>
         ) : (
-          <p className="text-gray-500">No hay opinión de cumplimiento cargada.</p>
+          <div className="flex items-center">
+            <FiFileText className="h-5 w-5 text-gray-400 mr-2" />
+            <p className="text-gray-500">No hay opinión de cumplimiento cargada.</p>
+          </div>
         )}
       </div>
     </div>

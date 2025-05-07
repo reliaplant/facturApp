@@ -773,7 +773,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
             
             {/* Add income evaluation button */}
             <Button
-              variant="outline"
+              variant="black"
               size="sm"
               className="flex items-center whitespace-nowrap"
               onClick={handleEvaluateIncome}

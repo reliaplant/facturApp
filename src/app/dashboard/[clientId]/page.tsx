@@ -328,11 +328,10 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
                 <TabsTrigger size="sm" value="proveedores">Proveedores</TabsTrigger>
                 <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
-                <TabsTrigger size="sm" value="info">Info</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
-                <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger>
-                <TabsTrigger size="sm" value="sat">SAT test</TabsTrigger>
-
+                {/* <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger> */}
+                <TabsTrigger size="sm" value="sat">SAT Desc Mas.</TabsTrigger>
+                <TabsTrigger size="sm" value="info">Info</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-1.5">

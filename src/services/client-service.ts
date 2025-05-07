@@ -215,7 +215,25 @@ export const clientService = {
   ): Promise<{url: string, date: string}> {
     try {
       const timestamp = new Date().getTime();
-      const path = `clients/${clientId}/fiel/${documentType}_${timestamp}`;
+      
+      // Determine the filename based on document type
+      let fileName: string;
+      switch (documentType) {
+        case 'cer':
+          fileName = 'certificado.cer';
+          break;
+        case 'keyCer':
+          fileName = 'llave.key';
+          break;
+        case 'claveFiel':
+          fileName = 'clave.txt';
+          break;
+        default:
+          // For other document types, keep the timestamp to avoid overwriting
+          fileName = `${documentType}_${timestamp}`;
+      }
+      
+      const path = `clients/${clientId}/fiel/${fileName}`;
       const storageRef = ref(storage, path);
       
       await uploadBytes(storageRef, file);

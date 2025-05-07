@@ -417,7 +417,7 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
             <Label htmlFor="tipoDeclaracion">Tipo de Declaración</Label>
             <Select
               value={newDeclaracion.tipoDeclaracion || 'ordinaria'}
-              onValueChange={(value) => setNewDeclaracion({...newDeclaracion, tipoDeclaracion: value})}
+              onValueChange={(value: "ordinaria" | "complementaria") => setNewDeclaracion({...newDeclaracion, tipoDeclaracion: value})}
             >
               <SelectTrigger id="tipoDeclaracion">
                 <SelectValue placeholder="Selecciona el tipo" />

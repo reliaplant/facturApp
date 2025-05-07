@@ -413,7 +413,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                 console.log("Opening declaracion modal");
                 setDeclaracionModalOpen(true);
               }}
-              className="text-xs flex items-center gap-1 bg-violet-600 hover:bg-violet-700"
+              className="text-xs flex items-center gap-1"
             >
               <FilePlus className="h-3.5 w-3.5" />
               Crear Declaración

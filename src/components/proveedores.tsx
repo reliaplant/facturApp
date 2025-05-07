@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Check, X } from "lucide-react";
+import { RefreshCw, Check, X, Search } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { invoiceService } from '@/services/invoice-service';
 
@@ -23,6 +23,8 @@ interface ProveedoresProps {
 
 export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const { toast } = useToast();
@@ -33,13 +35,35 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
     loadSuppliers();
   }, [clientId]);
   
+  // Filter suppliers based on search term
+  useEffect(() => {
+    if (!searchTerm.trim()) {
+      setFilteredSuppliers(suppliers);
+    } else {
+      const normalizedSearch = searchTerm.toLowerCase();
+      setFilteredSuppliers(
+        suppliers.filter(
+          supplier => 
+            supplier.name.toLowerCase().includes(normalizedSearch) ||
+            supplier.rfc.toLowerCase().includes(normalizedSearch)
+        )
+      );
+    }
+  }, [suppliers, searchTerm]);
+  
   // Load suppliers from Firestore
   const loadSuppliers = async () => {
     setIsLoading(true);
     try {
       const loadedSuppliers = await invoiceService.getSuppliers(clientId);
-      // Sort by name for consistent display
-      setSuppliers(loadedSuppliers.sort((a, b) => a.name.localeCompare(b.name)));
+      // Sort by creation date (newest first)
+      // For suppliers, lastUpdated effectively represents when they were first added
+      setSuppliers(loadedSuppliers.sort((a, b) => {
+        // Safely handle cases where lastUpdated might be missing
+        const dateA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+        const dateB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+        return dateB - dateA; // Descending order (newest first)
+      }));
     } catch (error) {
       console.error("Error loading suppliers:", error);
       toast({
@@ -138,8 +162,26 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
           </h2>
           
           <div className="flex items-center gap-2">
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Buscar proveedor..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="py-1 pl-8 pr-2 text-xs border rounded-md w-60 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              {searchTerm && (
+                <button 
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
             <Button 
-              variant="outline" 
+              variant="black" 
               size="sm"
               onClick={syncSuppliers}
               disabled={isSyncing}
@@ -169,14 +211,16 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                       Cargando proveedores...
                     </td>
                   </tr>
-                ) : suppliers.length === 0 ? (
+                ) : filteredSuppliers.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="px-2 py-4 text-center text-gray-500 text-xs">
-                      No hay proveedores registrados. Haga clic en "Sincronizar Proveedores" para extraerlos de sus facturas.
+                      {suppliers.length === 0 
+                        ? 'No hay proveedores registrados. Haga clic en "Sincronizar Proveedores" para extraerlos de sus facturas.'
+                        : 'No se encontraron proveedores con ese término de búsqueda.'}
                     </td>
                   </tr>
                 ) : (
-                  suppliers.map((supplier) => (
+                  filteredSuppliers.map((supplier) => (
                     <tr 
                       key={supplier.rfc} 
                       className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
