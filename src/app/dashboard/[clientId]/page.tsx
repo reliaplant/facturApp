@@ -407,7 +407,6 @@ export default function ClientDashboard() {
             <IncomesTable
               year={selectedYear}
               invoices={invoices.filter(inv => !inv.recibida)}
-              disableExport={true} // Add this prop to hide the export button
               clientId={clientId} // Add clientId prop
             />
           </TabsContent>
@@ -417,7 +416,6 @@ export default function ClientDashboard() {
               key={`expenses-${lastInvoiceRefresh}`} // Use lastInvoiceRefresh instead of Date.now() to prevent continuous remounting
               year={selectedYear}
               invoices={invoices.filter(inv => inv.recibida)}
-              disableExport={true} // Add this prop to hide the export button
               clientId={clientId} // Add clientId prop
             />
           </TabsContent>

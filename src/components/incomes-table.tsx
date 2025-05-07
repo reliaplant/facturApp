@@ -8,7 +8,6 @@ import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Invoice } from "@/models/Invoice";
 import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
-import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
 import { invoiceService } from "@/services/invoice-service";
@@ -20,6 +19,8 @@ import {
   PopoverTrigger 
 } from "@/components/ui/popover";
 import { useToast } from "@/components/ui/use-toast";
+import { fiscalDataService } from '@/services/fiscal-data-service';
+import { YearTaxData } from '@/models/fiscalData'; // Add this import
 
 interface IncomesTableProps {
   year: number;
@@ -49,6 +50,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
   const [categories, setCategories] = useState<Category[]>([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const { toast } = useToast();
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load/Save from localStorage - simplified
   useEffect(() => {
@@ -101,10 +103,15 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     }
   }), [invoices]);
 
-  // Date utilities
+  // Date utilities - Make sure we're consistently using 1-12 for months
   const dateUtils = useMemo(() => ({
+    // This already returns 1-12, which is correct
     getMonth: (dateString: string): number => new Date(dateString).getMonth() + 1,
+    
+    // Already using 1-12 months correctly
     getMonthName: (month: number): string => format(new Date(year, month - 1, 1), 'MMMM', { locale: es }),
+    
+    // Already using 1-12 months correctly
     getMonthAbbreviation: (month: number): string => {
       if (month === 13) return 'ANUAL';
       return ['ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC'][month - 1] || '';
@@ -163,6 +170,119 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     };
   }, [invoices, updatedInvoices, year, dateUtils]);
 
+  // Function to calculate and update fiscal summary tax fields
+  const updateFiscalSummaryTaxes = useCallback(async (invoicesToProcess = filteredInvoices) => {
+    if (!clientId || !year || invoicesToProcess.length === 0) return;
+    
+    console.log("Calculating fiscal summary tax fields for income invoices...");
+    
+    // Calculate income tax totals
+    const monthlyTotals: Record<string, {
+      isrGravado: number;
+      isrRetenido: number;
+      ivaTrasladado: number;
+      ivaRetenido: number;
+    }> = {};
+    
+    // Initialize monthly totals object - use string keys to match the model
+    for (let month = 1; month <= 12; month++) {
+      monthlyTotals[month.toString()] = {
+        isrGravado: 0,
+        isrRetenido: 0,
+        ivaTrasladado: 0,
+        ivaRetenido: 0
+      };
+    }
+    
+    // Calculate totals by month for income invoices only (deducible and not canceled)
+    invoicesToProcess.forEach(invoice => {
+      // Skip if not income-recognized or canceled
+      if (!invoice.esDeducible || invoice.estaCancelado || !invoice.mesDeduccion) return;
+      
+      // Month should always be 1-12 or 13 for annual - validate and convert to string
+      const month = invoice.mesDeduccion.toString();
+      if (invoice.mesDeduccion < 1 || invoice.mesDeduccion > 13) {
+        console.warn(`Invalid month ${invoice.mesDeduccion} found for invoice ${invoice.uuid}`);
+        return; // Skip invalid months
+      }
+      
+      // Now use the validated month string
+      if (!monthlyTotals[month]) return; // Skip if not a valid month in our structure
+      
+      // Add tax values to totals
+      monthlyTotals[month].isrGravado += invoice.gravadoISR || 0;
+      monthlyTotals[month].isrRetenido += invoice.isrRetenido || 0;
+      monthlyTotals[month].ivaTrasladado += invoice.gravadoIVA || 0;
+      monthlyTotals[month].ivaRetenido += invoice.ivaRetenido || 0;
+    });
+    
+    try {
+      // Update the fiscal summary with these values
+      await fiscalDataService.updateFiscalSummaryFields(clientId, year, (existingData) => {
+        // If no existing data, create a new object with default values
+        const baseData: YearTaxData = existingData || {
+          clientId,
+          year,
+          months: {}
+        };
+        
+        // Ensure months object exists
+        if (!baseData.months) baseData.months = {};
+        
+        // Update each month's data
+        Object.entries(monthlyTotals).forEach(([month, taxData]) => {
+          // Create month object if it doesn't exist
+          if (!baseData.months[month]) {
+            baseData.months[month] = {};
+          }
+          
+          // Update only the income tax fields, preserving other data
+          baseData.months[month] = {
+            ...baseData.months[month],
+            // Income tax fields
+            isrGravado: taxData.isrGravado,
+            isrRetenido: taxData.isrRetenido,
+            ivaTrasladado: taxData.ivaTrasladado,
+            ivaRetenido: taxData.ivaRetenido
+          };
+        });
+        
+        return baseData;
+      });
+      
+      console.log("Fiscal summary income tax fields updated successfully");
+    } catch (error) {
+      console.error("Error updating fiscal summary:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron actualizar los datos fiscales",
+        variant: "destructive"
+      });
+    }
+  }, [clientId, year, filteredInvoices, toast]);
+
+  // Debounced version of the update function to avoid too many writes
+  const debouncedUpdateFiscalSummary = useCallback(() => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    
+    updateTimeoutRef.current = setTimeout(() => {
+      updateFiscalSummaryTaxes();
+    }, 2000); // Wait 2 seconds after the last change before updating
+  }, [updateFiscalSummaryTaxes]);
+
+  // Trigger update when filtered invoices change
+  useEffect(() => {
+    debouncedUpdateFiscalSummary();
+    
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, [filteredInvoices, debouncedUpdateFiscalSummary]);
+
   // Event handlers
   const handleUpdateInvoice = useCallback((updatedInvoice: Invoice) => {
     setUpdatedInvoices(prev => {
@@ -170,9 +290,13 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
       if (modalState.selectedInvoice?.uuid === updatedInvoice.uuid) {
         setModalState(prev => ({ ...prev, selectedInvoice: updatedInvoice }));
       }
+      
+      // Trigger fiscal summary update after updating local state
+      debouncedUpdateFiscalSummary();
+      
       return newState;
     });
-  }, [modalState.selectedInvoice]);
+  }, [modalState.selectedInvoice, debouncedUpdateFiscalSummary]);
 
   const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
@@ -189,7 +313,14 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     if (!invoice) return;
     
     const isActive = month !== "none";
+    // Parse month as integer, ensuring it's in the 1-12 range (or 13 for annual)
     const numericMonth = isActive ? parseInt(month) : undefined;
+    
+    // Debug check to make sure we're never using month 0
+    if (numericMonth === 0) {
+      console.error("Invalid month 0 detected! Months should be 1-12 or 13 for annual.");
+      return;
+    }
     
     try {
       let updateData: Partial<Invoice> = {
@@ -370,6 +501,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           
           setUpdatedInvoices(updatedMap);
           console.log("Invoice data refreshed successfully");
+          
+          // Update fiscal summary with the new data
+          updateFiscalSummaryTaxes(refreshedInvoices.filter(inv => !inv.recibida));
         } catch (refreshError) {
           console.error("Error refreshing invoices:", refreshError);
         }
@@ -444,7 +578,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           </div>
         </td>
 
-        {/* Payment Type */}
+        {/* Payment Type - Fixed missing td opening tag */}
         <td className="px-2 py-1 align-middle">
           <div className="flex flex-col">
             <span className="font-medium">{invoice.usoCFDI}</span>
@@ -524,7 +658,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           )}
         </td>
 
-        {/* Amount Cells */}
+        {/* Amount Cells - Fixed missing td opening tags */}
         <td className="px-2 py-1 align-middle text-right">
           {isComplement ? <span></span> : <span>${invoice.subTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>}
         </td>
@@ -648,13 +782,11 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
               <Calculator className={`h-3.5 w-3.5 mr-1 ${isEvaluating ? "animate-spin" : ""}`} />
               {isEvaluating ? "Evaluando..." : "Evaluar Ingresos"}
             </Button>
-            
 
-            {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Ingresos_${year}.xlsx`} />}
           </div>
         </div>
 
-        {/* Table */}
+        {/* Table - Fixed unclosed div tag */}
         <div className="relative">
           <div className="max-h-[calc(100vh-140px)] overflow-y-auto">
             <table className="w-full text-xs relative">
