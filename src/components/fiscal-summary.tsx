@@ -8,6 +8,7 @@ import { fiscalDataService } from "@/services/fiscal-data-service";
 import { YearTaxData } from "@/models/fiscalData";
 import { useToast } from "@/components/ui/use-toast";
 import { TaxBracketsService } from "@/services/tax-brackets-service";
+import { FixedAssetService } from "@/services/fixed-asset-service";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -50,6 +51,9 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
   // Add state for tracking refresh operation
   const [isRefreshing, setIsRefreshing] = useState(false);
   
+  // Initialize the FixedAssetService
+  const fixedAssetService = useMemo(() => new FixedAssetService(), []);
+  
   // Fetch fiscal data from Firebase
   useEffect(() => {
     async function fetchFiscalData() {
@@ -75,14 +79,51 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     }
   }, [clientId, year, toast]);
 
-  // Load depreciation data - mock for now
+  // Modify the depreciation data loading effect
   useEffect(() => {
-    const emptyDepreciations: Record<number, number> = {};
-    for (let i = 0; i < 12; i++) {
-      emptyDepreciations[i] = 0; // We'll set all to 0 for now
+    const fetchDepreciationData = async () => {
+      try {
+        console.log("Fetching fixed asset depreciation data...");
+        const depreciations: Record<number, number> = {};
+        
+        // Initialize with zeros
+        for (let month = 0; month < 12; month++) {
+          depreciations[month] = 0;
+        }
+        
+        // Fetch depreciation data for each month
+        for (let month = 0; month < 12; month++) {
+          // Create start and end dates for this month
+          const startDate = new Date(year, month, 1).toISOString();
+          const endDate = new Date(year, month + 1, 0).toISOString(); // Last day of the month
+          
+          // Get total depreciation for this month
+          const monthlyDepreciation = await fixedAssetService.getTotalMonthlyDepreciation(
+            clientId,
+            startDate,
+            endDate
+          );
+          
+          depreciations[month] = monthlyDepreciation;
+        }
+        
+        console.log("Fixed asset depreciation data loaded:", depreciations);
+        setMonthlyDepreciations(depreciations);
+      } catch (error) {
+        console.error("Error loading depreciation data:", error);
+        // Set all to zero if there's an error
+        const emptyDepreciations: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) {
+          emptyDepreciations[i] = 0;
+        }
+        setMonthlyDepreciations(emptyDepreciations);
+      }
+    };
+    
+    if (clientId && year) {
+      fetchDepreciationData();
     }
-    setMonthlyDepreciations(emptyDepreciations);
-  }, [year, clientId]);
+  }, [year, clientId, fixedAssetService]);
   
   // Load tax brackets - mock for now
   useEffect(() => {
@@ -298,9 +339,24 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     setIsRefreshing(true);
     try {
       console.log("Manually refreshing fiscal data...");
+      
+      // 1. Fetch the fiscal summary data
       const data = await fiscalDataService.getFiscalSummary(clientId, year);
-      console.log("Refreshed fiscal data:", data);
       setFiscalData(data);
+      
+      // 2. Update depreciation data from fixed assets
+      const depreciations: Record<number, number> = {};
+      for (let month = 0; month < 12; month++) {
+        const startDate = new Date(year, month, 1).toISOString();
+        const endDate = new Date(year, month + 1, 0).toISOString();
+        
+        const monthlyDepreciation = await fixedAssetService.getTotalMonthlyDepreciation(
+          clientId, startDate, endDate
+        );
+        
+        depreciations[month] = monthlyDepreciation;
+      }
+      setMonthlyDepreciations(depreciations);
       
       toast({
         title: "Datos actualizados",
