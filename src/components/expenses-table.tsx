@@ -8,7 +8,6 @@ import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
 import { Invoice } from "@/models/Invoice";
 import { InvoicePreviewModal } from "@/components/invoice-preview-modal";
-import { ExportInvoicesExcel } from "@/components/export-invoices-excel";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InvoiceDeductibilityEditor } from "@/components/invoice-deductibility-editor";
 import { invoiceService } from "@/services/invoice-service";
@@ -900,9 +899,9 @@ const handleEvaluateDeductibility = async () => {
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-medium whitespace-nowrap">Facturas Recibidas {year}</h2>
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Badge>
+            </Badge> */}
             
             {/* Deductibility evaluation button */}
             <Button
@@ -915,9 +914,7 @@ const handleEvaluateDeductibility = async () => {
               <Calculator className={`h-3.5 w-3.5 mr-1 ${isEvaluating ? "animate-spin" : ""}`} />
               {isEvaluating ? "Evaluando..." : "Evaluar Deducibilidad"}
             </Button>
-            
-            {!disableExport && <ExportInvoicesExcel invoices={filteredInvoices} year={year} fileName={`Gastos_${year}.xlsx`} />}
-          </div>
+                      </div>
         </div>
 
         {/* Table */}

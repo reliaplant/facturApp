@@ -91,8 +91,20 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   
   // Date selection state
   const currentYear = new Date().getFullYear();
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  // Format yesterday as YYYY-MM-DD
+  const formatDateToYYYYMMDD = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [fromDate, setFromDate] = useState<string>(`${currentYear}-01-01`);
-  const [toDate, setToDate] = useState<string>(`${currentYear}-12-31`);
+  const [toDate, setToDate] = useState<string>(formatDateToYYYYMMDD(yesterday));
   const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Load real data when component mounts or RFC changes
@@ -480,18 +492,7 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
             Solicitudes SAT
           </h2>
           
-          <div className="flex items-center gap-2">
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={fetchRequests}
-              disabled={isRefreshing}
-              className="flex items-center whitespace-nowrap"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
-              Actualizar
-            </Button>
-            
+          <div className="flex items-center gap-2">            
             {/* Replace the simple dropdown with one that includes date selection */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -716,45 +717,8 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                               )}
                             </button>
                           )}
-                          {request.packagesDownloaded && !request.packagesProcessed && (
-                            <button 
-                              className={`text-xs ${processingId === request.id ? 'text-gray-500' : 'text-blue-600 hover:text-blue-900 hover:underline'}`}
-                              onClick={() => handleProcessPackages(request)}
-                              disabled={processingId === request.id}
-                            >
-                              {processingId === request.id ? (
-                                <span className="flex items-center">
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  Procesando...
-                                </span>
-                              ) : (
-                                <span className="flex items-center">
-                                  <FileCheck className="h-3 w-3 mr-1" />
-                                  Procesar XMLs
-                                </span>
-                              )}
-                            </button>
-                          )}
-                          {request.packagesProcessed && (
-                            <button
-                              onClick={() => {
-                                // Redirect to invoices view with this request's filters
-                                const invoicesFilter = request.downloadType === "issued" 
-                                  ? "?filter=emitidas"
-                                  : "?filter=recibidas";
-                                
-                                // You could add date filters as well
-                                // This is a placeholder - implement according to your app's navigation structure
-                                toast({
-                                  title: "Ver facturas",
-                                  description: `Ir a ${request.downloadType === "issued" ? "emitidas" : "recibidas"} (${request.processedCount || 0} facturas)`
-                                });
-                              }}
-                              className="text-xs text-blue-600 hover:text-blue-900 hover:underline flex items-center"
-                            >
-                              <ExternalLink className="h-3 w-3 mr-1" />
-                              Ver facturas
-                            </button>
+                          {(request.packagesDownloaded || request.packagesProcessed) && (
+                            <span className="text-xs text-gray-500">-</span>
                           )}
                         </div>
                       </td>

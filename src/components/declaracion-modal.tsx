@@ -140,19 +140,30 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
 
   // Update tax amounts and all fiscal data fields when month is selected
   const handleMonthChange = (month: string) => {
-    const monthNumber = parseInt(month) - 1; // Convert to 0-based index
+    // Get the month number for the fiscal data
+    // For declaring February (month="2"), we actually use January data (monthNumber=0)
+    const selectedMonthNumber = parseInt(month);
+    const fiscalMonthNumber = selectedMonthNumber - 2; // Offset by -2 (0-indexed + offset by 1)
     
-    if (fiscalData && fiscalData[monthNumber] && calculateMonthISR && getAccumulatedRetainedISR) {
-      const monthData = fiscalData[monthNumber];
+    // Handle the case of January (uses December of previous year)
+    const adjustedFiscalMonthNumber = fiscalMonthNumber < 0 ? 11 : fiscalMonthNumber;
+    
+    console.log(`Selected ${month} (${getMesNombre(month)}), using fiscal data from month: ${adjustedFiscalMonthNumber}`);
+    
+    if (fiscalData && fiscalData[adjustedFiscalMonthNumber] && calculateMonthISR && getAccumulatedRetainedISR) {
+      const monthData = fiscalData[adjustedFiscalMonthNumber];
+      
+      // Get depreciation directly from the monthData where we now explicitly include it
+      const depreciationValue = monthData.depreciation || 0;
       
       // Calculate ISR
       const income = monthData.periodProfit;
-      const isrCalc = calculateMonthISR(monthNumber, income);
-      const accRetentions = getAccumulatedRetainedISR(monthNumber);
+      const isrCalc = calculateMonthISR(adjustedFiscalMonthNumber, income);
+      const accRetentions = getAccumulatedRetainedISR(adjustedFiscalMonthNumber);
       
       // Calculate previous ISR payments
       let previousPayments = 0;
-      for (let i = 0; i < monthNumber; i++) {
+      for (let i = 0; i < adjustedFiscalMonthNumber; i++) {
         const prevIncome = fiscalData[i]?.periodProfit || 0;
         const prevIsrCalc = calculateMonthISR(i, prevIncome);
         const prevRetentions = getAccumulatedRetainedISR(i);
@@ -172,15 +183,14 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
       const ivaCredit = Math.max(0, ivaPaid + ivaRetenido - ivaCollected);
       
       // Set fecha límite de pago to 17th of next month
-      const fechaLimite = new Date(year, monthNumber + 1, 17);
+      const fechaLimite = new Date(year, selectedMonthNumber, 17);
       // If it's December, move to January of next year
-      if (monthNumber === 11) {
+      if (selectedMonthNumber === 12) {
         fechaLimite.setFullYear(year + 1);
         fechaLimite.setMonth(0);
       }
 
       // Get total deductions for this month (expenses + depreciation)
-      const depreciationValue = monthData.expenseAmount; // This is already included in the calculation
       const totalDeductions = monthData.expenseAmount + depreciationValue;
       
       // Update the form with calculated values and ALL fields from the fiscal data
@@ -214,7 +224,7 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
         cuotaFija: isrCalc.fixedFee,
         impuestosArt113: isrCalc.totalTax,
         pagosProvisionalesAnteriores: previousPayments,
-        retencionesPeriodo: getMonthlyRetainedISR(monthNumber),
+        retencionesPeriodo: getMonthlyRetainedISR(adjustedFiscalMonthNumber),
         retencionesAcumuladas: accRetentions,
         isrACargo: isrCharge,
         impuestoPorPagar: isrCharge
@@ -376,7 +386,7 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
         <div className="grid gap-4 py-4">
           {/* Only show month and declaration type fields */}
           <div className="grid grid-cols-1 gap-2">
-            <Label htmlFor="mes">Mes</Label>
+            <Label htmlFor="mes">Mes a declarar</Label>
             <Select
               value={newDeclaracion.mes}
               onValueChange={handleMonthChange}
@@ -386,18 +396,19 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
                 <SelectValue placeholder="Selecciona el mes" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="1">Enero</SelectItem>
-                <SelectItem value="2">Febrero</SelectItem>
-                <SelectItem value="3">Marzo</SelectItem>
-                <SelectItem value="4">Abril</SelectItem>
-                <SelectItem value="5">Mayo</SelectItem>
-                <SelectItem value="6">Junio</SelectItem>
-                <SelectItem value="7">Julio</SelectItem>
-                <SelectItem value="8">Agosto</SelectItem>
-                <SelectItem value="9">Septiembre</SelectItem>
-                <SelectItem value="10">Octubre</SelectItem>
-                <SelectItem value="11">Noviembre</SelectItem>
-                <SelectItem value="12">Diciembre</SelectItem>
+                {/* Adjust the display to show that each month refers to the previous month's data */}
+                <SelectItem value="1">Enero (Diciembre {year-1})</SelectItem>
+                <SelectItem value="2">Febrero (Enero {year})</SelectItem>
+                <SelectItem value="3">Marzo (Febrero {year})</SelectItem>
+                <SelectItem value="4">Abril (Marzo {year})</SelectItem>
+                <SelectItem value="5">Mayo (Abril {year})</SelectItem>
+                <SelectItem value="6">Junio (Mayo {year})</SelectItem>
+                <SelectItem value="7">Julio (Junio {year})</SelectItem>
+                <SelectItem value="8">Agosto (Julio {year})</SelectItem>
+                <SelectItem value="9">Septiembre (Agosto {year})</SelectItem>
+                <SelectItem value="10">Octubre (Septiembre {year})</SelectItem>
+                <SelectItem value="11">Noviembre (Octubre {year})</SelectItem>
+                <SelectItem value="12">Diciembre (Noviembre {year})</SelectItem>
               </SelectContent>
             </Select>
           </div>

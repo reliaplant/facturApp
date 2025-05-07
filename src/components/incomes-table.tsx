@@ -767,9 +767,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           </h2>
           
           <div className="flex items-center gap-2">
-            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
+            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Badge>
+            </Badge> */}
             
             {/* Add income evaluation button */}
             <Button

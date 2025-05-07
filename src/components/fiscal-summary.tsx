@@ -9,6 +9,7 @@ import { YearTaxData } from "@/models/fiscalData";
 import { useToast } from "@/components/ui/use-toast";
 import { TaxBracketsService } from "@/services/tax-brackets-service";
 import { FixedAssetService } from "@/services/fixed-asset-service";
+import DeclaracionModal from "@/components/declaracion-modal";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -21,6 +22,7 @@ export interface MonthlyFiscalData {
   ivaRetenido: number;
   // Calculated metrics
   profit: number;
+  depreciation: number; // Add explicit depreciation field
   // Accumulated values
   periodIncomesTotal: number;
   periodExpensesTotal: number;
@@ -146,6 +148,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
         ivaPaid: 0,
         ivaRetenido: 0,
         profit: 0,
+        depreciation: 0, // Add with default value
         periodIncomesTotal: 0,
         periodExpensesTotal: 0,
         periodProfit: 0
@@ -194,6 +197,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
         ivaPaid,
         ivaRetenido,
         profit,
+        depreciation, // Include the depreciation value explicitly
         periodIncomesTotal,
         periodExpensesTotal,
         periodProfit
@@ -401,12 +405,15 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
               {isRefreshing ? "Actualizando..." : "Actualizar Datos"}
             </Button>
             
-            {/* Existing buttons */}
+            {/* Fixed button - using standard variant */}
             <Button 
-              variant="violet" 
+              variant="default" 
               size="sm" 
-              onClick={() => setDeclaracionModalOpen(true)}
-              className="text-xs flex items-center gap-1"
+              onClick={() => {
+                console.log("Opening declaracion modal");
+                setDeclaracionModalOpen(true);
+              }}
+              className="text-xs flex items-center gap-1 bg-violet-600 hover:bg-violet-700"
             >
               <FilePlus className="h-3.5 w-3.5" />
               Crear Declaración
@@ -892,17 +899,23 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
         </div>
       </div>
       
+      {/* Debug to verify modal state */}
+      <div className="hidden">Modal state: {declaracionModalOpen ? 'open' : 'closed'}</div>
+
       {/* Add Declaracion Modal with fiscal data */}
-      {/* <DeclaracionModal
+      <DeclaracionModal
         open={declaracionModalOpen}
-        onClose={() => setDeclaracionModalOpen(false)}
+        onClose={() => {
+          console.log("Closing modal");
+          setDeclaracionModalOpen(false);
+        }}
         onSave={handleDeclarationSave}
         year={year}
         clientId={clientId}
         fiscalData={monthlyData}
         calculateMonthISR={calculateMonthISR}
         getAccumulatedRetainedISR={getAccumulatedRetainedISR}
-      /> */}
+      />
     </div>
   );
 }

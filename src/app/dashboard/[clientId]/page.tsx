@@ -338,7 +338,7 @@ export default function ClientDashboard() {
             <div className="flex items-center gap-1.5">
 
 
-              <Button
+              {/* <Button
                 variant="gray800"
                 size="sm"
                 onClick={handleRefreshData}
@@ -346,7 +346,7 @@ export default function ClientDashboard() {
               >
                 <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
                 Recuperar_CFDIs
-              </Button>
+              </Button> */}
               <Button
                 variant="outline"
                 size="sm"
