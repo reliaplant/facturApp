@@ -399,7 +399,6 @@ export default function ClientDashboard() {
             <FiscalSummary
               clientId={clientId}
               year={selectedYear}
-              invoices={invoices}
             />
           </TabsContent>
 

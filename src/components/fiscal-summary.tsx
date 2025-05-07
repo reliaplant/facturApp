@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { es } from "date-fns/locale";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { FilePlus } from "lucide-react";
+import { FilePlus, RefreshCw } from "lucide-react";
 import { fiscalDataService } from "@/services/fiscal-data-service";
 import { YearTaxData } from "@/models/fiscalData";
 import { useToast } from "@/components/ui/use-toast";
@@ -45,6 +45,9 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
   const [taxBracketsByMonth, setTaxBracketsByMonth] = useState<Record<number, any[]>>({});
   const [declaracionModalOpen, setDeclaracionModalOpen] = useState(false);
   const { toast } = useToast();
+  
+  // Add state for tracking refresh operation
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Fetch fiscal data from Firebase
   useEffect(() => {
@@ -238,6 +241,32 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     return { income, expenses, profit };
   }, [monthlyData]);
 
+  // Add a function to handle manual refresh
+  const handleRefreshData = async () => {
+    setIsRefreshing(true);
+    try {
+      console.log("Manually refreshing fiscal data...");
+      const data = await fiscalDataService.getFiscalSummary(clientId, year);
+      console.log("Refreshed fiscal data:", data);
+      setFiscalData(data);
+      
+      toast({
+        title: "Datos actualizados",
+        description: "La información fiscal ha sido actualizada correctamente",
+        variant: "default"
+      });
+    } catch (error) {
+      console.error("Error refreshing fiscal data:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron actualizar los datos fiscales",
+        variant: "destructive"
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   if (loading) {
     return <div className="p-4 text-center">Cargando datos fiscales...</div>;
   }
@@ -252,19 +281,19 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
           </h2>
           
           <div className="flex items-center gap-2">
-            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
-              Ingreso: {formatCurrency(annualTotals.income)}
-            </Badge>
-            <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
-              Gastos: {formatCurrency(annualTotals.expenses)}
-            </Badge>
-            <Badge variant="outline" className={`text-sm py-0.5 whitespace-nowrap ${
-              annualTotals.profit < 0 ? 'text-red-500' : 'text-green-600'
-            }`}>
-              Utilidad: {formatCurrency(annualTotals.profit)}
-            </Badge>
-             */}
-            {/* Simplified Create Declaration button */}
+            {/* Add refresh button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center whitespace-nowrap"
+              onClick={handleRefreshData}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
+              {isRefreshing ? "Actualizando..." : "Actualizar Datos"}
+            </Button>
+            
+            {/* Existing buttons */}
             <Button 
               variant="violet" 
               size="sm" 

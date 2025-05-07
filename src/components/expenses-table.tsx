@@ -44,35 +44,49 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   const [isEvaluating, setIsEvaluating] = useState(false);
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Clear localStorage on component mount to prevent any stale data
+  // Add this ref to track if we've loaded from Firebase in this session
+  const initialLoadComplete = useRef(false);
+
+  // Modify the useEffect to load from Firebase only on first mount
   useEffect(() => {
-    // CRITICAL: Force clear localStorage on component mount to prevent auto-evaluation
-    localStorage.removeItem(`updatedReceivedInvoices_${year}`);
-    console.log("🧹 Cleared localStorage to prevent auto-evaluation");
-    
-    return () => {
-      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
-    };
-  }, [year]);
-  
-  // RESTORE the useEffect to load from localStorage, but AFTER clearing any auto-evaluation data
-  useEffect(() => {
-    // First clear only auto-evaluation data, not all localStorage data
-    // This preserves user edits but removes auto-evaluation values
-    try {
-      const savedInvoices = localStorage.getItem(`updatedReceivedInvoices_${year}`);
-      if (savedInvoices) {
-        const parsedInvoices = JSON.parse(savedInvoices);
-        setUpdatedInvoices(parsedInvoices);
+    // Only clear on the first load of the component
+    if (!initialLoadComplete.current) {
+      localStorage.removeItem(`updatedReceivedInvoices_${year}`);
+      console.log("🧹 First load: Cleared localStorage");
+      
+      // Set all invoices from props as the baseline
+      const initialData: Record<string, Invoice> = {};
+      invoices.filter(inv => inv.recibida).forEach(invoice => {
+        initialData[invoice.uuid] = invoice;
+      });
+      
+      setUpdatedInvoices(initialData);
+      localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(initialData));
+      
+      // Mark initial load as complete
+      initialLoadComplete.current = true;
+      console.log("📥 First load: Saved all invoices to localStorage");
+    } else {
+      // For subsequent renders, try to load from localStorage first
+      try {
+        console.log("🔄 Subsequent render: Trying to load from localStorage");
+        const savedInvoices = localStorage.getItem(`updatedReceivedInvoices_${year}`);
+        if (savedInvoices) {
+          const parsedInvoices = JSON.parse(savedInvoices);
+          setUpdatedInvoices(parsedInvoices);
+          console.log("📤 Loaded saved invoices from localStorage");
+        } else {
+          console.log("⚠️ No saved invoices found in localStorage");
+        }
+      } catch (error) {
+        console.error("Error loading from localStorage:", error);
       }
-    } catch (error) {
-      console.error("Error loading from localStorage:", error);
     }
 
     return () => {
       if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
     };
-  }, [year]);
+  }, [year, invoices]); // Add invoices as dependency
   
   // Keep the save to localStorage functionality
   useEffect(() => {
@@ -295,32 +309,39 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
 
   // NOW we can define handlers that use debouncedUpdateFiscalSummary
   const handleUpdateInvoice = useCallback(async (updatedInvoice: Invoice) => {
-    // Add logging to trace the problem
-    console.log("Saving invoice to Firebase:", updatedInvoice.uuid, {
-      esDeducible: updatedInvoice.esDeducible,
-      mesDeduccion: updatedInvoice.mesDeduccion,
-      gravadoISR: updatedInvoice.gravadoISR,
-      gravadoIVA: updatedInvoice.gravadoIVA,
-      gravadoModificado: updatedInvoice.gravadoModificado
-    });
+    console.log("Saving invoice to Firebase:", updatedInvoice.uuid);
     
     try {
-      // CRITICAL FIX: First save to Firebase to ensure values are stored
+      // 1. First save to Firebase
       await invoiceService.updateInvoice(clientId, updatedInvoice.uuid, {
         esDeducible: updatedInvoice.esDeducible,
         mesDeduccion: updatedInvoice.mesDeduccion,
         gravadoISR: updatedInvoice.gravadoISR,
         gravadoIVA: updatedInvoice.gravadoIVA,
         gravadoModificado: updatedInvoice.gravadoModificado,
-        notasDeducibilidad: updatedInvoice.notasDeducibilidad
+        notasDeducibilidad: updatedInvoice.notasDeducibilidad,
+        categoria: updatedInvoice.categoria,
+        locked: updatedInvoice.locked
       });
       
-      // Then update local state AFTER successful Firebase save
+      // 2. Update local state
       setUpdatedInvoices(prev => {
         const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
-        if (selectedInvoice?.uuid === updatedInvoice.uuid) setSelectedInvoice(updatedInvoice);
         
-        // Trigger fiscal summary update after updating local state
+        // 3. Also update localStorage with the new state
+        try {
+          localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(newState));
+          console.log("📝 Updated localStorage with new invoice data");
+        } catch (e) {
+          console.error("Error saving to localStorage:", e);
+        }
+        
+        // 4. Update selected invoice if needed
+        if (selectedInvoice?.uuid === updatedInvoice.uuid) {
+          setSelectedInvoice(updatedInvoice);
+        }
+        
+        // 5. Trigger fiscal summary update
         debouncedUpdateFiscalSummary();
         
         return newState;
@@ -334,7 +355,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
         variant: "destructive"
       });
     }
-  }, [clientId, selectedInvoice, toast, debouncedUpdateFiscalSummary]);
+  }, [clientId, selectedInvoice, toast, debouncedUpdateFiscalSummary, year]);
 
   const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
@@ -529,7 +550,12 @@ const handleEvaluateDeductibility = async () => {
           }
         });
         
+        // Update state
         setUpdatedInvoices(updatedMap);
+        
+        // Also update localStorage
+        localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(updatedMap));
+        console.log("📝 Updated localStorage after evaluation");
         
         // Update fiscal summary with fresh data
         updateFiscalSummaryTaxes();
@@ -598,10 +624,21 @@ const handleEvaluateDeductibility = async () => {
           )}
         </td>
         
-        {/* Invoice Info */}
+        {/* Factura Info - Add this column */}
         <td className="px-2 py-1 align-middle">
+          <div className="flex flex-col">
+            <span>{format(new Date(invoice.fecha), 'dd/MM/yyyy')}</span>
+            <button 
+              className="text-blue-500 hover:text-blue-700 text-xs text-left"
+              onClick={() => handleInvoiceClick(invoice)}
+            >
+              {invoice.uuid.substring(0, 8)}... ({invoice.tipoDeComprobante})
+            </button>
+          </div>
+        </td>
+
         {/* Emisor */}
-       
+        <td className="px-2 py-1 align-middle">
           <div className="flex flex-col">
             <span className={`truncate max-w-[40ch] ${isS01 ? "text-gray-400" : ""}`}>
               {invoice.nombreEmisor} ({invoice.regimenFiscal || 'N/A'})
@@ -890,6 +927,7 @@ const handleEvaluateDeductibility = async () => {
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
                   <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Emisor</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
