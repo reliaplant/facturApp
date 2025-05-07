@@ -63,7 +63,6 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
       const savedInvoices = localStorage.getItem(`updatedReceivedInvoices_${year}`);
       if (savedInvoices) {
         const parsedInvoices = JSON.parse(savedInvoices);
-        console.log(`📋 Loaded ${Object.keys(parsedInvoices).length} invoices from localStorage`);
         setUpdatedInvoices(parsedInvoices);
       }
     } catch (error) {
@@ -80,7 +79,6 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     if (Object.keys(updatedInvoices).length === 0) return;
     try {
       localStorage.setItem(`updatedReceivedInvoices_${year}`, JSON.stringify(updatedInvoices));
-      console.log(`💾 Saved ${Object.keys(updatedInvoices).length} invoices to localStorage`);
     } catch (error) {
       console.error("Error saving to localStorage:", error);
     }
@@ -90,12 +88,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   useEffect(() => {
     categoryService.getAllCategories().then(setCategories).catch(() => {});
   }, [year]);
-  
-  // Add a logging useEffect to track when component receives new props
-  useEffect(() => {
-    console.log(`📋 ExpensesTable received ${invoices.length} invoices`);
-    // This will help you confirm when the component receives updated data
-  }, [invoices.length]);
+  ;
 
   // Helper functions for UI display and logic
   const invoiceHelpers = useMemo(() => ({
@@ -206,9 +199,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   // Function to calculate and update fiscal summary tax fields
   const updateFiscalSummaryTaxes = useCallback(async () => {
     if (!clientId || !year) return;
-    
-    console.log("Calculating fiscal summary tax fields for expenses...");
-    
+        
     // Initialize monthly totals with zero values for each month
     const monthlyTotals: Record<string, {
       isrDeducible: number;
@@ -270,7 +261,6 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
         return baseData;
       });
       
-      console.log("Fiscal summary expense tax fields updated successfully");
     } catch (error) {
       console.error("Error updating fiscal summary:", error);
       toast({
@@ -336,7 +326,6 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
         return newState;
       });
       
-      console.log("Invoice updated successfully in Firebase:", updatedInvoice.uuid);
     } catch (error) {
       console.error("Error saving invoice to Firebase:", error);
       toast({
@@ -509,9 +498,7 @@ const handleEvaluateDeductibility = async () => {
   try {
     // First force a refresh of suppliers to ensure we have latest data
     try {
-      console.log("Refreshing suppliers data before evaluation...");
       await invoiceService.syncSuppliersFromInvoices(clientId);
-      console.log("Suppliers refreshed successfully");
     } catch (syncError) {
       console.error("Error syncing suppliers:", syncError);
       // Continue with evaluation even if sync fails
@@ -521,9 +508,7 @@ const handleEvaluateDeductibility = async () => {
     await new Promise(resolve => setTimeout(resolve, 500));
     
     // Now run the evaluation with fresh supplier data
-    console.log("Starting deductibility evaluation...");
     const result = await invoiceService.evaluateDeductibility(clientId);
-    console.log("Evaluation completed:", result);
     
     toast({
       title: "Evaluación completada",
@@ -535,7 +520,6 @@ const handleEvaluateDeductibility = async () => {
     // If updates were made, refresh the local data
     if (result.updated > 0) {
       try {
-        console.log("Refreshing invoice data after updates...");
         const refreshedInvoices = await invoiceService.getInvoices(clientId);
         
         const updatedMap: Record<string, Invoice> = {};
@@ -546,7 +530,6 @@ const handleEvaluateDeductibility = async () => {
         });
         
         setUpdatedInvoices(updatedMap);
-        console.log("Invoice data refreshed successfully");
         
         // Update fiscal summary with fresh data
         updateFiscalSummaryTaxes();
@@ -578,13 +561,7 @@ const handleEvaluateDeductibility = async () => {
     // Log for debugging
     if (invoice.uuid === "87703bd5-f139-407d-8970-ac454bc9cb44" || 
         invoice.rfcEmisor === "AAF1107272S1") {
-      console.log("Debug invoice in renderInvoiceRow:", {
-        uuid: invoice.uuid,
-        rfcEmisor: invoice.rfcEmisor,
-        esDeducible: invoice.esDeducible,
-        mesDeduccion: invoice.mesDeduccion,
-        source: updatedInvoices[invoice.uuid] ? 'updatedInvoices' : 'original'
-      });
+     
     }
     
     // Simply use the invoice properties directly without transformations
