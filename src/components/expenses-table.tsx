@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/popover";
 import { categoryService } from "@/services/category-service";
 import { Category } from "@/models/Category";
+import { fiscalDataService } from '@/services/fiscal-data-service';
+import { YearTaxData } from '@/models/fiscalData';
 
 interface ExpensesTableProps {
   year: number;
@@ -40,6 +42,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   const { toast } = useToast();
   const [categories, setCategories] = useState<Category[]>([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Clear localStorage on component mount to prevent any stale data
   useEffect(() => {
@@ -200,6 +203,107 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     setIsModalOpen(true);
   }, []);
 
+  // Function to calculate and update fiscal summary tax fields
+  const updateFiscalSummaryTaxes = useCallback(async () => {
+    if (!clientId || !year) return;
+    
+    console.log("Calculating fiscal summary tax fields for expenses...");
+    
+    // Initialize monthly totals with zero values for each month
+    const monthlyTotals: Record<string, {
+      isrDeducible: number;
+      ivaDeducible: number;
+    }> = {};
+    
+    // Create entries for months 1-12 (as strings to match the model)
+    for (let month = 1; month <= 12; month++) {
+      monthlyTotals[month.toString()] = {
+        isrDeducible: 0,
+        ivaDeducible: 0
+      };
+    }
+    
+    // Calculate totals by month from filtered invoices
+    filteredInvoices.forEach(invoice => {
+      // Skip if not deductible, canceled, or missing month
+      if (!invoice.esDeducible || invoice.estaCancelado || !invoice.mesDeduccion) return;
+      
+      // Skip annual deductions (month 13) since they're handled separately
+      if (invoice.mesDeduccion === 13) return;
+      
+      // Get month as string key
+      const monthKey = invoice.mesDeduccion.toString();
+      
+      // Add tax values to monthly totals
+      monthlyTotals[monthKey].isrDeducible += invoice.gravadoISR || 0;
+      monthlyTotals[monthKey].ivaDeducible += invoice.gravadoIVA || 0;
+    });
+    
+    try {
+      // Update fiscal summary document with expense tax data
+      await fiscalDataService.updateFiscalSummaryFields(clientId, year, (existingData) => {
+        // Create base data if none exists
+        const baseData: YearTaxData = existingData || {
+          clientId,
+          year,
+          months: {}
+        };
+        
+        // Ensure months object exists
+        if (!baseData.months) baseData.months = {};
+        
+        // Update each month's expense tax fields
+        Object.entries(monthlyTotals).forEach(([month, taxData]) => {
+          // Create month object if it doesn't exist
+          if (!baseData.months[month]) {
+            baseData.months[month] = {};
+          }
+          
+          // Update only expense tax fields, preserving other data
+          baseData.months[month] = {
+            ...baseData.months[month],
+            isrDeducible: taxData.isrDeducible,
+            ivaDeducible: taxData.ivaDeducible
+          };
+        });
+        
+        return baseData;
+      });
+      
+      console.log("Fiscal summary expense tax fields updated successfully");
+    } catch (error) {
+      console.error("Error updating fiscal summary:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron actualizar los datos fiscales",
+        variant: "destructive"
+      });
+    }
+  }, [clientId, year, filteredInvoices, toast]);
+  
+  // Debounced version of the update function to avoid too many writes
+  const debouncedUpdateFiscalSummary = useCallback(() => {
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+    
+    updateTimeoutRef.current = setTimeout(() => {
+      updateFiscalSummaryTaxes();
+    }, 2000); // 2 second debounce
+  }, [updateFiscalSummaryTaxes]);
+
+  // Trigger update when filtered invoices change
+  useEffect(() => {
+    debouncedUpdateFiscalSummary();
+    
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
+  }, [filteredInvoices, debouncedUpdateFiscalSummary]);
+
+  // NOW we can define handlers that use debouncedUpdateFiscalSummary
   const handleUpdateInvoice = useCallback(async (updatedInvoice: Invoice) => {
     // Add logging to trace the problem
     console.log("Saving invoice to Firebase:", updatedInvoice.uuid, {
@@ -225,6 +329,10 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
       setUpdatedInvoices(prev => {
         const newState = { ...prev, [updatedInvoice.uuid]: updatedInvoice };
         if (selectedInvoice?.uuid === updatedInvoice.uuid) setSelectedInvoice(updatedInvoice);
+        
+        // Trigger fiscal summary update after updating local state
+        debouncedUpdateFiscalSummary();
+        
         return newState;
       });
       
@@ -237,7 +345,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
         variant: "destructive"
       });
     }
-  }, [clientId, selectedInvoice, toast]);
+  }, [clientId, selectedInvoice, toast, debouncedUpdateFiscalSummary]);
 
   const handleLockToggle = useCallback(async (e: React.MouseEvent, invoice: Invoice) => {
     e.stopPropagation();
@@ -439,6 +547,9 @@ const handleEvaluateDeductibility = async () => {
         
         setUpdatedInvoices(updatedMap);
         console.log("Invoice data refreshed successfully");
+        
+        // Update fiscal summary with fresh data
+        updateFiscalSummaryTaxes();
       } catch (refreshError) {
         console.error("Error refreshing invoices:", refreshError);
       }
@@ -512,19 +623,8 @@ const handleEvaluateDeductibility = async () => {
         
         {/* Invoice Info */}
         <td className="px-2 py-1 align-middle">
-          <div className="flex flex-col">
-            <span className={isS01 ? "text-gray-400" : ""}>{format(new Date(invoice.fecha), 'dd/MM/yyyy')}</span>
-            <button 
-              className={`hover:text-blue-700 text-xs text-left ${isS01 ? "text-gray-400" : "text-blue-500"}`}
-              onClick={() => handleInvoiceClick(invoice)}
-            >
-              {invoice.uuid.substring(0, 8)}... ({invoice.tipoDeComprobante})
-            </button>
-          </div>
-        </td>
-
         {/* Emisor */}
-        <td className="px-2 py-1 align-middle">
+       
           <div className="flex flex-col">
             <span className={`truncate max-w-[40ch] ${isS01 ? "text-gray-400" : ""}`}>
               {invoice.nombreEmisor} ({invoice.regimenFiscal || 'N/A'})
@@ -813,7 +913,6 @@ const handleEvaluateDeductibility = async () => {
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
                   <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-12">Lock</th>
-                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Emisor</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
@@ -876,4 +975,3 @@ const handleEvaluateDeductibility = async () => {
     </div>
   );
 }
-
