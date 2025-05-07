@@ -7,6 +7,7 @@ import { FilePlus, RefreshCw } from "lucide-react";
 import { fiscalDataService } from "@/services/fiscal-data-service";
 import { YearTaxData } from "@/models/fiscalData";
 import { useToast } from "@/components/ui/use-toast";
+import { TaxBracketsService } from "@/services/tax-brackets-service";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -161,16 +162,67 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
 
   // ISR calculation functions - using data from Firebase
   const calculateMonthISR = (month: number, amount: number) => {
-    // Mock calculation for now
-    return { 
-      taxBase: amount,
-      lowerLimit: 0,
-      excess: 0,
-      percentage: 0,
-      marginalTax: 0,
-      fixedFee: 0,
-      totalTax: 0
-    };
+    try {
+      // Skip calculation for negative or zero income
+      if (amount <= 0) {
+        return { 
+          taxBase: amount,
+          lowerLimit: 0,
+          excess: 0,
+          percentage: 0,
+          marginalTax: 0,
+          fixedFee: 0,
+          totalTax: 0
+        };
+      }
+      
+      // Get the appropriate tax bracket for this amount and month
+      const brackets = TaxBracketsService.getTaxBracketsByMonth(month + 1); // +1 because months are 0-indexed in the component
+      
+      // Find the bracket that applies to this amount
+      const bracket = brackets.find(b => 
+        amount >= b.lowerLimit && amount <= b.upperLimit
+      );
+      
+      if (!bracket) {
+        console.error(`No tax bracket found for amount ${amount} in month ${month + 1}`);
+        return { 
+          taxBase: amount,
+          lowerLimit: 0,
+          excess: 0,
+          percentage: 0,
+          marginalTax: 0,
+          fixedFee: 0,
+          totalTax: 0
+        };
+      }
+      
+      // Calculate the ISR components
+      const excess = amount - bracket.lowerLimit;
+      const marginalTax = excess * bracket.percentage;
+      const totalTax = bracket.fixedFee + marginalTax;
+      
+      return { 
+        taxBase: amount,
+        lowerLimit: bracket.lowerLimit,
+        excess: excess,
+        percentage: bracket.percentage * 100, // Convert to percentage for display
+        marginalTax: marginalTax,
+        fixedFee: bracket.fixedFee,
+        totalTax: totalTax
+      };
+    } catch (error) {
+      console.error("Error calculating ISR:", error);
+      return { 
+        taxBase: amount,
+        lowerLimit: 0,
+        excess: 0,
+        percentage: 0,
+        marginalTax: 0,
+        fixedFee: 0,
+        totalTax: 0
+      };
+    }
   };
   
   const getMonthlyRetainedISR = (month: number) => {
