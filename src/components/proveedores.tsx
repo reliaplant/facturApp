@@ -6,6 +6,7 @@ import { RefreshCw, Check, X, Search, AlertTriangle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { invoiceService } from '@/services/invoice-service';
 import { listado69bService } from '@/services/listado69b-service';
+import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 
 // Simple supplier interface matching what's in the service
 interface Supplier {
@@ -101,6 +102,22 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
       
       // Update state
       setSuppliers(updatedSuppliers);
+      
+      // IMPORTANT: Save the 69B status to Firebase for each supplier
+      for (const supplier of updatedSuppliers) {
+        try {
+          // Use updateDoc directly since we don't have a specific method for this
+          const supplierRef = doc(getFirestore(), 'clients', clientId, 'suppliers', supplier.rfc);
+          await updateDoc(supplierRef, {
+            inListado69B: supplier.inListado69B || false,
+            situacion69B: supplier.situacion69B || null,
+            lastUpdated: new Date().toISOString()
+          });
+          console.log(`Updated 69B status for ${supplier.rfc} in Firebase: ${supplier.inListado69B ? 'In 69B list' : 'Not in list'}`);
+        } catch (updateError) {
+          console.error(`Error saving 69B status for supplier ${supplier.rfc}:`, updateError);
+        }
+      }
       
       // Show toast if any suppliers are in 69B
       const foundCount = updatedSuppliers.filter(s => s.inListado69B).length;

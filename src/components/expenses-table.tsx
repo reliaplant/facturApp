@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check, Tag, Calculator } from "lucide-react";
+import { Lock, Unlock, Check, Tag, Calculator, Search, X } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +42,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
   const [categories, setCategories] = useState<Category[]>([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [rfcFilter, setRfcFilter] = useState('');
 
   // Add this ref to track if we've loaded from Firebase in this session
   const initialLoadComplete = useRef(false);
@@ -158,7 +159,16 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     // Filter for current year and received invoices only
     const filtered = mergedInvoices.filter(invoice => {
       try {
-        return new Date(invoice.fecha).getFullYear() === year && invoice.recibida;
+        // Base filter: year and received
+        const baseFilter = new Date(invoice.fecha).getFullYear() === year && invoice.recibida;
+        
+        // Additional RFC filter if provided
+        if (baseFilter && rfcFilter.trim() !== '') {
+          return invoice.rfcEmisor.toLowerCase().includes(rfcFilter.toLowerCase()) ||
+                 invoice.nombreEmisor.toLowerCase().includes(rfcFilter.toLowerCase());
+        }
+        
+        return baseFilter;
       } catch (error) { return false; }
     });
     
@@ -183,7 +193,7 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     const months = Object.keys(byMonth).map(Number).sort((a, b) => a - b);
     
     return { filteredInvoices: filtered, invoicesByMonth: byMonth, sortedMonths: months, totalAmount: total };
-  }, [invoices, updatedInvoices, year]); // RESTORED updatedInvoices dependency
+  }, [invoices, updatedInvoices, year, rfcFilter]); // Add rfcFilter as a dependency
 
   // Date and month utilities - consolidated
   const dateUtils = useMemo(() => ({
@@ -926,9 +936,25 @@ const handleEvaluateDeductibility = async () => {
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-base font-medium whitespace-nowrap">Facturas Recibidas {year}</h2>
           <div className="flex items-center gap-2">
-            {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
-              Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </Badge> */}
+            {/* RFC Filter */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Filtrar por RFC o emisor..."
+                value={rfcFilter}
+                onChange={(e) => setRfcFilter(e.target.value)}
+                className="py-1 pl-8 pr-6 text-xs border rounded-md w-60 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              <Search className="h-3.5 w-3.5 absolute left-2 top-1/2 transform -translate-y-1/2 text-gray-400" />
+              {rfcFilter && (
+                <button
+                  onClick={() => setRfcFilter('')}
+                  className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
             
             {/* Deductibility evaluation button */}
             <Button
@@ -941,7 +967,7 @@ const handleEvaluateDeductibility = async () => {
               <Calculator className={`h-3.5 w-3.5 mr-1 ${isEvaluating ? "animate-spin" : ""}`} />
               {isEvaluating ? "Evaluando..." : "Evaluar Deducibilidad"}
             </Button>
-                      </div>
+          </div>
         </div>
 
         {/* Table */}
