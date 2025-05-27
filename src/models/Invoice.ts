@@ -47,11 +47,11 @@ export interface Invoice {
   gravadoModificado?: boolean; // Flag to indicate if gravado values were manually modified
   locked?: boolean; // Indica si la factura está bloqueada para edición
   notasDeducibilidad?: string;
-  
+  exento?: number; // Indica si un monto es exento de impuestos
+  fechaPagoComplemento?: number; // Indica la fecha en la que se realizó el pago del complemento
   // New fields to track payment status
   pagado?: boolean; // If the invoice has been paid (especially for PPD method)
   pagadoConComplementos?: string[]; // UUIDs of payment complements that paid this invoice
-  
   docsRelacionadoComplementoPago: string[]; // UUIDs de documentos relacionados en complemento de pago
   ejercicioFiscal: number; // Año fiscal (derivado de la fecha)
   noCertificado?: string; // Número de certificado

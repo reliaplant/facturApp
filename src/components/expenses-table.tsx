@@ -207,17 +207,27 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
 
   // Tax totals calculation - using useMemo for better performance
   const monthlyTaxTotals = useMemo(() => {
-    const totals: Record<number, { isr: number; iva: number; ieps: number }> = {};
+    const totals: Record<number, { isr: number; iva: number; ieps: number; exento: number }> = {};
     
     // Initialize all months
-    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0, ieps: 0 };
+    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0, ieps: 0, exento: 0 };
     
     // Calculate totals
     filteredInvoices.forEach(invoice => {
-      if (invoice.mesDeduccion && !invoice.estaCancelado) {
+      // Only count invoices that are marked as deductible, have a month assigned, and aren't canceled
+      if (invoice.mesDeduccion && !invoice.estaCancelado && invoice.esDeducible === true) {
+        // Skip annual deductions identified by anual flag or D-prefixed usoCFDI
+        if (invoice.anual === true || invoice.usoCFDI?.startsWith('D')) {
+          return;
+        }
+        
         totals[invoice.mesDeduccion].isr += invoice.gravadoISR || 0;
         totals[invoice.mesDeduccion].iva += invoice.gravadoIVA || 0;
-        totals[invoice.mesDeduccion].ieps += invoice.iepsTrasladado || 0; // Fix: use iepsTrasladado instead of impuestoIEPS
+        totals[invoice.mesDeduccion].ieps += invoice.iepsTrasladado || 0;
+        
+        // Calculate and add exento amount
+        const exentoAmount = Math.max(0, (invoice.total || 0) - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0));
+        totals[invoice.mesDeduccion].exento += exentoAmount;
       }
     });
     
@@ -238,13 +248,15 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     const monthlyTotals: Record<string, {
       isrDeducible: number;
       ivaDeducible: number;
+      exento: number; 
     }> = {};
     
     // Create entries for months 1-12 (as strings to match the model)
     for (let month = 1; month <= 12; month++) {
       monthlyTotals[month.toString()] = {
         isrDeducible: 0,
-        ivaDeducible: 0
+        ivaDeducible: 0,
+        exento: 0
       };
     }
     
@@ -256,12 +268,19 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
       // Skip annual deductions (month 13) since they're handled separately
       if (invoice.mesDeduccion === 13) return;
       
+      // Also skip annual deductions identified by anual flag or D-prefixed usoCFDI
+      if (invoice.anual === true || invoice.usoCFDI?.startsWith('D')) return;
+      
       // Get month as string key
       const monthKey = invoice.mesDeduccion.toString();
       
       // Add tax values to monthly totals
       monthlyTotals[monthKey].isrDeducible += invoice.gravadoISR || 0;
       monthlyTotals[monthKey].ivaDeducible += invoice.gravadoIVA || 0;
+      
+      // Calculate and add exento amount
+      const exentoAmount = Math.max(0, (invoice.total || 0) - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0));
+      monthlyTotals[monthKey].exento += exentoAmount;
     });
     
     try {
@@ -288,7 +307,8 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
           baseData.months[month] = {
             ...baseData.months[month],
             isrDeducible: taxData.isrDeducible,
-            ivaDeducible: taxData.ivaDeducible
+            ivaDeducible: taxData.ivaDeducible,
+            exento: taxData.exento  // Add exento field
           };
         });
         
@@ -896,7 +916,7 @@ const handleEvaluateDeductibility = async () => {
 
         {/* Gravado IVA - only show value if invoice.esDeducible === true */}
         <td 
-          className="pr-7 px-2 py-1 align-middle text-right cursor-pointer"
+          className="px-2 py-1 align-middle text-right cursor-pointer"
           onDoubleClick={() => !isS01 && handleGravadoDoubleClick(invoice)}
         >
           {isComplement || isS01
@@ -910,6 +930,19 @@ const handleEvaluateDeductibility = async () => {
                   }
                   {invoice.gravadoModificado === true && <span className="text-blue-500 ml-1 text-xs">(Mod)</span>}
                 </span>
+          }
+        </td>
+        
+        {/* Exento amount - Calculate as total - gravadoIVA - gravadoISR */}
+        <td className="pr-7 px-2 py-1 align-middle text-right">
+          {isComplement || isS01
+            ? <span></span>
+            : <span>
+                ${invoice.esDeducible === true && invoice.mesDeduccion
+                  ? Math.max(0, (invoice.total || 0) - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0)).toLocaleString('es-MX', { minimumFractionDigits: 2 })
+                  : '0.00'
+                }
+              </span>
           }
         </td>
       </tr>
@@ -988,7 +1021,8 @@ const handleEvaluateDeductibility = async () => {
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Mes Pago</th>
                   <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado ISR</th>
-                  <th className="pr-7 px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Gravado IVA</th>
+                  <th className="pr-7 px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Exento</th>
                 </tr>
               </thead>
               <tbody className="mt-1">
@@ -996,27 +1030,24 @@ const handleEvaluateDeductibility = async () => {
                   sortedMonths.map((month) => (
                     <React.Fragment key={month}>
                       <tr className="bg-gray-200 dark:bg-gray-700">
-                        <td colSpan={13} className="pl-7 px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
+                        <td colSpan={14} className="pl-7 px-2 py-1.5 font-medium">{dateUtils.getMonthName(month)}</td>
                       </tr>
                       
                       {invoicesByMonth[month].map(renderInvoiceRow)}
                       
                       {/* Monthly Totals */}
                       <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
-                        <td colSpan={13} className="px-7 py-1.5 text-right text-gray-500">
+                        <td colSpan={14} className="px-7 py-1.5 text-right text-gray-500">
                           Total Deducible: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
-                          IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                          {monthlyTaxTotals[month].ieps > 0 && (
-                            <>&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
-                            IEPS ${monthlyTaxTotals[month].ieps.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</>
-                          )}
+                          IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
+                          Exento ${monthlyTaxTotals[month].exento.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                         </td>
                       </tr>
                     </React.Fragment>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={13} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={14} className="px-2 py-4 text-center text-gray-500 text-xs">
                       No se encontraron facturas CFDI recibidas para el año {year} con los filtros actuales
                     </td>
                   </tr>
