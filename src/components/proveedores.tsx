@@ -2,9 +2,10 @@
 import React, { useState, useEffect } from 'react';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Check, X, Search } from "lucide-react";
+import { RefreshCw, Check, X, Search, AlertTriangle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
 import { invoiceService } from '@/services/invoice-service';
+import { listado69bService } from '@/services/listado69b-service';
 
 // Simple supplier interface matching what's in the service
 interface Supplier {
@@ -14,11 +15,14 @@ interface Supplier {
   isDeductible: boolean;
   lastUpdated: string;
   invoiceCount?: number;
+  // Add 69B status properties
+  inListado69B?: boolean;
+  situacion69B?: string;
 }
 
 interface ProveedoresProps {
   clientId: string;
-  onSupplierUpdated?: () => void; // Add callback prop
+  onSupplierUpdated?: () => void;
 }
 
 export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
@@ -27,6 +31,7 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isChecking69B, setIsChecking69B] = useState(false);
   const { toast } = useToast();
   const [updatingRfc, setUpdatingRfc] = useState<string | null>(null);
   
@@ -76,6 +81,48 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
     }
   };
   
+  // Check if supplier RFCs are in Listado 69B
+  const check69BStatus = async (suppliersList: Supplier[]) => {
+    setIsChecking69B(true);
+    
+    try {
+      const rfcList = suppliersList.map(s => s.rfc);
+      const results = await listado69bService.checkMultipleRFCs(rfcList);
+      
+      // Update suppliers with 69B status
+      const updatedSuppliers = suppliersList.map(supplier => {
+        const status = results.get(supplier.rfc);
+        return {
+          ...supplier,
+          inListado69B: status?.found || false,
+          situacion69B: status?.situacion
+        };
+      });
+      
+      // Update state
+      setSuppliers(updatedSuppliers);
+      
+      // Show toast if any suppliers are in 69B
+      const foundCount = updatedSuppliers.filter(s => s.inListado69B).length;
+      if (foundCount > 0) {
+        toast({
+          title: `¡Advertencia! ${foundCount} proveedores en Lista 69B`,
+          description: "Se han identificado proveedores en la lista negra del SAT.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error checking 69B status:", error);
+      toast({
+        title: "Error",
+        description: "No se pudo verificar el estatus en Lista 69B",
+        variant: "destructive",
+      });
+    } finally {
+      setIsChecking69B(false);
+    }
+  };
+  
   // Sync suppliers from invoices
   const syncSuppliers = async () => {
     setIsSyncing(true);
@@ -90,7 +137,21 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
       });
       
       // Reload suppliers
-      loadSuppliers();
+      const refreshedSuppliers = await invoiceService.getSuppliers(clientId);
+      
+      // Sort by creation date
+      const sortedSuppliers = refreshedSuppliers.sort((a, b) => {
+        const dateA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+        const dateB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+        return dateB - dateA;
+      });
+      
+      // Set suppliers without 69B status first for fast UI update
+      setSuppliers(sortedSuppliers);
+      
+      // Then check 69B status
+      await check69BStatus(sortedSuppliers);
+      
     } catch (error) {
       console.error("Error syncing suppliers:", error);
       toast({
@@ -184,11 +245,11 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
               variant="black" 
               size="sm"
               onClick={syncSuppliers}
-              disabled={isSyncing}
+              disabled={isSyncing || isChecking69B}
               className="flex items-center whitespace-nowrap"
             >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isSyncing ? "animate-spin" : ""}`} />
-              {isSyncing ? "Sincronizando..." : "Sincronizar Proveedores"}
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${(isSyncing || isChecking69B) ? "animate-spin" : ""}`} />
+              {isSyncing ? "Sincronizando..." : isChecking69B ? "Verificando Lista 69B..." : "Sincronizar Proveedores"}
             </Button>
           </div>
         </div>
@@ -201,19 +262,20 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                   <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">RFC</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Nombre</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Facturas</th>
+                  <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Listado 69B</th>
                   <th className="px-2 py-1.5 pr-7 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
                 </tr>
               </thead>
               <tbody className="mt-1">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={4} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={5} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Cargando proveedores...
                     </td>
                   </tr>
                 ) : filteredSuppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={5} className="px-2 py-4 text-center text-gray-500 text-xs">
                       {suppliers.length === 0 
                         ? 'No hay proveedores registrados. Haga clic en "Sincronizar Proveedores" para extraerlos de sus facturas.'
                         : 'No se encontraron proveedores con ese término de búsqueda.'}
@@ -223,7 +285,9 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                   filteredSuppliers.map((supplier) => (
                     <tr 
                       key={supplier.rfc} 
-                      className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      className={`border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 ${
+                        supplier.inListado69B ? 'bg-red-50 dark:bg-red-900/20' : ''
+                      }`}
                     >
                       <td className="pl-7 px-2 py-1.5 align-middle font-mono">
                         {supplier.rfc}
@@ -233,6 +297,21 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                       </td>
                       <td className="px-2 py-1.5 align-middle text-center">
                         {supplier.invoiceCount || 0}
+                      </td>
+                      <td className="px-2 py-1.5 align-middle text-center">
+                        {isChecking69B ? (
+                          <span className="text-xs text-gray-500">Verificando...</span>
+                        ) : supplier.inListado69B ? (
+                          <Badge 
+                            variant="outline"
+                            className="bg-red-50 text-red-700 border-red-300"
+                          >
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {supplier.situacion69B || "En Lista 69B"}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-gray-500">No</span>
+                        )}
                       </td>
                       <td className="px-2 py-1.5 pr-7 align-middle text-center">
                         <Badge 

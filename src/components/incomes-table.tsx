@@ -94,11 +94,10 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
                  pc.docsRelacionadoComplementoPago?.some(uuid => 
                    uuid.toUpperCase() === invoice.uuid.toUpperCase()))),
     isAnnualDeduction: (invoice: Invoice) => invoice.anual || invoice.usoCFDI?.startsWith('D'),
-    // Simplified gravados calculation
+    // Fixed gravados calculation - gravadoISR should simply be the subtotal
     calculateGravados: (invoice: Invoice) => {
-      const ivaValue = invoice.impuestoTrasladado || 0;
-      const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
-      const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
+      const gravadoISR = invoice.subTotal;
+      const gravadoIVA = invoice.impuestoTrasladado || 0;
       return { gravadoISR, gravadoIVA };
     }
   }), [invoices]);
@@ -135,8 +134,8 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
     const byMonth: Record<number, Invoice[]> = {};
     
     // Initialize monthly tax totals
-    const taxTotals: Record<number, { isr: number; iva: number }> = {};
-    for (let i = 1; i <= 13; i++) taxTotals[i] = { isr: 0, iva: 0 };
+    const taxTotals: Record<number, { isr: number; iva: number; ivaRetenido: number }> = {};
+    for (let i = 1; i <= 13; i++) taxTotals[i] = { isr: 0, iva: 0, ivaRetenido: 0 };
     
     filtered.forEach(invoice => {
       try {
@@ -145,10 +144,15 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
         if (!byMonth[month]) byMonth[month] = [];
         byMonth[month].push(invoice);
         
-        // Calculate tax totals
+        // Calculate tax totals - use the same logic as row display
         if (invoice.mesDeduccion && !invoice.estaCancelado && invoice.esDeducible) {
-          taxTotals[invoice.mesDeduccion].isr += invoice.gravadoISR || invoice.subTotal;
-          taxTotals[invoice.mesDeduccion].iva += invoice.gravadoIVA || (invoice.impuestoTrasladado || 0);
+          // Use the same calculation logic as in the UI to ensure consistent totals
+          const isrValue = invoice.gravadoModificado ? (invoice.gravadoISR || 0) : invoice.subTotal;
+          const ivaValue = invoice.gravadoModificado ? (invoice.gravadoIVA || 0) : (invoice.impuestoTrasladado || 0);
+          
+          taxTotals[invoice.mesDeduccion].isr += isrValue;
+          taxTotals[invoice.mesDeduccion].iva += ivaValue;
+          taxTotals[invoice.mesDeduccion].ivaRetenido += (invoice.ivaRetenido || 0);
         }
       } catch (e) {}
     });
@@ -611,7 +615,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           {isComplement ? <span></span> : (
             invoice.locked ? (
               // Locked state - just show text without Popover
-              <div className="flex items-center gap-1 px-2 py-1 max-w-[200px] opacity-80">
+              <div className="flex items-center gap-1 px-2 py-1.5 max-w-[200px] opacity-80">
                 <Tag className="h-3.5 w-3.5 text-gray-400" />
                 <span className="text-sm text-gray-500 dark:text-gray-400 truncate">
                   {invoice.categoria || 'Sin categoría'}
@@ -621,7 +625,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
               // Unlocked state - show clickable Popover
               <Popover>
                 <PopoverTrigger asChild>
-                  <div className="flex items-center gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1 max-w-[200px] transition-colors">
+                  <div className="flex items-center gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 rounded px-2 py-1.5 max-w-[200px] transition-colors">
                     <Tag className="h-3.5 w-3.5 text-gray-500" />
                     <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
                       {invoice.categoria || 'Sin categoría'}
@@ -706,7 +710,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           )}
         </td>
         
-        {/* Gravado badge */}
+        {/* Gravable badge */}
         <td className="px-2 py-1 align-middle text-center">
           {isComplement ? <span></span> : (
             <Badge 
@@ -731,7 +735,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           {isComplement ? <span></span> : (
             <span>
               ${invoice.mesDeduccion && invoice.esDeducible 
-                ? (invoice.gravadoISR || invoice.subTotal).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
+                ? (invoice.gravadoModificado ? (invoice.gravadoISR || 0) : invoice.subTotal).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
                 : '0.00'}
               {invoice.gravadoModificado && <span className="text-blue-500 ml-1 text-xs">(Mod)</span>}
             </span>
@@ -744,7 +748,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           {isComplement ? <span></span> : (
             <span>
               ${invoice.mesDeduccion && invoice.esDeducible 
-                ? (invoice.gravadoIVA || (invoice.impuestoTrasladado || 0)).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
+                ? (invoice.gravadoModificado ? (invoice.gravadoIVA || 0) : (invoice.impuestoTrasladado || 0)).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
                 : '0.00'}
               {invoice.gravadoModificado && <span className="text-blue-500 ml-1 text-xs">(Mod)</span>}
             </span>
@@ -823,7 +827,8 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
                       <tr className="bg-gray-100 dark:bg-gray-800 font-medium border-t border-gray-300 dark:border-gray-600">
                         <td colSpan={13} className="px-7 py-1.5 text-right text-gray-500">
                           Total Gravado: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
-                          IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
+                          IVA Retenido ${monthlyTaxTotals[month].ivaRetenido.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                         </td>
                       </tr>
                     </React.Fragment>

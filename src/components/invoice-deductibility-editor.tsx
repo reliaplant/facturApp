@@ -180,10 +180,11 @@ export function InvoiceDeductibilityEditor({
           {formData.esDeducible && formData.mesDeduccion !== "none" && (
             <>
               <div className="grid grid-cols-1 gap-2">
+                {/* Add back the Reset Values button */}
                 <div className="flex justify-between items-center">
                   <Label htmlFor="gravadoISR">Gravado ISR</Label>
                   <span 
-                    className="text-xs text-red-600 hover:underline cursor-pointer"
+                    className="text-xs text-blue-600 hover:underline cursor-pointer"
                     onClick={handleReset}
                   >
                     Restablecer valores
@@ -197,22 +198,17 @@ export function InvoiceDeductibilityEditor({
                   value={formData.gravadoISR}
                   onChange={(e) => {
                     const newISR = parseFloat(e.target.value) || 0;
-                    const newIVA = Math.round(newISR * 0.16 * 100) / 100;
-                    
-                    // Check if value actually changed from calculated value
-                    const { gravadoISR: calculatedISR } = calculateGravados(invoice!);
-                    const isModified = Math.abs(newISR - calculatedISR) > 0.01; // Allow small rounding differences
-                    
+                    // No longer automatically update IVA when ISR changes
                     setFormData({
                       ...formData,
                       gravadoISR: newISR,
-                      gravadoIVA: newIVA,
-                      gravadoModificado: isModified
+                      // IVA is now independent and manually edited
+                      gravadoModificado: true
                     });
                   }}
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Calculado como IVA trasladado ÷ 0.16
+                  Normalmente calculado como IVA trasladado ÷ 0.16
                 </p>
               </div>
 
@@ -228,13 +224,14 @@ export function InvoiceDeductibilityEditor({
                     const newIVA = parseFloat(e.target.value) || 0;
                     setFormData({
                       ...formData,
-                      gravadoIVA: newIVA
+                      gravadoIVA: newIVA,
+                      gravadoModificado: true
                     });
                   }}
-                  disabled
+                  // Removed the disabled attribute to allow manual editing
                 />
                 <p className="text-xs text-gray-500 mt-1">
-                  Calculado automáticamente como Gravado ISR × 0.16
+                  Normalmente calculado como Gravado ISR × 0.16
                 </p>
               </div>
             </>

@@ -134,10 +134,20 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
     }
     
     const ivaValue = invoice.impuestoTrasladado || 0;
-    const gravadoISR = ivaValue !== undefined ? Math.round(ivaValue / 0.16 * 100) / 100 : invoice.subTotal;
-    const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
     
-    return { gravadoIVA, gravadoISR };
+    // Special case: when IVA is 0, gravado ISR is TOTAL and gravado IVA is 0
+    if (ivaValue === 0) {
+      return { 
+        gravadoISR: invoice.total,  // Changed from subtotal to total
+        gravadoIVA: 0
+      };
+    } 
+    // When IVA exists, calculate normally
+    else {
+      const gravadoISR = Math.round(ivaValue / 0.16 * 100) / 100;
+      const gravadoIVA = Math.round(gravadoISR * 0.16 * 100) / 100;
+      return { gravadoIVA, gravadoISR };
+    }
   }, [invoiceHelpers]);
   
   // Process and filter invoices - using useMemo for better performance
@@ -187,16 +197,17 @@ export function ExpensesTable({ year, invoices = [], disableExport = false, clie
 
   // Tax totals calculation - using useMemo for better performance
   const monthlyTaxTotals = useMemo(() => {
-    const totals: Record<number, { isr: number; iva: number }> = {};
+    const totals: Record<number, { isr: number; iva: number; ieps: number }> = {};
     
     // Initialize all months
-    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0 };
+    for (let i = 1; i <= 13; i++) totals[i] = { isr: 0, iva: 0, ieps: 0 };
     
     // Calculate totals
     filteredInvoices.forEach(invoice => {
       if (invoice.mesDeduccion && !invoice.estaCancelado) {
         totals[invoice.mesDeduccion].isr += invoice.gravadoISR || 0;
         totals[invoice.mesDeduccion].iva += invoice.gravadoIVA || 0;
+        totals[invoice.mesDeduccion].ieps += invoice.iepsTrasladado || 0; // Fix: use iepsTrasladado instead of impuestoIEPS
       }
     });
     
@@ -756,9 +767,25 @@ const handleEvaluateDeductibility = async () => {
             <span></span>
           ) : (
             <div className={`flex flex-col text-xs text-right ${isS01 ? "text-gray-400" : ""}`}>
-              <span>+IVA: ${(invoice.impuestoTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
-              <span>-IVA: ${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
-              <span>-ISR: ${(invoice.isrRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              {(invoice.impuestoTrasladado || 0) > 0 && (
+                <span>+IVA: ${(invoice.impuestoTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              )}
+              {(invoice.iepsTrasladado || 0) > 0 && (
+                <span>+IEPS: ${(invoice.iepsTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              )}
+              {(invoice.ivaRetenido || 0) > 0 && (
+                <span>-IVA: ${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              )}
+              {(invoice.isrRetenido || 0) > 0 && (
+                <span>-ISR: ${(invoice.isrRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              )}
+              {/* Show a placeholder when all taxes are zero */}
+              {(invoice.impuestoTrasladado || 0) === 0 && 
+               (invoice.iepsTrasladado || 0) === 0 && 
+               (invoice.ivaRetenido || 0) === 0 && 
+               (invoice.isrRetenido || 0) === 0 && (
+                <span>Sin impuestos</span>
+              )}
             </div>
           )}
         </td>
@@ -953,6 +980,10 @@ const handleEvaluateDeductibility = async () => {
                         <td colSpan={13} className="px-7 py-1.5 text-right text-gray-500">
                           Total Deducible: ISR ${monthlyTaxTotals[month].isr.toLocaleString('es-MX', { minimumFractionDigits: 2 })}   &nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
                           IVA ${monthlyTaxTotals[month].iva.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                          {monthlyTaxTotals[month].ieps > 0 && (
+                            <>&nbsp;&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;&nbsp;   
+                            IEPS ${monthlyTaxTotals[month].ieps.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</>
+                          )}
                         </td>
                       </tr>
                     </React.Fragment>
