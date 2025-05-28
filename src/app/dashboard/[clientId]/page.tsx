@@ -23,6 +23,7 @@ import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Mak
 import { invoiceService } from "@/services/invoice-service"; // Add this import
 import SatRequests from "@/components/sat-requests";
 import Proveedores from "@/components/proveedores"; // Add this import
+import { FacturasExtranjerasTable } from "@/components/facturas-extranjeras-table"; // Add this import
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -326,6 +327,7 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="fiscal">Cédula Fiscal</TabsTrigger>
                 <TabsTrigger size="sm" value="incomes">Facturas Emitidas</TabsTrigger>
                 <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
+                <TabsTrigger size="sm" value="extranjeras">Facturas Extranjeras</TabsTrigger>
                 <TabsTrigger size="sm" value="proveedores">Proveedores</TabsTrigger>
                 <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
@@ -464,6 +466,14 @@ export default function ClientDashboard() {
             <Proveedores 
               clientId={clientId} 
               onSupplierUpdated={handleSupplierUpdated} // Pass this callback to Proveedores
+            />
+          </TabsContent>
+
+          {/* Add the Facturas Extranjeras tab content */}
+          <TabsContent value="extranjeras">
+            <FacturasExtranjerasTable
+              clientId={clientId}
+              year={selectedYear}
             />
           </TabsContent>
         </Tabs>

@@ -504,12 +504,30 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                     );
                   })}
                 </tr>
+                
+                {/* Add new row for Pagado Extranjero */}
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Extranjero</td>
+                  {months.map(month => {
+                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${getCellStyle(month, extranjeroValue)}`}
+                      >
+                        {formatCurrency(extranjeroValue)}
+                      </td>
+                    );
+                  })}
+                </tr>
+
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Total deducciones del mes</td>
                   {months.map(month => {
                     const expenseValue = monthlyData[month]?.expenseAmount || 0;
                     const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
-                    const value = expenseValue + exentoValue;
+                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    const value = expenseValue + exentoValue + extranjeroValue;
                     return (
                       <td 
                         key={month} 
@@ -540,7 +558,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                     const expenseValue = monthlyData[month]?.expenseAmount || 0;
                     const depreciationValue = monthlyDepreciations[month] || 0;
                     const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
-                    const totalValue = expenseValue + depreciationValue + exentoValue;
+                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    const totalValue = expenseValue + depreciationValue + exentoValue + extranjeroValue;
                     return (
                       <td 
                         key={month} 
@@ -554,14 +573,16 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Deducciones acumuladas</td>
                   {months.map(month => {
-                    // Calculate accumulated exento values up to this month
+                    // Calculate accumulated exento and extranjero values up to this month
                     let accumulatedExento = 0;
+                    let accumulatedExtranjero = 0;
                     for (let i = 0; i <= month; i++) {
                       const monthKey = (i + 1).toString();
                       accumulatedExento += fiscalData?.months[monthKey]?.exento || 0;
+                      accumulatedExtranjero += fiscalData?.months[monthKey]?.deduccionFacturasManual || 0;
                     }
                     
-                    const value = (monthlyData[month]?.periodExpensesTotal || 0) + accumulatedExento;
+                    const value = (monthlyData[month]?.periodExpensesTotal || 0) + accumulatedExento + accumulatedExtranjero;
                     return (
                       <td 
                         key={month} 
@@ -725,13 +746,15 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Base del Impuesto</td>
                   {months.map(month => {
                     const basePeriodProfit = monthlyData[month]?.periodProfit || 0;
-                    // Calculate accumulated exento values up to this month
+                    // Calculate accumulated exento and extranjero values up to this month
                     let accumulatedExento = 0;
+                    let accumulatedExtranjero = 0;
                     for (let i = 0; i <= month; i++) {
                       const monthKey = (i + 1).toString();
                       accumulatedExento += fiscalData?.months[monthKey]?.exento || 0;
+                      accumulatedExtranjero += fiscalData?.months[monthKey]?.deduccionFacturasManual || 0;
                     }
-                    const value = basePeriodProfit - accumulatedExento;
+                    const value = basePeriodProfit - accumulatedExento - accumulatedExtranjero;
                     return (
                       <td 
                         key={month} 

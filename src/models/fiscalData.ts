@@ -21,6 +21,7 @@ export interface MonthlyTaxData {
   isrDeducible?: number;   // ISR deductible amount
   ivaDeducible?: number;   // IVA deductible amount
   exento?: number;         // Exempt amounts
+  deduccionFacturasManual?: number; // Manual deductions
   // Make all fields optional to allow partial updates
 }
 
