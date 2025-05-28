@@ -7,6 +7,8 @@ import { useToast } from "@/components/ui/use-toast";
 import { invoiceService } from '@/services/invoice-service';
 import { listado69bService } from '@/services/listado69b-service';
 import { doc, updateDoc, getFirestore } from 'firebase/firestore';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { categoryService } from '@/services/category-service';
 
 // Simple supplier interface matching what's in the service
 interface Supplier {
@@ -19,6 +21,14 @@ interface Supplier {
   // Add 69B status properties
   inListado69B?: boolean;
   situacion69B?: string;
+  // Add default category
+  categoriaDefault?: string;
+}
+
+// Category interface
+interface Category {
+  id?: string;
+  name: string;
 }
 
 interface ProveedoresProps {
@@ -33,13 +43,31 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isChecking69B, setIsChecking69B] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [updatingCategoryRfc, setUpdatingCategoryRfc] = useState<string | null>(null);
   const { toast } = useToast();
   const [updatingRfc, setUpdatingRfc] = useState<string | null>(null);
   
   // Load suppliers on mount
   useEffect(() => {
     loadSuppliers();
+    loadCategories(); // Add this to load categories
   }, [clientId]);
+  
+  // Load categories
+  const loadCategories = async () => {
+    try {
+      const loadedCategories = await categoryService.getAllCategories();
+      setCategories(loadedCategories);
+    } catch (error) {
+      console.error("Error loading categories:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar las categorías",
+        variant: "destructive",
+      });
+    }
+  };
   
   // Filter suppliers based on search term
   useEffect(() => {
@@ -231,6 +259,48 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
     }
   };
   
+  // Handle updating default category
+  const updateDefaultCategory = async (rfc: string, categoryName: string | null) => {
+    try {
+      setUpdatingCategoryRfc(rfc);
+      
+      // Optimistic update for UI - fixed type issue
+      setSuppliers(suppliers.map(supplier => {
+        if (supplier.rfc === rfc) {
+          // Create a new supplier object with the correct type
+          const updatedSupplier: Supplier = {
+            ...supplier,
+            // Convert null to undefined for the UI state to match Supplier interface
+            categoriaDefault: categoryName === "none" ? undefined : 
+                             categoryName === null ? undefined : categoryName
+          };
+          return updatedSupplier;
+        }
+        return supplier;
+      }));
+      
+      // Update in Firestore
+      const supplierRef = doc(getFirestore(), 'clients', clientId, 'suppliers', rfc);
+      await updateDoc(supplierRef, {
+        categoriaDefault: categoryName === "none" ? null : categoryName,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      // Notify parent if needed
+      if (onSupplierUpdated) {
+        console.log("🔔 Notifying parent of supplier category update");
+        onSupplierUpdated();
+      }
+    } catch (error) {
+      console.error("Error updating default category:", error);
+      
+      // Revert optimistic update - use the original suppliers array to avoid type issues
+      setSuppliers([...suppliers]);
+    } finally {
+      setUpdatingCategoryRfc(null);
+    }
+  };
+
   return (
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
@@ -280,19 +350,20 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Nombre</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Facturas</th>
                   <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Listado 69B</th>
+                  <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Categoría Default</th>
                   <th className="px-2 py-1.5 pr-7 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Deducible</th>
                 </tr>
               </thead>
               <tbody className="mt-1">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={6} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Cargando proveedores...
                     </td>
                   </tr>
                 ) : filteredSuppliers.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={6} className="px-2 py-4 text-center text-gray-500 text-xs">
                       {suppliers.length === 0 
                         ? 'No hay proveedores registrados. Haga clic en "Sincronizar Proveedores" para extraerlos de sus facturas.'
                         : 'No se encontraron proveedores con ese término de búsqueda.'}
@@ -329,6 +400,32 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                         ) : (
                           <span className="text-xs text-gray-500">No</span>
                         )}
+                      </td>
+                      {/* Add default category column */}
+                      <td className="px-2 py-1.5 align-middle text-center">
+                        <div className="w-48 mx-auto">
+                          <Select
+                            value={supplier.categoriaDefault || "none"}
+                            onValueChange={(value) => updateDefaultCategory(supplier.rfc, value === "none" ? null : value)}
+                            disabled={updatingCategoryRfc === supplier.rfc}
+                          >
+                            <SelectTrigger 
+                              className={`h-7 text-xs border-0 bg-transparent hover:bg-gray-100 ${
+                                !supplier.categoriaDefault ? 'text-red-500 italic' : ''
+                              }`}
+                            >
+                              <SelectValue placeholder="Sin categoría por defecto" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Sin categoría</SelectItem>
+                              {categories.map((category) => (
+                                <SelectItem key={category.id} value={category.name}>
+                                  {category.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </td>
                       <td className="px-2 py-1.5 pr-7 align-middle text-center">
                         <Badge 
