@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Lock, Unlock, Check, Tag, RefreshCw, Calculator } from "lucide-react";
+import { Lock, Unlock, Check, Tag, RefreshCw, Calculator, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { Badge } from "@/components/ui/badge";
@@ -49,6 +49,9 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
   const highlightTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [isEvaluating, setIsEvaluating] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verificationProgress, setVerificationProgress] = useState(0);
+  const [verificationTotal, setVerificationTotal] = useState(0);
   const { toast } = useToast();
   const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -604,11 +607,13 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
           </div>
         </td>
 
-        {/* Concept & Category */}
-        <td className="px-2 py-1 align-middle">
+        {/* Cancelado Status */}
+        <td className="px-2 py-1 align-middle text-center">
           {isComplement 
-            ? <span className="text-gray-400">Comp. de Pago</span>
-            : <span className="text-sm">{invoice.concepto || 'Sin concepto'}</span>
+            ? <span className="text-gray-400">-</span>
+            : invoice.estaCancelado
+              ? <span className="inline-flex items-center px-2 py-0.5 rounded-md text-sm font-medium bg-red-100 text-red-800">Sí</span>
+              : <span className="inline-flex items-center px-2 py-0.5 rounded-md text-sm font-medium bg-green-100 text-green-800">No</span>
           }
         </td>
         <td className="px-2 py-1 align-middle">
@@ -761,6 +766,104 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
   // Avoid re-renders for the memo component
   InvoiceRow.displayName = 'InvoiceRow';
 
+  // Function to handle bulk verification of CFDIs
+  const handleBulkVerifyCfdis = async () => {
+    // Get all non-complemento invoices
+    const invoicesToVerify = filteredInvoices.filter(invoice => invoice.tipoDeComprobante !== 'P');
+    
+    if (invoicesToVerify.length === 0) {
+      toast({
+        title: "No hay facturas para verificar",
+        description: "No se encontraron facturas CFDI para verificar",
+        variant: "default"
+      });
+      return;
+    }
+
+    setIsVerifying(true);
+    setVerificationTotal(invoicesToVerify.length);
+    setVerificationProgress(0);
+    
+    let verified = 0;
+    let updated = 0;
+    let errors = 0;
+    let canceladas = 0;
+    
+    const batchSize = 5; // Process 5 invoices at a time to avoid overwhelming the server
+    const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    
+    // Process invoices in batches
+    for (let i = 0; i < invoicesToVerify.length; i += batchSize) {
+      const batch = invoicesToVerify.slice(i, i + batchSize);
+      
+      // Process each invoice sequentially within the batch with a delay
+      for (const invoice of batch) {
+        try {
+          // Add 300ms delay between each CFDI verification to avoid overloading SAT's API
+          await delay(300);
+          
+          const response = await fetch("/api/verify-cfdi", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              uuid: invoice.uuid,
+              rfcEmisor: invoice.rfcEmisor,
+              rfcReceptor: invoice.rfcReceptor,
+              total: invoice.total,
+            }),
+          });
+          
+          if (!response.ok) throw new Error(`Error verificando CFDI ${invoice.uuid}`);
+          
+          const result = await response.json();
+          verified++;
+          
+          // If the status has changed, update the invoice
+          if ((result.status === "Cancelado" && !invoice.estaCancelado) || 
+              (result.status !== "Cancelado" && invoice.estaCancelado)) {
+            
+            const newStatus = result.status === "Cancelado";
+            if (newStatus) canceladas++;
+            
+            // Update invoice in the database
+            await invoiceService.updateInvoice(clientId, invoice.uuid, { 
+              estaCancelado: newStatus,
+              fechaCancelación: result.cancellationDate || null
+            });
+            
+            // Update local state
+            handleUpdateInvoice({
+              ...invoice, 
+              estaCancelado: newStatus,
+              fechaCancelación: result.cancellationDate || undefined
+            });
+            
+            updated++;
+          }
+          
+          // Update progress
+          setVerificationProgress(prev => prev + 1);
+          
+        } catch (error) {
+          console.error(`Error verifying CFDI ${invoice.uuid}:`, error);
+          errors++;
+          setVerificationProgress(prev => prev + 1);
+        }
+      }
+      
+      // No need for additional delay between batches since we've already delayed each individual request
+    }
+    
+    // Show completion toast
+    toast({
+      title: "Verificación completada",
+      description: `Se verificaron ${verified} facturas, se actualizaron ${updated} (${canceladas} canceladas) y hubo ${errors} errores.`,
+      variant: "default"
+    });
+    
+    setIsVerifying(false);
+  };
+
   return (
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
@@ -774,6 +877,20 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
             {/* <Badge variant="outline" className="text-sm py-0.5 whitespace-nowrap">
               Total: ${totalAmount.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
             </Badge> */}
+            
+            {/* Verify CFDIs button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex items-center whitespace-nowrap"
+              onClick={handleBulkVerifyCfdis}
+              disabled={isVerifying}
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isVerifying ? "animate-spin" : ""}`} />
+              {isVerifying 
+                ? `Verificando (${verificationProgress}/${verificationTotal})` 
+                : "Verificar CFDIs"}
+            </Button>
             
             {/* Add income evaluation button */}
             <Button
@@ -800,7 +917,7 @@ export function IncomesTable({ year, invoices = [], disableExport = false, clien
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Factura</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Receptor</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Uso/Pago</th>
-                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Concepto</th>
+                  <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center">Cancelado</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Categoría</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">SubTotal</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Impuestos</th>
