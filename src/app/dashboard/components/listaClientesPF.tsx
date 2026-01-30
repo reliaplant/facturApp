@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface ListaClientesPFProps {
   clients: Client[];
@@ -20,8 +21,9 @@ interface ListaClientesPFProps {
     name: string;
     rfc: string;
     email: string;
+    tipoPersona: 'fisica' | 'moral';
   };
-  setNewClient: (client: { name: string; rfc: string; email: string }) => void;
+  setNewClient: (client: { name: string; rfc: string; email: string; tipoPersona: 'fisica' | 'moral' }) => void;
   handleCreateClient: () => Promise<void>;
   isCreating: boolean;
 }
@@ -125,8 +127,25 @@ export const ListaClientesPF = ({
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                   <div className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor="tipoPersona" className="text-right">
+                      Tipo*
+                    </Label>
+                    <Select 
+                      value={newClient.tipoPersona} 
+                      onValueChange={(value: 'fisica' | 'moral') => setNewClient({ ...newClient, tipoPersona: value })}
+                    >
+                      <SelectTrigger id="tipoPersona" className="col-span-3">
+                        <SelectValue placeholder="Selecciona el tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fisica">Persona Física</SelectItem>
+                        <SelectItem value="moral">Persona Moral</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="name" className="text-right">
-                      Nombre*
+                      {newClient.tipoPersona === 'fisica' ? 'Nombre*' : 'Razón Social*'}
                     </Label>
                     <Input
                       id="name"
@@ -150,7 +169,7 @@ export const ListaClientesPF = ({
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="email" className="text-right">
-                      Email
+                      Email*
                     </Label>
                     <Input
                       id="email"
@@ -159,6 +178,7 @@ export const ListaClientesPF = ({
                       onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
                       className="col-span-3"
                       placeholder="correo@ejemplo.com"
+                      required
                     />
                   </div>
                 </div>

@@ -10,6 +10,7 @@ export interface Client {
   name?: string;
   email?: string;
   telefono?: string;
+  tipoPersona?: 'fisica' | 'moral'; // Tipo de persona: física o moral
   
   // For client categorization in dashboard
   tier?: string;

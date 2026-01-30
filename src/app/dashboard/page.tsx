@@ -15,7 +15,8 @@ export default function DashboardPage() {
   const [newClient, setNewClient] = useState({
     name: "",
     rfc: "",
-    email: ""
+    email: "",
+    tipoPersona: 'fisica' as 'fisica' | 'moral'
   });
   const [isCreating, setIsCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("personaFisica");
@@ -45,7 +46,7 @@ export default function DashboardPage() {
   }, []);
 
   const handleCreateClient = async () => {
-    if (!newClient.name || !newClient.rfc) {
+    if (!newClient.name || !newClient.rfc || !newClient.email) {
       return;
     }
 
@@ -56,7 +57,8 @@ export default function DashboardPage() {
         name: newClient.name,
         rfc: newClient.rfc,
         tier: "onboarding",
-        email: newClient.email && newClient.email.trim() !== '' ? newClient.email : undefined
+        email: newClient.email && newClient.email.trim() !== '' ? newClient.email : undefined,
+        tipoPersona: newClient.tipoPersona
       };
 
       const testClient = await clientService.createClient(clientData);
@@ -66,7 +68,8 @@ export default function DashboardPage() {
       setNewClient({
         name: "",
         rfc: "",
-        email: ""
+        email: "",
+        tipoPersona: 'fisica'
       });
       setIsDialogOpen(false);
     } catch (error) {

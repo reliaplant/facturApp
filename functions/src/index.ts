@@ -17,7 +17,6 @@ import {
   HttpsWebClient,
   FielRequestBuilder,
   Service,
-  ServiceEndpoints,
   QueryParameters,
   DateTimePeriod,
   DownloadType,
@@ -95,18 +94,16 @@ export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
   const webClient = new HttpsWebClient();
   const requestBuilder = new FielRequestBuilder(fielObj);
 
-  // 2️⃣ Servicio apuntando a CFDI
+  // 2️⃣ Servicio apuntando a CFDI (v2.0 ya no requiere ServiceEndpoints)
   const service = new Service(
     requestBuilder,
-    webClient,
-    undefined,
-    ServiceEndpoints.cfdi()
+    webClient
   );
 
   // 3️⃣ Parámetros de la consulta con fechas proporcionadas
   const periodo = DateTimePeriod.createFromValues(from, to);
 
-  // Use the provided downloadType parameter
+  // Use the provided downloadType parameter (v2.0 sigue usando constructor)
   const downloadTypeObj = new DownloadType(downloadType); // "issued" or "received"
   const requestType = new RequestType("xml"); // xml
 
@@ -243,14 +240,12 @@ export const verificarSolicitud = onCall({ timeoutSeconds: 60 }, async (req) => 
     );
   }
 
-  // Crear el servicio
+  // Crear el servicio (v2.0 ya no requiere ServiceEndpoints)
   const webClient = new HttpsWebClient();
   const requestBuilder = new FielRequestBuilder(fielObj);
   const service = new Service(
     requestBuilder,
-    webClient,
-    undefined,
-    ServiceEndpoints.cfdi()
+    webClient
   );
 
   // Verificar la solicitud
@@ -338,9 +333,7 @@ export const descargarPaquetes = onCall({ timeoutSeconds: 120 }, async (req) => 
   const fielObj = Fiel.create(cerBuf.toString("binary"), keyBuf.toString("binary"), pwdBuf.toString("utf8").trim());
   const service = new Service(
     new FielRequestBuilder(fielObj),
-    new HttpsWebClient(),
-    undefined,
-    ServiceEndpoints.cfdi()
+    new HttpsWebClient()
   );
 
   const savedPaths: string[] = [];
