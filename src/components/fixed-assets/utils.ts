@@ -10,7 +10,7 @@ export function formatDate(dateString: string): string {
   try {
     if (!dateString) return "-";
     const date = parseISO(dateString);
-    return format(date, "dd/MM/yyyy", { locale: es });
+    return format(date, "dd MMM yyyy", { locale: es });
   } catch (error) {
     console.error("Error formatting date:", error);
     return dateString || "-";

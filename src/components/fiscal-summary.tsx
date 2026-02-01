@@ -4,11 +4,13 @@ import { es } from "date-fns/locale";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { FilePlus, RefreshCw } from "lucide-react";
-import { fiscalDataService } from "@/services/fiscal-data-service";
-import { YearTaxData } from "@/models/fiscalData";
+import { CFDI } from "@/models/CFDI";
+import { fiscalCalculator, AnnualFiscalSummary } from "@/services/fiscal-calculator";
 import { useToast } from "@/components/ui/use-toast";
 import { TaxBracketsService } from "@/services/tax-brackets-service";
 import { FixedAssetService } from "@/services/fixed-asset-service";
+import { facturasExtranjerasService } from "@/services/facturas-extranjeras-service";
+import { FacturaExtranjera } from "@/models/facturaManual";
 import DeclaracionModal from "@/components/declaracion-modal";
 
 // Simplified interface for fiscal data - focusing only on key metrics
@@ -32,19 +34,67 @@ export interface MonthlyFiscalData {
 interface FiscalSummaryProps {
   year: number;
   clientId: string;
+  cfdis: CFDI[]; // Ahora recibe los CFDIs directamente
   onGenerateDeclaration?: (monthData: MonthlyFiscalData) => void;
 }
 
-export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
+export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
   const months = Array.from({ length: 12 }, (_, i) => i);
   // Reference date data
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
   
-  // Add state for Firebase fiscal data
-  const [fiscalData, setFiscalData] = useState<YearTaxData | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Calcular el resumen fiscal dinámicamente desde los CFDIs
+  const fiscalSummary = useMemo(() => {
+    return fiscalCalculator.calculateAnnualSummary(cfdis, year, clientId);
+  }, [cfdis, year, clientId]);
+  
+  // Calcular montos exentos por mes (de gastos con IVA exento)
+  const monthlyExento = useMemo(() => {
+    const exento: Record<number, number> = {};
+    for (let month = 1; month <= 12; month++) {
+      exento[month] = 0;
+    }
+    
+    cfdis
+      .filter(cfdi => cfdi.esEgreso && cfdi.esDeducible && !cfdi.estaCancelado && cfdi.mesDeduccion)
+      .forEach(cfdi => {
+        const month = cfdi.mesDeduccion!;
+        if (month >= 1 && month <= 12) {
+          // Sumar el monto exento del CFDI
+          exento[month] += cfdi.exento || 0;
+        }
+      });
+    
+    return exento;
+  }, [cfdis]);
+  
+  // Estado para facturas extranjeras cargadas desde Firebase
+  const [facturasExtranjeras, setFacturasExtranjeras] = useState<FacturaExtranjera[]>([]);
+  
+  // Calcular facturas extranjeras por mes desde las facturas manuales cargadas
+  const monthlyExtranjero = useMemo(() => {
+    const extranjero: Record<number, number> = {};
+    for (let month = 1; month <= 12; month++) {
+      extranjero[month] = 0;
+    }
+    
+    // Sumar facturas extranjeras manuales por mes de su fecha (solo las deducibles)
+    facturasExtranjeras
+      .filter(f => f.esDeducible !== false) // Solo incluir las deducibles
+      .forEach(factura => {
+        const fechaFactura = new Date(factura.fecha);
+        const month = fechaFactura.getMonth() + 1; // getMonth() es 0-indexed
+        if (month >= 1 && month <= 12) {
+          extranjero[month] += factura.totalMXN || 0;
+        }
+      });
+    
+    return extranjero;
+  }, [facturasExtranjeras]);
+  
+  const [loading, setLoading] = useState(false);
   const [monthlyDepreciations, setMonthlyDepreciations] = useState<Record<number, number>>({});
   const [taxBracketsByMonth, setTaxBracketsByMonth] = useState<Record<number, any[]>>({});
   const [declaracionModalOpen, setDeclaracionModalOpen] = useState(false);
@@ -55,31 +105,6 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
   
   // Initialize the FixedAssetService
   const fixedAssetService = useMemo(() => new FixedAssetService(), []);
-  
-  // Fetch fiscal data from Firebase
-  useEffect(() => {
-    async function fetchFiscalData() {
-      setLoading(true);
-      try {
-        const data = await fiscalDataService.getFiscalSummary(clientId, year);
-        console.log("Fetched fiscal data:", data);
-        setFiscalData(data);
-      } catch (error) {
-        console.error("Error fetching fiscal data:", error);
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los datos fiscales",
-          variant: "destructive"
-        });
-      } finally {
-        setLoading(false);
-      }
-    }
-    
-    if (clientId && year) {
-      fetchFiscalData();
-    }
-  }, [clientId, year, toast]);
 
   // Modify the depreciation data loading effect
   useEffect(() => {
@@ -135,58 +160,54 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     }
     setTaxBracketsByMonth(brackets);
   }, []);
-
-  // Convert Firebase data to the format expected by our component
-  const monthlyData = useMemo(() => {
-    if (!fiscalData || !fiscalData.months) {
-      // Return empty data array if no fiscal data
-      return months.map(month => ({
-        month,
-        incomeAmount: 0,
-        expenseAmount: 0,
-        ivaCollected: 0,
-        ivaPaid: 0,
-        ivaRetenido: 0,
-        profit: 0,
-        depreciation: 0, // Add with default value
-        periodIncomesTotal: 0,
-        periodExpensesTotal: 0,
-        periodProfit: 0
-      }));
+  
+  // Cargar facturas extranjeras desde Firebase
+  useEffect(() => {
+    const fetchFacturasExtranjeras = async () => {
+      try {
+        const facturas = await facturasExtranjerasService.getFacturasExtranjeras(clientId, year);
+        console.log(`Loaded ${facturas.length} foreign invoices for fiscal summary`);
+        setFacturasExtranjeras(facturas);
+      } catch (error) {
+        console.error("Error loading foreign invoices:", error);
+        setFacturasExtranjeras([]);
+      }
+    };
+    
+    if (clientId && year) {
+      fetchFacturasExtranjeras();
     }
+  }, [clientId, year]);
 
-    // Convert the Firebase data to our component's format
+  // Convertir datos del calculador al formato del componente
+  const monthlyData = useMemo(() => {
+    // Convertir del formato del calculador al formato del componente
     return months.map(month => {
-      // Get month data from Firebase (month+1 because our months are 0-indexed but Firebase uses 1-indexed)
-      const monthKey = (month + 1).toString();
-      const monthData = fiscalData.months[monthKey] || {};
+      // fiscalSummary usa meses 1-12, el componente usa 0-11
+      const monthData = fiscalSummary.months[month + 1];
       
-      // Map Firebase fields to our component's fields
-      const incomeAmount = monthData.isrGravado || 0;
-      const expenseAmount = monthData.isrDeducible || 0;
-      const ivaCollected = monthData.ivaTrasladado || 0;
-      const ivaPaid = monthData.ivaDeducible || 0;
-      const ivaRetenido = monthData.ivaRetenido || 0;
+      // Obtener datos de ingresos y egresos
+      const incomeAmount = monthData?.ingresos.isrGravado || 0;
+      const expenseAmount = monthData?.egresos.isrDeducible || 0;
+      const ivaCollected = monthData?.ingresos.ivaTrasladado || 0;
+      const ivaPaid = monthData?.egresos.ivaAcreditable || 0;
+      const ivaRetenido = monthData?.ingresos.ivaRetenido || 0;
       
-      // Calculate profit (consider depreciation)
+      // Calcular utilidad (considerar depreciación)
       const depreciation = monthlyDepreciations[month] || 0;
       const profit = incomeAmount - expenseAmount - depreciation;
       
-      // Calculate accumulated values up to this month
-      let periodIncomesTotal = 0;
-      let periodExpensesTotal = 0;
-      let totalDepreciation = 0;
+      // Calcular valores acumulados hasta este mes
+      const accumulated = fiscalCalculator.calculateAccumulatedTotals(fiscalSummary, month + 1);
       
+      // Agregar depreciación acumulada
+      let totalDepreciation = 0;
       for (let i = 0; i <= month; i++) {
-        const prevMonthKey = (i + 1).toString();
-        const prevMonthData = fiscalData.months[prevMonthKey] || {};
-        
-        periodIncomesTotal += prevMonthData.isrGravado || 0;
-        periodExpensesTotal += prevMonthData.isrDeducible || 0;
         totalDepreciation += monthlyDepreciations[i] || 0;
       }
       
-      periodExpensesTotal += totalDepreciation;
+      const periodIncomesTotal = accumulated.ingresosAcumulados;
+      const periodExpensesTotal = accumulated.deduccionesAcumuladas + totalDepreciation;
       const periodProfit = periodIncomesTotal - periodExpensesTotal;
       
       return {
@@ -197,15 +218,15 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
         ivaPaid,
         ivaRetenido,
         profit,
-        depreciation, // Include the depreciation value explicitly
+        depreciation,
         periodIncomesTotal,
         periodExpensesTotal,
         periodProfit
       };
     });
-  }, [fiscalData, months, monthlyDepreciations]);
+  }, [fiscalSummary, months, monthlyDepreciations]);
 
-  // ISR calculation functions - using data from Firebase
+  // ISR calculation functions - usando datos calculados dinámicamente
   const calculateMonthISR = (month: number, amount: number) => {
     try {
       // Skip calculation for negative or zero income
@@ -221,8 +242,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
         };
       }
       
-      // Get the appropriate tax bracket for this amount and month
-      const brackets = TaxBracketsService.getTaxBracketsByMonth(month + 1); // +1 because months are 0-indexed in the component
+      // Get the appropriate tax bracket for this amount, year and month
+      const brackets = TaxBracketsService.getTaxBracketsByYearAndMonth(year, month + 1); // +1 because months are 0-indexed in the component
       
       // Find the bracket that applies to this amount
       const bracket = brackets.find(b => 
@@ -230,7 +251,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
       );
       
       if (!bracket) {
-        console.error(`No tax bracket found for amount ${amount} in month ${month + 1}`);
+        console.error(`No tax bracket found for amount ${amount} in month ${month + 1} of year ${year}`);
         return { 
           taxBase: amount,
           lowerLimit: 0,
@@ -271,8 +292,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
   };
   
   const getMonthlyRetainedISR = (month: number) => {
-    const monthKey = (month + 1).toString();
-    return fiscalData?.months[monthKey]?.isrRetenido || 0;
+    const monthData = fiscalSummary.months[month + 1];
+    return monthData?.ingresos.isrRetenido || 0;
   };
   
   const getAccumulatedRetainedISR = (month: number) => {
@@ -338,17 +359,13 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     return { income, expenses, profit };
   }, [monthlyData]);
 
-  // Add a function to handle manual refresh
+  // Función para refrescar datos de depreciación (los CFDIs se actualizan automáticamente via props)
   const handleRefreshData = async () => {
     setIsRefreshing(true);
     try {
-      console.log("Manually refreshing fiscal data...");
+      console.log("Refrescando datos de depreciación...");
       
-      // 1. Fetch the fiscal summary data
-      const data = await fiscalDataService.getFiscalSummary(clientId, year);
-      setFiscalData(data);
-      
-      // 2. Update depreciation data from fixed assets
+      // Actualizar datos de depreciación de activos fijos
       const depreciations: Record<number, number> = {};
       for (let month = 0; month < 12; month++) {
         const startDate = new Date(year, month, 1).toISOString();
@@ -364,14 +381,14 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
       
       toast({
         title: "Datos actualizados",
-        description: "La información fiscal ha sido actualizada correctamente",
+        description: "Los datos de depreciación han sido actualizados",
         variant: "default"
       });
     } catch (error) {
-      console.error("Error refreshing fiscal data:", error);
+      console.error("Error refreshing depreciation data:", error);
       toast({
         title: "Error",
-        description: "No se pudieron actualizar los datos fiscales",
+        description: "No se pudieron actualizar los datos de depreciación",
         variant: "destructive"
       });
     } finally {
@@ -379,43 +396,27 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
     }
   };
 
-  if (loading) {
-    return <div className="p-4 text-center">Cargando datos fiscales...</div>;
-  }
-
   return (
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
         {/* Header */}
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-medium whitespace-nowrap">
+          <h2 className="text-sm font-medium whitespace-nowrap">
             Cédula Fiscal {year}
           </h2>
           
           <div className="flex items-center gap-2">
-            {/* Add refresh button */}
-            <Button
-              variant="outline"
-              size="sm"
-              className="flex items-center whitespace-nowrap"
-              onClick={handleRefreshData}
-              disabled={isRefreshing}
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${isRefreshing ? "animate-spin" : ""}`} />
-              {isRefreshing ? "Actualizando..." : "Actualizar Datos"}
-            </Button>
-            
             {/* Fixed button - using standard variant */}
             <Button 
               variant="default" 
-              size="sm" 
+              size="xs" 
               onClick={() => {
                 console.log("Opening declaracion modal");
                 setDeclaracionModalOpen(true);
               }}
               className="text-xs flex items-center gap-1"
             >
-              <FilePlus className="h-3.5 w-3.5" />
+              <FilePlus className="h-3 w-3" />
               Crear Declaración
             </Button>
           </div>
@@ -493,7 +494,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento</td>
                   {months.map(month => {
-                    const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
+                    const exentoValue = monthlyExento[month + 1] || 0;
                     return (
                       <td 
                         key={month} 
@@ -509,7 +510,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Extranjero</td>
                   {months.map(month => {
-                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    const extranjeroValue = monthlyExtranjero[month + 1] || 0;
                     return (
                       <td 
                         key={month} 
@@ -525,8 +526,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Total deducciones del mes</td>
                   {months.map(month => {
                     const expenseValue = monthlyData[month]?.expenseAmount || 0;
-                    const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
-                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    const exentoValue = monthlyExento[month + 1] || 0;
+                    const extranjeroValue = monthlyExtranjero[month + 1] || 0;
                     const value = expenseValue + exentoValue + extranjeroValue;
                     return (
                       <td 
@@ -557,8 +558,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                   {months.map(month => {
                     const expenseValue = monthlyData[month]?.expenseAmount || 0;
                     const depreciationValue = monthlyDepreciations[month] || 0;
-                    const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
-                    const extranjeroValue = fiscalData?.months[(month + 1).toString()]?.deduccionFacturasManual || 0;
+                    const exentoValue = monthlyExento[month + 1] || 0;
+                    const extranjeroValue = monthlyExtranjero[month + 1] || 0;
                     const totalValue = expenseValue + depreciationValue + exentoValue + extranjeroValue;
                     return (
                       <td 
@@ -578,8 +579,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                     let accumulatedExtranjero = 0;
                     for (let i = 0; i <= month; i++) {
                       const monthKey = (i + 1).toString();
-                      accumulatedExento += fiscalData?.months[monthKey]?.exento || 0;
-                      accumulatedExtranjero += fiscalData?.months[monthKey]?.deduccionFacturasManual || 0;
+                      accumulatedExento += monthlyExento[parseInt(monthKey)] || 0;
+                      accumulatedExtranjero += monthlyExtranjero[parseInt(monthKey)] || 0;
                     }
                     
                     const value = (monthlyData[month]?.periodExpensesTotal || 0) + accumulatedExento + accumulatedExtranjero;
@@ -602,7 +603,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Utilidad del mes</td>
                   {months.map(month => {
                     const baseProfit = monthlyData[month]?.profit || 0;
-                    const exentoValue = fiscalData?.months[(month + 1).toString()]?.exento || 0;
+                    const exentoValue = monthlyExento[month + 1] || 0;
                     const value = baseProfit - exentoValue;
                     return (
                       <td 
@@ -622,7 +623,7 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                     let accumulatedExento = 0;
                     for (let i = 0; i <= month; i++) {
                       const monthKey = (i + 1).toString();
-                      accumulatedExento += fiscalData?.months[monthKey]?.exento || 0;
+                      accumulatedExento += monthlyExento[parseInt(monthKey)] || 0;
                     }
                     const value = basePeriodProfit - accumulatedExento;
                     return (
@@ -725,8 +726,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento</td>
                   {months.map(month => {
-                    // Calculate exento values - using the exento field from fiscal data if available
-                    const value = fiscalData?.months[(month + 1).toString()]?.exento || 0;
+                    // Calculate exento values - using calculated data from CFDIs
+                    const value = monthlyExento[month + 1] || 0;
                     return (
                       <td 
                         key={month} 
@@ -751,8 +752,8 @@ export function FiscalSummary({ year, clientId }: FiscalSummaryProps) {
                     let accumulatedExtranjero = 0;
                     for (let i = 0; i <= month; i++) {
                       const monthKey = (i + 1).toString();
-                      accumulatedExento += fiscalData?.months[monthKey]?.exento || 0;
-                      accumulatedExtranjero += fiscalData?.months[monthKey]?.deduccionFacturasManual || 0;
+                      accumulatedExento += monthlyExento[parseInt(monthKey)] || 0;
+                      accumulatedExtranjero += monthlyExtranjero[parseInt(monthKey)] || 0;
                     }
                     const value = basePeriodProfit - accumulatedExento - accumulatedExtranjero;
                     return (

@@ -66,8 +66,10 @@ export const userService = {
         displayName: userData.displayName || undefined,
         photoURL: user.photoURL || undefined,
         createdAt: new Date().toISOString(),
-        role: userData.role || 'user',
-        isActive: true
+        role: userData.role || 'cliente',
+        isActive: true,
+        assignedClients: userData.assignedClients || [],
+        clientId: userData.clientId
       };
       
       await setDoc(doc(db, 'users', user.uid), newUser);

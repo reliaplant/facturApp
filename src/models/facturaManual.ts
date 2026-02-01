@@ -11,4 +11,5 @@ export interface FacturaExtranjera {
   totalMXN: number; // Total en pesos mexicanos
   locked?: boolean;
   ejercicioFiscal: number; // Año fiscal (derivado de la fecha)
+  esDeducible?: boolean; // Si es deducible o no (default true)
 }

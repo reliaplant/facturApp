@@ -3,15 +3,15 @@
 import React, { useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
-import { Invoice } from "@/models/Invoice";
+import { CFDI } from "@/models/CFDI";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from 'xlsx';
 
 interface ExportInvoicesExcelProps {
-  invoices?: Invoice[];
-  emittedInvoices?: Invoice[];
-  receivedInvoices?: Invoice[];
+  invoices?: CFDI[];
+  emittedInvoices?: CFDI[];
+  receivedInvoices?: CFDI[];
   year: number;
   buttonLabel?: string;
   fileName?: string;
@@ -34,10 +34,10 @@ export function ExportInvoicesExcel({
   
   // Extract invoice processing logic to separate functions for cleaner code
   const processInvoices = useMemo(() => {
-    const sortInvoices = (invoicesToSort: Invoice[]) => 
+    const sortInvoices = (invoicesToSort: CFDI[]) => 
       [...invoicesToSort].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
       
-    const createEmittedData = (items: Invoice[]) => sortInvoices(items).map(invoice => ({
+    const createEmittedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
       "Fecha": format(new Date(invoice.fecha), 'dd/MM/yyyy'),
       "Tipo Comprobante": invoice.tipoDeComprobante || "",
       "RFC Receptor": invoice.rfcReceptor,
@@ -57,10 +57,13 @@ export function ExportInvoicesExcel({
       "Método de Pago": invoice.metodoPago,
       "Forma de Pago": invoice.formaPago,
       "Moneda": invoice.moneda || "MXN",
-      "Tipo de Cambio": invoice.tipoCambio || "1.00",
+      "Tipo de Cambio": invoice.tipoCambio || 1,
+      "Total MXN": invoice.totalMXN || invoice.total,
       "Subtotal": invoice.subTotal,
       "Impuestos Trasladados": invoice.impuestosTrasladados || 0,
       "IVA Trasladado": invoice.impuestoTrasladado || 0,
+      "Base IVA 16%": invoice.baseIva16 || 0,
+      "Base IVA 8%": invoice.baseIva8 || 0,
       "IEPS Trasladado": invoice.iepsTrasladado || 0,
       "Impuesto Retenido": invoice.impuestoRetenido || 0,
       "IVA Retenido": invoice.ivaRetenido || 0,
@@ -73,13 +76,13 @@ export function ExportInvoicesExcel({
       "Deducción Anual": invoice.anual ? "Sí" : "No",
       "Gravado ISR": invoice.gravadoISR || 0,
       "Gravado IVA": invoice.gravadoIVA || 0,
-      "Tasa 0%": invoice.Tasa0 || 0,
+      "Tasa 0%": invoice.ivaTasa0 || 0,
       "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
       "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
       "Bloqueado": invoice.locked ? "Sí" : "No"
     }));
     
-    const createReceivedData = (items: Invoice[]) => sortInvoices(items).map(invoice => ({
+    const createReceivedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
       "Fecha": format(new Date(invoice.fecha), 'dd/MM/yyyy'),
       "RFC Emisor": invoice.rfcEmisor,
       "Nombre Emisor": invoice.nombreEmisor,
@@ -102,8 +105,8 @@ export function ExportInvoicesExcel({
       "Deducción Anual": invoice.anual ? "Sí" : "No",
       "Gravado ISR": invoice.gravadoISR || 0,
       "Gravado IVA": invoice.gravadoIVA || 0,
-      "Tasa 0%": invoice.Tasa0 || 0,
-      "Exento": invoice.Exento || 0,
+      "Tasa 0%": invoice.ivaTasa0 || 0,
+      "Exento": invoice.exento || 0,
       "Cancelado": invoice.estaCancelado ? "Sí" : "No",
       "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
       "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
@@ -138,8 +141,8 @@ export function ExportInvoicesExcel({
       } else if (invoices && invoices.length > 0) {
         // Fallback to single sheet for backwards compatibility
         // Split invoices into emitted and received
-        const emittedOnes = invoices.filter(inv => !inv.recibida);
-        const receivedOnes = invoices.filter(inv => inv.recibida);
+        const emittedOnes = invoices.filter(inv => inv.esIngreso);
+        const receivedOnes = invoices.filter(inv => inv.esEgreso);
         
         if (emittedOnes.length > 0) {
           const emittedData = processInvoices.createEmittedData(emittedOnes);
@@ -168,10 +171,10 @@ export function ExportInvoicesExcel({
   return (
     <Button
       variant="outline"
-      size="sm"
+      size="xs"
       onClick={handleExport}
     >
-      <Download className="h-4 w-4 mr-1" />
+      <Download className="h-3 w-3 mr-1" />
       <span>{buttonLabel}</span>
     </Button>
   );

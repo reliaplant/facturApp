@@ -10,14 +10,15 @@ export interface TaxBracket {
 }
 
 /**
- * Servicio para obtener las tarifas de ISR por mes para el año 2025
+ * Servicio para obtener las tarifas de ISR por mes y año
  */
 export class TaxBracketsService {
   
   /**
-   * Devuelve todas las tarifas de ISR para los pagos provisionales mensuales del 2025
+   * Devuelve todas las tarifas de ISR para los pagos provisionales mensuales del 2025 y 2026
+   * Nota: Para 2026 se usan las mismas tarifas que 2025 ya que no hubo actualización por inflación
    */
-  static getTaxBrackets2025(): TaxBracket[] {
+  private static getTaxBracketsBase(): TaxBracket[] {
     return [
       // Enero (month 1)
       { lowerLimit: 0.01, upperLimit: 746.04, fixedFee: 0, percentage: 0.0192, month: 1 },
@@ -177,39 +178,130 @@ export class TaxBracketsService {
       { lowerLimit: 4511707.38, upperLimit: 9999999.99, fixedFee: 1414947.85, percentage: 0.3500, month: 12 },
     ];
   }
-  
+
   /**
-   * Obtiene los brackets de tarifa para un mes específico
+   * Devuelve todas las tarifas de ISR para el año 2025
+   */
+  static getTaxBrackets2025(): TaxBracket[] {
+    return this.getTaxBracketsBase();
+  }
+
+  /**
+   * Obtiene los brackets de tarifa para un año y mes específico
+   * @param year El año fiscal (2025, 2026, etc.)
    * @param month El número de mes (1-12)
    * @returns Array de brackets para ese mes
    */
-  static getTaxBracketsByMonth(month: number): TaxBracket[] {
+  static getTaxBracketsByYearAndMonth(year: number, month: number): TaxBracket[] {
     if (month < 1 || month > 12) {
       throw new Error("El mes debe estar entre 1 y 12");
     }
     
-    return this.getTaxBrackets2025().filter(bracket => bracket.month === month);
+    // Obtener brackets según el año
+    let brackets: TaxBracket[];
+    if (year === 2026) {
+      brackets = this.getTaxBrackets2026();
+    } else {
+      // Default a 2025 para años anteriores o no definidos
+      brackets = this.getTaxBrackets2025();
+    }
+    
+    return brackets.filter(bracket => bracket.month === month);
   }
   
   /**
-   * Calcula el ISR para un monto y mes específicos
+   * Obtiene los brackets de tarifa para un mes específico (mantener compatibilidad)
+   * @param month El número de mes (1-12)
+   * @returns Array de brackets para ese mes
+   * @deprecated Usar getTaxBracketsByYearAndMonth en su lugar
+   */
+  static getTaxBracketsByMonth(month: number): TaxBracket[] {
+    return this.getTaxBracketsByYearAndMonth(2025, month);
+  }
+  
+  /**
+   * Calcula el ISR para un monto, año y mes específicos
    * @param amount Monto gravable acumulado
+   * @param year Año fiscal
    * @param month Mes (1-12)
    * @returns El ISR calculado
    */
-  static calculateISR(amount: number, month: number): number {
-    const brackets = this.getTaxBracketsByMonth(month);
+  static calculateISRByYear(amount: number, year: number, month: number): number {
+    const brackets = this.getTaxBracketsByYearAndMonth(year, month);
     
     // Encontrar el bracket que corresponde al monto
     const bracket = brackets.find(b => amount >= b.lowerLimit && amount <= b.upperLimit);
     
     if (!bracket) {
-      throw new Error(`No se encontró un bracket válido para el monto ${amount} en el mes ${month}`);
+      throw new Error(`No se encontró un bracket válido para el monto ${amount} en el mes ${month} del año ${year}`);
     }
     
     // Cálculo del ISR: cuota fija + (monto - límite inferior) * porcentaje
     const isr = bracket.fixedFee + (amount - bracket.lowerLimit) * bracket.percentage;
     
+    return parseFloat(isr.toFixed(2));
+  }
+
+  /**
+   * Calcula el ISR para un monto y mes específicos (mantener compatibilidad)
+   * @param amount Monto gravable acumulado
+   * @param month Mes (1-12)
+   * @returns El ISR calculado
+   * @deprecated Usar calculateISRByYear en su lugar
+   */
+  static calculateISR(amount: number, month: number): number {
+    return this.calculateISRByYear(amount, 2025, month);
+  }
+
+  /**
+   * Tarifas ISR 2026 - Anexo 8 RMF 2026 (DOF 28/12/2025)
+   * Factor de actualización: 1.1321 (inflación acumulada 13.21%)
+   * En Actividad Empresarial, los límites y cuotas aumentan proporcionalmente cada mes.
+   */
+  public static getTaxBrackets2026(): TaxBracket[] {
+    const baseBrackets = [
+      { lowerLimit: 0.01, upperLimit: 844.59, fixedFee: 0, percentage: 0.0192 },
+      { lowerLimit: 844.60, upperLimit: 7168.51, fixedFee: 16.22, percentage: 0.0640 },
+      { lowerLimit: 7168.52, upperLimit: 12598.02, fixedFee: 420.95, percentage: 0.1088 },
+      { lowerLimit: 12598.03, upperLimit: 14644.64, fixedFee: 1011.68, percentage: 0.1600 },
+      { lowerLimit: 14644.65, upperLimit: 17533.64, fixedFee: 1339.14, percentage: 0.1792 },
+      { lowerLimit: 17533.65, upperLimit: 35362.83, fixedFee: 1856.84, percentage: 0.2136 },
+      { lowerLimit: 35362.84, upperLimit: 55736.68, fixedFee: 5665.16, percentage: 0.2352 },
+      { lowerLimit: 55736.69, upperLimit: 106410.50, fixedFee: 10457.09, percentage: 0.3000 },
+      { lowerLimit: 106410.51, upperLimit: 141880.66, fixedFee: 25659.23, percentage: 0.3200 },
+      { lowerLimit: 141880.67, upperLimit: 425641.99, fixedFee: 37009.69, percentage: 0.3400 },
+      { lowerLimit: 425642.00, upperLimit: 999999999.99, fixedFee: 133488.54, percentage: 0.3500 },
+    ];
+
+    const allMonths: TaxBracket[] = [];
+
+    // Generamos los 12 meses multiplicando la base por el índice del mes
+    for (let m = 1; m <= 12; m++) {
+      baseBrackets.forEach(base => {
+        allMonths.push({
+          lowerLimit: Number((base.lowerLimit * m).toFixed(2)),
+          upperLimit: m === 12 && base.upperLimit > 9999999 ? base.upperLimit : Number((base.upperLimit * m).toFixed(2)),
+          fixedFee: Number((base.fixedFee * m).toFixed(2)),
+          percentage: base.percentage,
+          month: m
+        });
+      });
+    }
+
+    return allMonths;
+  }
+
+  /**
+   * Calcula el ISR Provisional para un mes específico de 2026
+   */
+  static calculateISR2026(amount: number, month: number): number {
+    const brackets = this.getTaxBrackets2026().filter(b => b.month === month);
+    
+    const bracket = brackets.find(b => amount >= b.lowerLimit && amount <= b.upperLimit);
+    
+    if (!bracket) return 0;
+    
+    const isr = bracket.fixedFee + (amount - bracket.lowerLimit) * bracket.percentage;
     return parseFloat(isr.toFixed(2));
   }
 }

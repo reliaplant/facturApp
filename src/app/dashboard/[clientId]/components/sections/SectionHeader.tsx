@@ -14,17 +14,17 @@ export default function SectionHeader({
   showEditButton = true 
 }: SectionHeaderProps) {
   return (
-    <div className="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
-      <h3 className="">{title}</h3>
+    <div className="bg-gray-100 px-4 py-2 border-b border-gray-300 flex justify-between items-center">
+      <h3 className="text-sm font-medium text-gray-700">{title}</h3>
       {showEditButton && (
         <button 
           onClick={toggleEditMode}
-          className="text-blue-600 hover:text-blue-800"
+          className="text-gray-500 hover:text-gray-700 p-1 rounded hover:bg-gray-200 transition-colors"
         >
           {isEditing ? (
-            <XMarkIcon className="h-4 w-4" />
+            <XMarkIcon className="h-3.5 w-3.5" />
           ) : (
-            <PencilIcon className="h-4 w-4" />
+            <PencilIcon className="h-3.5 w-3.5" />
           )}
         </button>
       )}

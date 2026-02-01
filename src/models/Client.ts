@@ -35,17 +35,27 @@ export interface Client {
     entreCalles?: string;
   };
 
-  // Economic activities
+  // Economic activities (from CSF "Actividades Económicas")
   actividadesEconomicas: Array<{
-    regimen: string;
+    orden: number;
+    actividad: string;
+    porcentaje: number;
     fechaInicio: string;
     fechaFin?: string;
   }>;
 
-  // Obligations
+  // Fiscal regimes (from CSF "Regímenes")
+  regimenesFiscales: Array<{
+    regimen: string;
+    fechaInicio: string;
+    fechaFin?: string;
+    esPredeterminado?: boolean;
+  }>;
+
+  // Obligations (from CSF "Obligaciones")
   obligaciones: Array<{
     descripcion: string;
-    vencimiento: string;
+    descripcionVencimiento: string;
     fechaInicio: string;
     fechaFin?: string;
   }>;
@@ -70,8 +80,11 @@ export interface Client {
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;
-  lastCSFUrl?: string;  // Add this field
-  lastCSFDate?: string; // Añadimos la fecha de la última carga
+  
+  // CSF (Constancia de Situación Fiscal)
+  lastCSFUrl?: string;  // URL del PDF
+  lastCSFDate?: string; // Fecha de la última carga
+  idCIF?: string;       // ID de la CSF para validación (ej: 19030152512)
   lastOPFUrl?: string;  // Añadir para Opinión de Fiel Cumplimiento
   lastOPFDate?: string; // Añadir fecha de última opinión
 

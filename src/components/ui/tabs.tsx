@@ -69,7 +69,7 @@ const TabsTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       tabsTriggerVariants({ size, className }),
-      "data-[state=active]:border-violet-600 data-[state=active]:text-violet-800 dark:data-[state=active]:border-violet-500 dark:data-[state=active]:text-violet-300"
+      "data-[state=active]:border-violet-600 data-[state=active]:text-violet-800 data-[state=active]:bg-purple-50 dark:data-[state=active]:border-violet-500 dark:data-[state=active]:text-violet-300 dark:data-[state=active]:bg-purple-900/30"
     )}
     {...props}
   />

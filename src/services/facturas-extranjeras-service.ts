@@ -130,6 +130,18 @@ export const facturasExtranjerasService = {
     }
   },
   
+  // Toggle the deductible status of a foreign invoice
+  async toggleDeducibleFacturaExtranjera(clientId: string, id: string, esDeducible: boolean): Promise<void> {
+    try {
+      const facturaRef = doc(db, 'clients', clientId, 'facturasManuales', id);
+      await updateDoc(facturaRef, { esDeducible });
+      console.log(`Factura extranjera deducible set to ${esDeducible} for ID:`, id);
+    } catch (error) {
+      console.error('Error toggling deductible status:', error);
+      throw error;
+    }
+  },
+  
   // Calculate total amount for all foreign invoices in a year
   calculateTotal(facturas: FacturaExtranjera[]): number {
     return facturas.reduce((sum, factura) => sum + factura.totalMXN, 0);

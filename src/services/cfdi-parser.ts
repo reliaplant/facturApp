@@ -1,12 +1,12 @@
-import { Invoice } from '@/models/Invoice';
+import { CFDI, CFDIConcepto, ConceptoImpuesto, CfdiRelacionado, PagoComplemento, DoctoRelacionadoPago } from '@/models/CFDI';
 import { v4 as uuidv4 } from 'uuid';
 import { XMLParser } from 'fast-xml-parser';
 
 /**
- * Procesa archivos CFDI (XML) y los convierte en objetos Invoice
+ * Procesa archivos CFDI (XML) y los convierte en objetos CFDI
  */
-export async function processCFDIFiles(files: File[], clientId: string, clientRfc: string): Promise<Invoice[]> {
-  const invoices: Invoice[] = [];
+export async function processCFDIFiles(files: File[], clientId: string, clientRfc: string): Promise<CFDI[]> {
+  const cfdis: CFDI[] = [];
   const processedUUIDs = new Set<string>(); // Para evitar duplicados
   
   // First process all invoices normally
@@ -56,9 +56,6 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       const rfcReceptor = (receptor.Rfc || '').trim().toUpperCase();
       const clientRfcNormalizado = clientRfc.trim().toUpperCase();
       
-      // Determinar si la factura es recibida
-      const recibida = rfcReceptor === clientRfcNormalizado;
-      
       // Impuestos y montos
       const subTotal = parseFloat(comprobante.SubTotal) || 0;
       const total = parseFloat(comprobante.Total) || 0;
@@ -73,10 +70,11 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       let isrRetenido = 0;
       let iepsTrasladado = 0;
       
-      // Valores para deducibilidad
-      let gravado = 0;
-      let tasa0 = 0;
-      let exento = 0;
+      // Valores para deducibilidad - desglose por tasa de IVA
+      let baseIva16 = 0;  // Base gravada al 16%
+      let baseIva8 = 0;   // Base gravada al 8% (frontera)
+      let tasa0 = 0;      // Base gravada al 0%
+      let exento = 0;     // Base exenta
       
       // Procesar traslados
       try {
@@ -91,17 +89,24 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
           const importe = parseFloat(traslado.Importe) || 0;
           const base = parseFloat(traslado.Base) || 0;
           const tasa = parseFloat(traslado.TasaOCuota) || 0;
+          const tipoFactor = traslado.TipoFactor || '';
           
-          // Clasificar importes por tasa
-          if (tasa > 0) {
-            gravado += base;
-            if (impuesto === '002' || impuesto === 'IVA') {
-              impuestoTrasladado += importe;
-            } else if (impuesto === '003' || impuesto === 'IEPS') {
-              iepsTrasladado += importe;
+          // Clasificar por tipo de impuesto y tasa
+          if (impuesto === '002' || impuesto === 'IVA') {
+            impuestoTrasladado += importe;
+            
+            // Clasificar base por tasa de IVA
+            if (tipoFactor === 'Exento') {
+              exento += base;
+            } else if (tasa === 0.16 || tasa === 0.160000) {
+              baseIva16 += base;
+            } else if (tasa === 0.08 || tasa === 0.080000) {
+              baseIva8 += base;
+            } else if (tasa === 0) {
+              tasa0 += base;
             }
-          } else if (tasa === 0) {
-            tasa0 += base;
+          } else if (impuesto === '003' || impuesto === 'IEPS') {
+            iepsTrasladado += importe;
           }
         }
       } catch (error) {
@@ -130,12 +135,14 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         // Ignorar errores en procesamiento de retenciones
       }
       
-      // Detectar conceptos exentos
+      // Detectar conceptos exentos y extraer desglose
+      const conceptosArray: CFDIConcepto[] = [];
+      let conceptoResumen = '';
       try {
         const conceptosNode = comprobante['cfdi:Conceptos'] || comprobante.Conceptos || {};
-        const conceptosArray = conceptosNode['cfdi:Concepto'] || conceptosNode.Concepto || [];
-        const conceptosList = Array.isArray(conceptosArray) ? conceptosArray : [conceptosArray];
-        
+        const conceptosXml = conceptosNode['cfdi:Concepto'] || conceptosNode.Concepto || [];
+        const conceptosList = Array.isArray(conceptosXml) ? conceptosXml : [conceptosXml];
+
         for (const concepto of conceptosList) {
           if (!concepto) continue;
           
@@ -143,27 +150,124 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
           const impuestosConcepto = concepto['cfdi:Impuestos'] || concepto.Impuestos || {};
           
           // Si el concepto no tiene impuestos, considerarlo exento
-          if (!impuestosConcepto.Traslados && !impuestosConcepto.Retenciones) {
+          if (!impuestosConcepto.Traslados && !impuestosConcepto.Retenciones && 
+              !impuestosConcepto['cfdi:Traslados'] && !impuestosConcepto['cfdi:Retenciones']) {
             exento += importe;
+          }
+          
+          // Extraer impuestos del concepto
+          const trasladosConcepto: ConceptoImpuesto[] = [];
+          const retencionesConcepto: ConceptoImpuesto[] = [];
+          
+          try {
+            const trasladosNode = impuestosConcepto['cfdi:Traslados'] || impuestosConcepto.Traslados || {};
+            const trasladosXml = trasladosNode['cfdi:Traslado'] || trasladosNode.Traslado || [];
+            const trasladosList = Array.isArray(trasladosXml) ? trasladosXml : (trasladosXml ? [trasladosXml] : []);
+            
+            for (const traslado of trasladosList) {
+              if (!traslado) continue;
+              trasladosConcepto.push({
+                base: parseFloat(traslado.Base) || 0,
+                impuesto: traslado.Impuesto || '',
+                tipoFactor: traslado.TipoFactor || 'Tasa',
+                tasaOCuota: traslado.TasaOCuota ? parseFloat(traslado.TasaOCuota) : undefined,
+                importe: traslado.Importe ? parseFloat(traslado.Importe) : undefined,
+              });
+            }
+            
+            const retencionesNode = impuestosConcepto['cfdi:Retenciones'] || impuestosConcepto.Retenciones || {};
+            const retencionesXml = retencionesNode['cfdi:Retencion'] || retencionesNode.Retencion || [];
+            const retencionesList = Array.isArray(retencionesXml) ? retencionesXml : (retencionesXml ? [retencionesXml] : []);
+            
+            for (const retencion of retencionesList) {
+              if (!retencion) continue;
+              retencionesConcepto.push({
+                base: parseFloat(retencion.Base) || 0,
+                impuesto: retencion.Impuesto || '',
+                tipoFactor: retencion.TipoFactor || 'Tasa',
+                tasaOCuota: retencion.TasaOCuota ? parseFloat(retencion.TasaOCuota) : undefined,
+                importe: retencion.Importe ? parseFloat(retencion.Importe) : undefined,
+              });
+            }
+          } catch (e) {
+            // Ignorar errores en impuestos de concepto
+          }
+          
+          // Agregar el concepto al array
+          const cfdiConcepto: CFDIConcepto = {
+            claveProdServ: concepto.ClaveProdServ || '',
+            noIdentificacion: concepto.NoIdentificacion || undefined,
+            cantidad: parseFloat(concepto.Cantidad) || 0,
+            claveUnidad: concepto.ClaveUnidad || '',
+            unidad: concepto.Unidad || undefined,
+            descripcion: concepto.Descripcion || '',
+            valorUnitario: parseFloat(concepto.ValorUnitario) || 0,
+            importe: importe,
+            descuento: concepto.Descuento ? parseFloat(concepto.Descuento) : undefined,
+            objetoImp: concepto.ObjetoImp || undefined,
+          };
+          
+          // Solo agregar impuestos si existen
+          if (trasladosConcepto.length > 0 || retencionesConcepto.length > 0) {
+            cfdiConcepto.impuestos = {
+              ...(trasladosConcepto.length > 0 && { traslados: trasladosConcepto }),
+              ...(retencionesConcepto.length > 0 && { retenciones: retencionesConcepto }),
+            };
+          }
+          
+          conceptosArray.push(cfdiConcepto);
+          
+          // Guardar el primer concepto como resumen
+          if (!conceptoResumen && concepto.Descripcion) {
+            conceptoResumen = concepto.Descripcion;
           }
         }
       } catch (error) {
         // Ignorar errores
       }
       
-      // Si no se pudo calcular gravado o tasa0, derivar de los totales
-      if (gravado <= 0 && tasa0 <= 0 && exento <= 0) {
-        // Si hay IVA, asumir que todo es gravado
+      // Extraer CFDIs relacionados
+      const cfdiRelacionados: CfdiRelacionado[] = [];
+      try {
+        const cfdiRelacionadosNode = comprobante['cfdi:CfdiRelacionados'] || comprobante.CfdiRelacionados;
+        if (cfdiRelacionadosNode) {
+          const relacionadosNodeList = Array.isArray(cfdiRelacionadosNode) ? cfdiRelacionadosNode : [cfdiRelacionadosNode];
+          
+          for (const relacionadosNode of relacionadosNodeList) {
+            const tipoRelacion = relacionadosNode.TipoRelacion || '';
+            const relacionadosXml = relacionadosNode['cfdi:CfdiRelacionado'] || relacionadosNode.CfdiRelacionado || [];
+            const relacionadosList = Array.isArray(relacionadosXml) ? relacionadosXml : (relacionadosXml ? [relacionadosXml] : []);
+            
+            for (const relacionado of relacionadosList) {
+              if (relacionado) {
+                cfdiRelacionados.push({
+                  uuid: relacionado.UUID || relacionado,
+                  tipoRelacion: tipoRelacion,
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        // Ignorar errores en CFDIs relacionados
+      }
+      
+      // Si no se pudo clasificar las bases, derivar de los totales
+      const totalBases = baseIva16 + baseIva8 + tasa0 + exento;
+      if (totalBases <= 0) {
+        // Si hay IVA, asumir que todo es gravado al 16%
         if (impuestoTrasladado > 0) {
-          gravado = subTotal;
+          baseIva16 = subTotal;
         } else {
-          // Si no hay IVA, asumir que todo es tasa 0
+          // Si no hay IVA, asumir que todo es tasa 0%
           tasa0 = subTotal;
         }
       }
       
-      // Extraer documentos relacionados en complemento de pago
+      // Extraer documentos relacionados y detalle de complemento de pago
       let docsRelacionados: string[] = [];
+      const pagosComplemento: PagoComplemento[] = [];
+      
       try {
         const complemento = comprobante['cfdi:Complemento'] || comprobante.Complemento || {};
         
@@ -178,15 +282,48 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         for (const pago of pagosList) {
           if (!pago) continue;
           
+          // Extraer detalle del pago
+          const doctosRelacionados: DoctoRelacionadoPago[] = [];
+          
           // Obtener documentos relacionados
           const docRelArray = pago['pago20:DoctoRelacionado'] || pago['pagos:DoctoRelacionado'] || pago.DoctoRelacionado || [];
           const docRelList = Array.isArray(docRelArray) ? docRelArray : [docRelArray];
           
-          // Extraer el UUID (IdDocumento) de cada documento relacionado
+          // Extraer el detalle de cada documento relacionado
           for (const docRel of docRelList) {
             if (docRel && docRel.IdDocumento) {
               docsRelacionados.push(docRel.IdDocumento);
+              
+              doctosRelacionados.push({
+                idDocumento: docRel.IdDocumento,
+                serie: docRel.Serie || undefined,
+                folio: docRel.Folio || undefined,
+                monedaDR: docRel.MonedaDR || 'MXN',
+                equivalenciaDR: docRel.EquivalenciaDR ? parseFloat(docRel.EquivalenciaDR) : undefined,
+                numParcialidad: docRel.NumParcialidad ? parseInt(docRel.NumParcialidad) : undefined,
+                impSaldoAnt: docRel.ImpSaldoAnt ? parseFloat(docRel.ImpSaldoAnt) : undefined,
+                impPagado: docRel.ImpPagado ? parseFloat(docRel.ImpPagado) : undefined,
+                impSaldoInsoluto: docRel.ImpSaldoInsoluto ? parseFloat(docRel.ImpSaldoInsoluto) : undefined,
+                objetoImpDR: docRel.ObjetoImpDR || undefined,
+              });
             }
+          }
+          
+          // Crear objeto de pago completo
+          if (doctosRelacionados.length > 0) {
+            pagosComplemento.push({
+              fechaPago: pago.FechaPago || '',
+              formaPago: pago.FormaDePagoP || pago.FormaPago || '',
+              moneda: pago.MonedaP || pago.Moneda || 'MXN',
+              tipoCambio: pago.TipoCambioP ? parseFloat(pago.TipoCambioP) : undefined,
+              monto: parseFloat(pago.Monto) || 0,
+              numOperacion: pago.NumOperacion || undefined,
+              rfcEmisorCtaOrd: pago.RfcEmisorCtaOrd || undefined,
+              ctaOrdenante: pago.CtaOrdenante || undefined,
+              rfcEmisorCtaBen: pago.RfcEmisorCtaBen || undefined,
+              ctaBeneficiario: pago.CtaBeneficiario || undefined,
+              doctoRelacionados: doctosRelacionados,
+            });
           }
         }
       } catch (error) {
@@ -210,7 +347,7 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         
         // Check for cancellation status in the invoice status attributes
         if (comprobante.EstadoComprobante && (
-            comprobante.EstadoComprobante.toUpperCase() === 'CANCELADO' || 
+            comprobante.EstadoComprobante.toUpperCase() === 'CANCELADO' ||
             comprobante.EstadoComprobante.toUpperCase() === 'CANCELLED')) {
 
         }
@@ -231,16 +368,33 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       // Determine if it's an annual deduction based on usoCFDI
       const usoCFDI = receptor.UsoCFDI || 'G03';
       
-      // Crear objeto factura con solo los campos definidos en la interfaz
-      const invoice: Invoice = {
+      // Calcular mes fiscal
+      const mesFiscal = fecha ? new Date(fecha).getMonth() + 1 : undefined;
+      
+      // Calcular tipo de cambio numérico y total en MXN
+      const tipoCambioNum = parseFloat(comprobante.TipoCambio) || 1;
+      const moneda = comprobante.Moneda || 'MXN';
+      const totalMXN = moneda !== 'MXN' ? total * tipoCambioNum : undefined;
+      
+      // Crear objeto CFDI con solo los campos definidos en la interfaz
+      // esIngreso = factura emitida (nosotros facturamos al cliente)
+      // esEgreso = factura recibida (proveedor nos factura a nosotros)
+      const esEgreso = rfcReceptor === clientRfcNormalizado;
+      const esIngreso = !esEgreso;
+      
+      const cfdi: CFDI = {
         id: uuid, // This is now the primary identifier
         idCliente: clientId,
         fechaCreacion: new Date().toISOString(),
         fechaActualizacion: new Date().toISOString(),
         contenidoXml: xmlContent,
-        recibida,
+        esIngreso,
+        esEgreso,
+        recibida: esEgreso, // Mantener por compatibilidad
         fecha: ensureDefined(fecha, ''),
         tipoDeComprobante: ensureDefined(comprobante.TipoDeComprobante, ''),
+        version: ensureDefined(comprobante.Version, '4.0'),
+        exportacion: ensureDefined(comprobante.Exportacion, '01'),
         rfcReceptor: ensureDefined(rfcReceptor, ''),
         nombreReceptor: ensureDefined(receptor.Nombre, ''),
         domicilioFiscalReceptor: ensureDefined(receptor.DomicilioFiscalReceptor, ''),
@@ -258,12 +412,20 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         metodoPago: ensureDefined(comprobante.MetodoPago, 'PUE'),
         numCtaPago: ensureDefined(comprobante.NumCtaPago, ''),
         formaPago: ensureDefined(comprobante.FormaPago, '99'),
-        moneda: ensureDefined(comprobante.Moneda, 'MXN'),
-        tipoCambio: ensureDefined(comprobante.TipoCambio, '1'),
+        condicionesDePago: ensureDefined(comprobante.CondicionesDePago, ''),
+        moneda: ensureDefined(moneda, 'MXN'),
+        tipoCambio: tipoCambioNum,
+        totalMXN: totalMXN,
         subTotal: ensureDefined(subTotal, 0),
         impuestosTrasladados: ensureDefined((impuestoTrasladado + iepsTrasladado), 0),
         impuestoTrasladado: ensureDefined(impuestoTrasladado, 0),
         iepsTrasladado: ensureDefined(iepsTrasladado, 0),
+        // Bases desglosadas por tasa de IVA
+        baseIva16: baseIva16 > 0 ? baseIva16 : undefined,
+        baseIva8: baseIva8 > 0 ? baseIva8 : undefined,
+        ivaTasa0: tasa0 > 0 ? tasa0 : undefined,
+        exento: exento > 0 ? exento : undefined,
+        // Retenciones
         impuestoRetenido: ensureDefined((ivaRetenido + isrRetenido), 0),
         ivaRetenido: ensureDefined(ivaRetenido, 0),
         isrRetenido: ensureDefined(isrRetenido, 0),
@@ -271,68 +433,74 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
         total: ensureDefined(total, 0),
         estaCancelado: ensureDefined(estaCancelado, false),
         fechaCancelación: ensureDefined(fechaCancelacion, ''),
-        Tasa0: ensureDefined(tasa0, 0),
-        Exento: ensureDefined(exento, 0),
         noCertificado: ensureDefined(comprobante.NoCertificado, ''),
         ejercicioFiscal: ensureDefined(ejercicioFiscal, new Date().getFullYear()),
+        mesFiscal: mesFiscal,
+        // Conceptos/Items
+        conceptos: conceptosArray.length > 0 ? conceptosArray : undefined,
+        concepto: ensureDefined(conceptoResumen, ''),
+        // CFDIs relacionados
+        cfdiRelacionados: cfdiRelacionados.length > 0 ? cfdiRelacionados : undefined,
+        // Complemento de pago
+        docsRelacionadoComplementoPago: ensureDefined(docsRelacionados, []),
+        pagos: pagosComplemento.length > 0 ? pagosComplemento : undefined,
         // IMPORTANT: Don't set deductibility status or month - keep these undefined 
         // so they need explicit evaluation
         esDeducible: undefined,
         mesDeduccion: undefined,
-        docsRelacionadoComplementoPago: ensureDefined(docsRelacionados, [])
       };
       
       // Añadir UUID al set para evitar duplicados
       processedUUIDs.add(uuid);
       
-      // Añadir factura al array de resultados
-      invoices.push(invoice);
+      // Añadir CFDI al array de resultados
+      cfdis.push(cfdi);
       
     } catch (error) {
       // Continuar con el siguiente archivo si hay un error
     }
   }
   
-  // Post-processing: update invoices that are referenced in payment complements
+  // Post-processing: update CFDIs that are referenced in payment complements
   const paymentComplementMap = new Map<string, string[]>(); // UUID -> [Payment Complement UUIDs]
   
   // First, identify all payment complements and their referenced documents
-  invoices.forEach(invoice => {
-    if (invoice.tipoDeComprobante === 'P' && invoice.docsRelacionadoComplementoPago.length > 0) {
+  cfdis.forEach(cfdi => {
+    if (cfdi.tipoDeComprobante === 'P' && cfdi.docsRelacionadoComplementoPago.length > 0) {
       // This is a payment complement, store references to all documents it pays
-      invoice.docsRelacionadoComplementoPago.forEach(referencedUUID => {
+      cfdi.docsRelacionadoComplementoPago.forEach(referencedUUID => {
         const normalizedUUID = referencedUUID.toUpperCase();
         if (!paymentComplementMap.has(normalizedUUID)) {
           paymentComplementMap.set(normalizedUUID, []);
         }
-        paymentComplementMap.get(normalizedUUID)?.push(invoice.uuid);
+        paymentComplementMap.get(normalizedUUID)?.push(cfdi.uuid);
       });
     }
   });
   
-  // Second, update regular invoices with payment information
-  invoices.forEach(invoice => {
-    if (invoice.tipoDeComprobante !== 'P') {
-      // Check if this invoice is referenced in any payment complement
-      const normalizedUUID = invoice.uuid.toUpperCase();
+  // Second, update regular CFDIs with payment information
+  cfdis.forEach(cfdi => {
+    if (cfdi.tipoDeComprobante !== 'P') {
+      // Check if this CFDI is referenced in any payment complement
+      const normalizedUUID = cfdi.uuid.toUpperCase();
       if (paymentComplementMap.has(normalizedUUID)) {
-        // This invoice has been paid through payment complement(s)
+        // This CFDI has been paid through payment complement(s)
         const paymentComplements = paymentComplementMap.get(normalizedUUID) || [];
         
-        // Add these payment complements to the invoice's references
-        invoice.pagadoConComplementos = paymentComplements;
+        // Add these payment complements to the CFDI's references
+        cfdi.pagadoConComplementos = paymentComplements;
         
-        // If the invoice has PPD payment method, it needs a complement to be considered paid
-        if (invoice.metodoPago === 'PPD') {
+        // If the CFDI has PPD payment method, it needs a complement to be considered paid
+        if (cfdi.metodoPago === 'PPD') {
           // Automatically set the payment month based on payment date if available
           // For now we just mark it as paid
-          invoice.pagado = true;
+          cfdi.pagado = true;
         }
       }
     }
   });
   
-  return invoices;
+  return cfdis;
 }
 
 /**

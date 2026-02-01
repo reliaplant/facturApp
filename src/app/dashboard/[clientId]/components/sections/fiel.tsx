@@ -312,27 +312,27 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
     return (
         <>
             {/* Main Card */}
-            <div className="w-full bg-white rounded-lg  shadow-sm">
+            <div className="w-full bg-white rounded-lg">
                 {/* Card Header */}
-                <div className="p-3 pb-3 border-b">
-                    <h3 className="">Documentos FIEL</h3>
+                <div className="bg-gray-100 px-4 py-2 border-b border-gray-300">
+                    <h3 className="text-sm font-medium text-gray-700">Documentos FIEL</h3>
                 </div>
 
                 {/* Card Content */}
                 <div className="">
                     <div className="">
                         {/* Table */}
-                        <table className="w-full">
+                        <table className="w-full text-xs">
                             {/* Table Header */}
                             <thead>
-                                <tr className="border-b">
-                                    <th className="w-[60%] px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                <tr className="border-b bg-gray-50">
+                                    <th className="w-[60%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
                                         Documento
                                     </th>
-                                    <th className="w-[20%] px-3 py-1 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="w-[20%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
                                         Actualizado
                                     </th>
-                                    <th className="w-[20%] px-3 py-1 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    <th className="w-[20%] px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wide">
                                         Acciones
                                     </th>
                                 </tr>
@@ -346,51 +346,49 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                     return (
                                         <tr key={doc.type} className="border-b hover:bg-gray-50">
                                             {/* Document Name Cell */}
-                                            <td className="py-1 px-3 font-medium">
-                                                <div className='flex flex-row gap-4 items-center'>
+                                            <td className="py-2 px-4">
+                                                <div className='flex flex-row gap-3 items-center'>
                                                     <div>
-                                                        <td className="py-2 text-center">
-                                                            {hasFile ? (
-                                                                <CheckCircle2 className="h-5 w-5 text-green-500 mx-auto" />
-                                                            ) : (
-                                                                <CheckCircle2 className="h-5 w-5 text-gray-300 mx-auto" />
-                                                            )}
-                                                        </td>
+                                                        {hasFile ? (
+                                                            <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                        ) : (
+                                                            <CheckCircle2 className="h-4 w-4 text-gray-300" />
+                                                        )}
                                                     </div>
-                                                    <div className="flex items-center whitespace-nowrap text-sm">
+                                                    <span className="font-medium">
                                                         {doc.label}
-                                                    </div>
+                                                    </span>
                                                 </div>
                                             </td>
 
                                             {/* Date Cell */}
-                                            <td className="py-1 px-3 text-sm whitespace-nowrap text-gray-500">
+                                            <td className="py-2 px-4 text-gray-500">
                                                 {doc.date ? (
                                                     <>
                                                         {formatDate(doc.date)}
                                                         {' ('}
                                                         {Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24)) === 0
-                                                            ? 'actualizado hoy'
-                                                            : `actualizado hace ${Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24))} días`}
+                                                            ? 'hoy'
+                                                            : `${Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24))} días`}
                                                         {')'}
                                                     </>
-                                                ) : 'No disponible'}
+                                                ) : <span className="text-gray-400">—</span>}
                                             </td>
 
                                             {/* Actions Cell */}
-                                            <td className="py-1 px-3 text-right text-sm">
+                                            <td className="py-2 px-4 text-right">
                                                 <div className="flex justify-end gap-1">
                                                     {isUploading === doc.type ? (
-                                                        <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                                                        <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
                                                     ) : (
                                                         <>
                                                             {/* Upload button for all document types */}
                                                             <label
                                                                 htmlFor={`file-${doc.type}`}
-                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer"
+                                                                className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer"
                                                                 title="Subir archivo"
                                                             >
-                                                                <Upload className="h-4 w-4" />
+                                                                <Upload className="h-3.5 w-3.5" />
                                                             </label>
 
                                                             <input

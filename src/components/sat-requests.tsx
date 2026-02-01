@@ -488,7 +488,7 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-medium whitespace-nowrap">
+          <h2 className="text-sm font-medium whitespace-nowrap">
             Solicitudes SAT
           </h2>
           
@@ -498,18 +498,18 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
               <DropdownMenuTrigger asChild>
                 <Button 
                   variant="black" 
-                  size="sm" 
+                  size="xs" 
                   disabled={isLoading}
                   className="flex items-center whitespace-nowrap"
                 >
                   {isLoading ? (
                     <>
-                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                       Procesando...
                     </>
                   ) : (
                     <>
-                      <Download className="h-3.5 w-3.5 mr-1" />
+                      <Download className="h-3 w-3 mr-1" />
                       Solicitar Descarga
                     </>
                   )}
@@ -598,69 +598,83 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                   requests.map((request) => (
                     <tr 
                       key={request.id} 
-                      className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      className="border-t border-gray-200 dark:border-gray-800 hover:bg-blue-100 dark:hover:bg-blue-900/30"
                     >
-                      <td className="pl-7 px-2 py-1 align-middle">
+                      <td className="pl-7 px-2 py-1 align-middle h-[56px]">
                         <div className="flex flex-col">
-                          <span title={request.createdAt?.toDate?.() 
+                          <span className="text-xs" title={request.createdAt?.toDate?.() 
                             ? request.createdAt.toDate().toLocaleString() 
                             : "Fecha pendiente"}>
                             {request.createdAt?.toDate?.() 
                               ? formatRelativeTime(request.createdAt.toDate())
                               : "Fecha pendiente"}
                           </span>
-                          <span className="text-gray-500 text-[10px]">
+                          <span className="text-purple-500 text-[10px]">
                             {request.createdAt?.toDate?.() 
                               ? request.createdAt.toDate().toLocaleString() 
                               : ""}
                           </span>
                         </div>
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-1 align-middle h-[56px]">
                         <div className="flex flex-col">
-                          <span title={request.updatedAt?.toDate?.() 
+                          <span className="text-xs" title={request.updatedAt?.toDate?.() 
                             ? request.updatedAt.toDate().toLocaleString() 
                             : "Sin actualizar"}>
                             {request.updatedAt?.toDate?.() 
                               ? formatRelativeTime(request.updatedAt.toDate())
                               : "Sin actualizar"}
                           </span>
-                          <span className="text-gray-500 text-[10px]">
+                          <span className="text-purple-500 text-[10px]">
                             {request.updatedAt?.toDate?.() 
                               ? request.updatedAt.toDate().toLocaleString() 
                               : ""}
                           </span>
                         </div>
                       </td>
-                      <td className="px-2 py-1 align-middle">
-                    {request.from && request.to ? (
-                      <div className="flex flex-col">
-                        <span className="text-xs">
-                          {request.from.includes(' ') 
-                            ? formatDateString(request.from.split(' ')[0]) 
-                            : formatDateString(request.from)} - {
-                            request.to.includes(' ') 
-                            ? formatDateString(request.to.split(' ')[0]) 
-                            : formatDateString(request.to)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-gray-400 text-xs italic">No disponible</span>
-                    )}
-                  </td>
-                      <td className="px-2 py-1 align-middle font-mono text-xs">
-                        {request.requestId || "N/A"}
+                      <td className="px-2 py-1 align-middle h-[56px]">
+                        {request.from && request.to ? (
+                          <div className="flex flex-col">
+                            <span className="text-xs">
+                              {request.from.includes(' ') 
+                                ? formatDateString(request.from.split(' ')[0]) 
+                                : formatDateString(request.from)}
+                            </span>
+                            <span className="text-purple-500 text-[10px]">
+                              {request.to.includes(' ') 
+                                ? formatDateString(request.to.split(' ')[0]) 
+                                : formatDateString(request.to)}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs italic">No disponible</span>
+                        )}
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-1 align-middle h-[56px]">
                         <div className="flex flex-col">
-                          <span>{request.downloadType === "issued" ? "Emitida" : "Recibida"}</span>
+                          <span className="font-mono text-xs truncate max-w-[120px]" title={request.requestId}>
+                            {request.requestId ? request.requestId.substring(0, 12) + '...' : "N/A"}
+                          </span>
+                          <span className="text-purple-500 text-[10px]">
+                            {request.id?.substring(0, 8)}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-1 align-middle h-[56px]">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-medium">{request.downloadType === "issued" ? "Emitida" : "Recibida"}</span>
+                          {request.packageIds && request.packageIds.length > 0 && (
+                            <span className="text-purple-500 text-[10px]">
+                              {request.packageIds.length} paquete{request.packageIds.length > 1 ? 's' : ''}
+                            </span>
+                          )}
                           {request.packagesDownloaded && renderPackageDownloadButtons(request)}
                         </div>
                       </td>
-                      <td className="px-2 py-1 align-middle">
+                      <td className="px-2 py-1 align-middle h-[56px]">
                         <Badge 
                           variant="outline" 
-                          className={`${
+                          className={`text-[10px] ${
                             request.packagesProcessed ? 'bg-blue-50 text-blue-700 border-blue-300' :
                             request.packagesDownloaded ? 'bg-indigo-50 text-indigo-700 border-indigo-300' :
                             (request.completed || request.status === "3" || 
@@ -680,8 +694,8 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                            request.status || 'Pendiente'}
                         </Badge>
                       </td>
-                      <td className="pr-7 px-2 py-1 align-middle">
-                        <div className="flex justify-center space-x-1">
+                      <td className="pr-7 px-2 py-1 align-middle h-[56px]">
+                        <div className="flex justify-center space-x-2">
                           {!request.completed && !request.packagesDownloaded && !request.error && (
                             <button 
                               className={`text-xs ${verifyingId === request.id ? 'text-gray-500' : 'text-indigo-600 hover:text-indigo-900 hover:underline'}`}

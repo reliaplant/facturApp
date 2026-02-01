@@ -3,14 +3,15 @@ import React, { useState, useEffect, useRef, useCallback } from "react"; // Add 
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IncomesTable } from "@/components/incomes-table";
-import { ExpensesTable } from "@/components/expenses-table";
+import { IncomesTableV2 as IncomesTable } from "@/components/incomes-table-v2";
+import { ExpensesTableV2 as ExpensesTable } from "@/components/expenses-table-v2";
 import { FiscalSummary } from "@/components/fiscal-summary";
 import { YearSelector } from "@/components/year-selector";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 import { ChevronLeft, RefreshCw, FileUp } from "lucide-react";
-import { Invoice } from "@/models/Invoice";
+import { Badge } from "@/components/ui/badge";
+import { CFDI } from "@/models/CFDI";
 import { processCFDIFiles } from "@/services/cfdi-parser";
 import { v4 as uuidv4 } from "uuid";
 import { Client } from "@/models/Client";
@@ -20,7 +21,7 @@ import DeclaracionMensualPF from "@/components/declaracionMensualPF";
 import { FixedAssetsTable } from "@/components/fixed-assets-table";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
-import { invoiceService } from "@/services/invoice-service"; // Add this import
+import { cfdiService } from "@/services/cfdi-service";
 import SatRequests from "@/components/sat-requests";
 import Proveedores from "@/components/proveedores"; // Add this import
 import { FacturasExtranjerasTable } from "@/components/facturas-extranjeras-table"; // Add this import
@@ -28,11 +29,33 @@ import { FacturasExtranjerasTable } from "@/components/facturas-extranjeras-tabl
 export default function ClientDashboard() {
   const params = useParams();
   const clientId = params?.clientId as string || '';
-  const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
+  
+  // Initialize year from localStorage or current year
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('selectedYear');
+      if (cached) {
+        const year = parseInt(cached, 10);
+        if (!isNaN(year) && year >= 2000 && year <= 2100) {
+          return year;
+        }
+      }
+    }
+    return new Date().getFullYear();
+  });
+  
+  // Save year to localStorage when it changes
+  const handleYearChange = useCallback((year: number) => {
+    setSelectedYear(year);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('selectedYear', year.toString());
+    }
+  }, []);
+  
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
   const [client, setClient] = useState<Client | null>(null);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<CFDI[]>([]);
   const [activeTab, setActiveTab] = useState<string>("fiscal");
   const { toast } = useToast();
 
@@ -67,8 +90,8 @@ export default function ClientDashboard() {
         if (clientData) {
           setClient(clientData);
 
-          // Also fetch the client's invoices - now using invoiceService
-          const clientInvoices = await invoiceService.getInvoices(clientId);
+          // Also fetch the client's invoices - now using cfdiService
+          const clientInvoices = await cfdiService.getInvoices(clientId);
           setInvoices(clientInvoices);
         } else {
           toast({
@@ -96,6 +119,13 @@ export default function ClientDashboard() {
     // We'll use this counter to trigger a refresh of invoice data
   }, []);
 
+  // Handle invoice updates from tables - sync state across all components
+  const handleInvoiceUpdate = useCallback((updatedInvoice: CFDI) => {
+    setInvoices(prev => 
+      prev.map(inv => inv.uuid === updatedInvoice.uuid ? updatedInvoice : inv)
+    );
+  }, []);
+
   // Modify the useEffect to also respond to supplier changes
   useEffect(() => {
     const fetchClientData = async () => {
@@ -109,7 +139,7 @@ export default function ClientDashboard() {
           setClient(clientData);
           
           console.log("📊 Fetching invoice data after supplier change");
-          const clientInvoices = await invoiceService.getInvoices(clientId);
+          const clientInvoices = await cfdiService.getInvoices(clientId);
           setInvoices(clientInvoices);
           setLastInvoiceRefresh(Date.now());
         }
@@ -171,7 +201,7 @@ export default function ClientDashboard() {
 
         try {
           console.log("💾 Saving invoices to Firestore WITHOUT deductibility values");
-          const result = await invoiceService.saveInvoices(clientId, processedInvoices);
+          const result = await cfdiService.saveInvoices(clientId, processedInvoices);
 
           // Prepare status message
           let statusDetails = [];
@@ -239,8 +269,8 @@ export default function ClientDashboard() {
   const handleRefreshData = async () => {
     setIsRefreshing(true);
     try {
-      // Fetch invoices from Firestore using invoiceService
-      const clientInvoices = await invoiceService.getInvoices(clientId);
+      // Fetch invoices from Firestore using cfdiService
+      const clientInvoices = await cfdiService.getInvoices(clientId);
       setInvoices(clientInvoices);
 
       toast({
@@ -270,8 +300,8 @@ export default function ClientDashboard() {
   };
 
   const yearInvoices = getYearFilteredInvoices();
-  const emittedInvoices = yearInvoices.filter(inv => !inv.recibida);
-  const receivedInvoices = yearInvoices.filter(inv => inv.recibida);
+  const emittedInvoices = yearInvoices.filter(inv => inv.esIngreso);
+  const receivedInvoices = yearInvoices.filter(inv => inv.esEgreso);
 
   if (!client) {
     return <div className="flex items-center justify-center min-h-screen">Cargando...</div>;
@@ -285,14 +315,45 @@ export default function ClientDashboard() {
           <div className="flex justify-between items-center">
             <div className="flex items-center">
               <Link href="/dashboard" className="mr-3">
-                <Button variant="ghost" size="sm">
-                  <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                <Button variant="ghost" size="xs">
+                  <ChevronLeft className="h-3 w-3 mr-1" />
                   Volver
                 </Button>
               </Link>
-              <h1 className="font-bold text-gray-900 dark:text-white">
-                {client.name} <span className="font-normal">({client.rfc})</span>
+              <h1 className="text-sm font-medium text-gray-900 dark:text-white">
+                {client.name} <span className="font-normal text-gray-500">({client.rfc})</span>
               </h1>
+              {client.regimenesFiscales && client.regimenesFiscales.length > 0 && (
+                <Badge variant="outline" className="ml-2 text-[10px] bg-purple-50 text-purple-700 border-purple-200">
+                  {client.regimenesFiscales.find(r => r.esPredeterminado)?.regimen || client.regimenesFiscales[0].regimen}
+                </Badge>
+              )}
+              
+              {/* CSF y OPF status indicators */}
+              <div className="flex items-center gap-2 ml-4 text-[10px]">
+                {(() => {
+                  const csfDays = client.lastCSFDate 
+                    ? Math.floor((Date.now() - new Date(client.lastCSFDate).getTime()) / (1000 * 60 * 60 * 24))
+                    : null;
+                  const isCSFOld = csfDays !== null && csfDays > 20;
+                  return (
+                    <span className={`px-1.5 py-0.5 rounded ${isCSFOld ? 'bg-red-100 text-red-700' : csfDays !== null ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                      CSF: {csfDays !== null ? `${csfDays}d` : 'Sin cargar'}
+                    </span>
+                  );
+                })()}
+                {(() => {
+                  const opfDays = client.lastOPFDate 
+                    ? Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))
+                    : null;
+                  const isOPFOld = opfDays !== null && opfDays > 20;
+                  return (
+                    <span className={`px-1.5 py-0.5 rounded ${isOPFOld ? 'bg-red-100 text-red-700' : opfDays !== null ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
+                      OPF: {opfDays !== null ? `${opfDays}d` : 'Sin cargar'}
+                    </span>
+                  );
+                })()}
+              </div>
             </div>
 
             {/* Add user info with avatar */}
@@ -325,11 +386,11 @@ export default function ClientDashboard() {
               {/* Use simplified TabsList with bottom border-only styling */}
               <TabsList size="sm" className="overflow-x-auto bg-transparent">
                 <TabsTrigger size="sm" value="fiscal">Cédula Fiscal</TabsTrigger>
-                <TabsTrigger size="sm" value="incomes">Facturas Emitidas</TabsTrigger>
-                <TabsTrigger size="sm" value="expenses">Facturas Recibidas</TabsTrigger>
-                <TabsTrigger size="sm" value="extranjeras">Facturas Extranjeras</TabsTrigger>
+                <TabsTrigger size="sm" value="incomes">Fact. Emitidas</TabsTrigger>
+                <TabsTrigger size="sm" value="expenses">Fact. Recibidas</TabsTrigger>
+                <TabsTrigger size="sm" value="extranjeras">Fact. Extranjeras</TabsTrigger>
                 <TabsTrigger size="sm" value="proveedores">Proveedores</TabsTrigger>
-                <TabsTrigger size="sm" value="declaraciones">Declaraciones</TabsTrigger>
+                <TabsTrigger size="sm" value="declaraciones">Declaración</TabsTrigger>
                 <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
                 {/* <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger> */}
                 <TabsTrigger size="sm" value="sat">SAT Desc Mas.</TabsTrigger>
@@ -350,12 +411,12 @@ export default function ClientDashboard() {
               </Button> */}
               <Button
                 variant="outline"
-                size="sm"
+                size="xs"
                 onClick={openFileDialog}
                 disabled={isLoading || isSaving}
                 className="flex items-center whitespace-nowrap"
               >
-                <FileUp className="h-3.5 w-3.5 mr-1" />
+                <FileUp className="h-3 w-3 mr-1" />
                 {isLoading ? "Procesando..." : isSaving ? "Guardando..." : "Subir"}
               </Button>
 
@@ -378,11 +439,11 @@ export default function ClientDashboard() {
                 buttonLabel="Exportar"
               />
 
-              {/* Explicitly add size="sm" to YearSelector */}
+              {/* Explicitly add size="xs" to YearSelector */}
               <YearSelector
                 selectedYear={selectedYear}
-                onYearChange={setSelectedYear}
-                size="sm"
+                onYearChange={handleYearChange}
+                size="xs"
               />
 
 
@@ -400,14 +461,16 @@ export default function ClientDashboard() {
             <FiscalSummary
               clientId={clientId}
               year={selectedYear}
+              cfdis={invoices}
             />
           </TabsContent>
 
           <TabsContent value="incomes">
             <IncomesTable
               year={selectedYear}
-              invoices={invoices.filter(inv => !inv.recibida)}
-              clientId={clientId} // Add clientId prop
+              invoices={invoices.filter(inv => inv.esIngreso)}
+              clientId={clientId}
+              onInvoiceUpdate={handleInvoiceUpdate}
             />
           </TabsContent>
 
@@ -415,8 +478,9 @@ export default function ClientDashboard() {
             <ExpensesTable
               key={`expenses-${lastInvoiceRefresh}`} // Use lastInvoiceRefresh instead of Date.now() to prevent continuous remounting
               year={selectedYear}
-              invoices={invoices.filter(inv => inv.recibida)}
-              clientId={clientId} // Add clientId prop
+              invoices={invoices.filter(inv => inv.esEgreso)}
+              clientId={clientId}
+              onInvoiceUpdate={handleInvoiceUpdate}
             />
           </TabsContent>
 

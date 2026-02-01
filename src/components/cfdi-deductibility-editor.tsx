@@ -10,19 +10,19 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CFDI } from "@/models/CFDI";
 
-interface InvoiceDeductibilityEditorProps {
-  invoice: CFDI | null;
+interface CFDIDeductibilityEditorProps {
+  cfdi: CFDI | null;
   isOpen: boolean;
   onClose: () => void;
-  onSave: (updatedInvoice: CFDI) => void;
+  onSave: (updatedCFDI: CFDI) => void;
 }
 
-export function InvoiceDeductibilityEditor({
-  invoice,
+export function CFDIDeductibilityEditor({
+  cfdi,
   isOpen,
   onClose,
   onSave
-}: InvoiceDeductibilityEditorProps) {
+}: CFDIDeductibilityEditorProps) {
   // Default values
   const [formData, setFormData] = useState({
     esDeducible: false,
@@ -47,35 +47,35 @@ export function InvoiceDeductibilityEditor({
     return { gravadoISR, gravadoIVA };
   };
 
-  // Initialize form when invoice changes
+  // Initialize form when cfdi changes
   useEffect(() => {
-    if (invoice) {
+    if (cfdi) {
       // Calculate proper gravado values
-      const { gravadoISR, gravadoIVA } = calculateGravados(invoice);
+      const { gravadoISR, gravadoIVA } = calculateGravados(cfdi);
       
       setFormData({
-        esDeducible: invoice.esDeducible || false,
-        mesDeduccion: invoice.mesDeduccion?.toString() || "none",
-        gravadoISR: invoice.gravadoISR || gravadoISR,
-        gravadoIVA: invoice.gravadoIVA || gravadoIVA,
-        gravadoModificado: invoice.gravadoModificado || false,
-        notasDeducibilidad: invoice.notasDeducibilidad || ""
+        esDeducible: cfdi.esDeducible || false,
+        mesDeduccion: cfdi.mesDeduccion?.toString() || "none",
+        gravadoISR: cfdi.gravadoISR || gravadoISR,
+        gravadoIVA: cfdi.gravadoIVA || gravadoIVA,
+        gravadoModificado: cfdi.gravadoModificado || false,
+        notasDeducibilidad: cfdi.notasDeducibilidad || ""
       });
     }
-  }, [invoice]);
+  }, [cfdi]);
 
   const handleSave = () => {
-    if (!invoice) return;
+    if (!cfdi) return;
     
     // Calculate what the values should be automatically
-    const { gravadoISR: calculatedISR, gravadoIVA: calculatedIVA } = calculateGravados(invoice);
+    const { gravadoISR: calculatedISR, gravadoIVA: calculatedIVA } = calculateGravados(cfdi);
     
     // Check if values were modified from the calculated values
     const isModified = 
       Math.abs((formData.gravadoISR || 0) - (calculatedISR || 0)) > 0.01 ||
       Math.abs((formData.gravadoIVA || 0) - (calculatedIVA || 0)) > 0.01;
     
-    console.log("Saving invoice with modified gravado values:", {
+    console.log("Saving cfdi with modified gravado values:", {
       calculatedISR,
       calculatedIVA,
       formISR: formData.gravadoISR,
@@ -83,8 +83,8 @@ export function InvoiceDeductibilityEditor({
       isModified
     });
     
-    const updatedInvoice: CFDI = {
-      ...invoice,
+    const updatedCFDI: CFDI = {
+      ...cfdi,
       esDeducible: formData.esDeducible,
       mesDeduccion: formData.mesDeduccion === "none" ? undefined : parseInt(formData.mesDeduccion),
       gravadoISR: formData.esDeducible ? formData.gravadoISR : 0,
@@ -95,20 +95,20 @@ export function InvoiceDeductibilityEditor({
     };
     
     console.log("Saving to Firebase with values:", {
-      gravadoISR: updatedInvoice.gravadoISR,
-      gravadoIVA: updatedInvoice.gravadoIVA,
-      gravadoModificado: updatedInvoice.gravadoModificado
+      gravadoISR: updatedCFDI.gravadoISR,
+      gravadoIVA: updatedCFDI.gravadoIVA,
+      gravadoModificado: updatedCFDI.gravadoModificado
     });
     
-    onSave(updatedInvoice);
+    onSave(updatedCFDI);
     onClose();
   };
 
-  // Handle reset to recalculate values based on invoice data
+  // Handle reset to recalculate values based on cfdi data
   const handleReset = () => {
-    if (!invoice) return;
+    if (!cfdi) return;
     
-    const { gravadoISR, gravadoIVA } = calculateGravados(invoice);
+    const { gravadoISR, gravadoIVA } = calculateGravados(cfdi);
     
     setFormData({
       ...formData,
@@ -124,7 +124,7 @@ export function InvoiceDeductibilityEditor({
     return monthAbbreviations[month - 1] || '';
   };
 
-  if (!invoice) return null;
+  if (!cfdi) return null;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -161,8 +161,8 @@ export function InvoiceDeductibilityEditor({
                   <SelectItem value="none">-</SelectItem>
                   {Array.from({ length: 12 }, (_, i) => {
                     const monthNum = i+1;
-                    const needsWarning = invoice.metodoPago === 'PPD' && 
-                      !((invoice.pagadoConComplementos || []).length > 0);
+                    const needsWarning = cfdi.metodoPago === 'PPD' && 
+                      !((cfdi.pagadoConComplementos || []).length > 0);
                     
                     return (
                       <SelectItem key={monthNum} value={monthNum.toString()}>

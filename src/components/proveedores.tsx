@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, Check, X, Search, AlertTriangle } from "lucide-react";
+import { Check, X, Search, AlertTriangle } from "lucide-react";
 import { useToast } from "@/components/ui/use-toast";
-import { invoiceService } from '@/services/invoice-service';
+import { cfdiService } from '@/services/cfdi-service';
 import { listado69bService } from '@/services/listado69b-service';
 import { doc, updateDoc, getFirestore } from 'firebase/firestore';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -41,18 +41,48 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
   const [filteredSuppliers, setFilteredSuppliers] = useState<Supplier[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState(false);
   const [isChecking69B, setIsChecking69B] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [updatingCategoryRfc, setUpdatingCategoryRfc] = useState<string | null>(null);
   const { toast } = useToast();
   const [updatingRfc, setUpdatingRfc] = useState<string | null>(null);
   
-  // Load suppliers on mount
+  // Load and sync suppliers on mount
   useEffect(() => {
-    loadSuppliers();
-    loadCategories(); // Add this to load categories
+    syncAndLoadSuppliers();
+    loadCategories();
   }, [clientId]);
+  
+  // Sync and load suppliers automatically
+  const syncAndLoadSuppliers = async () => {
+    setIsLoading(true);
+    try {
+      // First sync suppliers from invoices (silently)
+      await cfdiService.syncSuppliersFromInvoices(clientId).catch(() => {});
+      
+      // Then load suppliers
+      const loadedSuppliers = await cfdiService.getSuppliers(clientId);
+      const sortedSuppliers = loadedSuppliers.sort((a, b) => {
+        const dateA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
+        const dateB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
+        return dateB - dateA;
+      });
+      
+      setSuppliers(sortedSuppliers);
+      
+      // Check 69B status in background
+      check69BStatus(sortedSuppliers);
+    } catch (error) {
+      console.error("Error loading suppliers:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar los proveedores",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
   
   // Load categories
   const loadCategories = async () => {
@@ -84,31 +114,6 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
       );
     }
   }, [suppliers, searchTerm]);
-  
-  // Load suppliers from Firestore
-  const loadSuppliers = async () => {
-    setIsLoading(true);
-    try {
-      const loadedSuppliers = await invoiceService.getSuppliers(clientId);
-      // Sort by creation date (newest first)
-      // For suppliers, lastUpdated effectively represents when they were first added
-      setSuppliers(loadedSuppliers.sort((a, b) => {
-        // Safely handle cases where lastUpdated might be missing
-        const dateA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-        const dateB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
-        return dateB - dateA; // Descending order (newest first)
-      }));
-    } catch (error) {
-      console.error("Error loading suppliers:", error);
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar los proveedores",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
   
   // Check if supplier RFCs are in Listado 69B
   const check69BStatus = async (suppliersList: Supplier[]) => {
@@ -168,47 +173,6 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
     }
   };
   
-  // Sync suppliers from invoices
-  const syncSuppliers = async () => {
-    setIsSyncing(true);
-    try {
-      // Sync suppliers from invoices
-      const result = await invoiceService.syncSuppliersFromInvoices(clientId);
-      
-      // Show results
-      toast({
-        title: "Sincronización completada",
-        description: `Proveedores: ${result.added} nuevos, ${result.updated} actualizados, ${result.unchanged} sin cambios.`,
-      });
-      
-      // Reload suppliers
-      const refreshedSuppliers = await invoiceService.getSuppliers(clientId);
-      
-      // Sort by creation date
-      const sortedSuppliers = refreshedSuppliers.sort((a, b) => {
-        const dateA = a.lastUpdated ? new Date(a.lastUpdated).getTime() : 0;
-        const dateB = b.lastUpdated ? new Date(b.lastUpdated).getTime() : 0;
-        return dateB - dateA;
-      });
-      
-      // Set suppliers without 69B status first for fast UI update
-      setSuppliers(sortedSuppliers);
-      
-      // Then check 69B status
-      await check69BStatus(sortedSuppliers);
-      
-    } catch (error) {
-      console.error("Error syncing suppliers:", error);
-      toast({
-        title: "Error",
-        description: "No se pudieron sincronizar los proveedores",
-        variant: "destructive",
-      });
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-  
   // Toggle deductible status - modified to NOT trigger invoice evaluation
   const toggleDeductible = async (rfc: string, currentStatus: boolean) => {
     try {
@@ -224,7 +188,7 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
       
       // IMPORTANT: Use the new function that ONLY updates supplier status
       // and does NOT evaluate invoices
-      await invoiceService.updateSupplierDeductibleOnly(clientId, rfc, !currentStatus);
+      await cfdiService.updateSupplierDeductibleOnly(clientId, rfc, !currentStatus);
       
       // Still notify parent that supplier data changed
       if (onSupplierUpdated) {
@@ -305,7 +269,7 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
     <div className="space-y-2">
       <div className="bg-white dark:bg-gray-800 border-b">
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-base font-medium whitespace-nowrap">
+          <h2 className="text-sm font-medium whitespace-nowrap">
             Proveedores
           </h2>
           
@@ -328,16 +292,6 @@ export function Proveedores({ clientId, onSupplierUpdated }: ProveedoresProps) {
                 </button>
               )}
             </div>
-            <Button 
-              variant="black" 
-              size="sm"
-              onClick={syncSuppliers}
-              disabled={isSyncing || isChecking69B}
-              className="flex items-center whitespace-nowrap"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 mr-1 ${(isSyncing || isChecking69B) ? "animate-spin" : ""}`} />
-              {isSyncing ? "Sincronizando..." : isChecking69B ? "Verificando Lista 69B..." : "Sincronizar Proveedores"}
-            </Button>
           </div>
         </div>
 

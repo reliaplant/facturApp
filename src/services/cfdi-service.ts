@@ -23,11 +23,12 @@ interface Supplier {
   isDeductible: boolean;
   lastUpdated: string;
   invoiceCount?: number;
+  categoriaDefault?: string; // Default category for invoices from this supplier
 }
 
 const db = getFirestore(app);
 
-export const invoiceService = {
+export const cfdiService = {
   // Helper function to sanitize objects for Firestore (replace undefined with null)
   _sanitizeForFirestore(obj: any): any {
     if (obj === undefined) return null;
@@ -314,7 +315,7 @@ export const invoiceService = {
       .forEach(pc => {
         if (!pc.docsRelacionadoComplementoPago) return;
         
-        pc.docsRelacionadoComplementoPago.forEach((uuid: string) => {
+        pc.docsRelacionadoComplementoPago.forEach(uuid => {
           const key = uuid.toUpperCase();
           const paymentDate = new Date(pc.fecha);
           
@@ -526,6 +527,40 @@ export const invoiceService = {
   },
 
   /**
+   * Set supplier's default category if it doesn't have one already
+   * Returns true if the category was set, false if supplier already had a category
+   */
+  async setSupplierDefaultCategoryIfEmpty(clientId: string, rfc: string, categoryName: string): Promise<boolean> {
+    try {
+      const supplier = await this.getSupplierByRfc(clientId, rfc);
+      
+      // If supplier doesn't exist or already has a default category, skip
+      if (!supplier) {
+        console.log(`Supplier ${rfc} not found, cannot set default category`);
+        return false;
+      }
+      
+      if (supplier.categoriaDefault) {
+        console.log(`Supplier ${rfc} already has default category: ${supplier.categoriaDefault}`);
+        return false;
+      }
+      
+      // Supplier exists but has no default category - set it
+      const supplierRef = doc(db, 'clients', clientId, 'suppliers', rfc);
+      await updateDoc(supplierRef, { 
+        categoriaDefault: categoryName,
+        lastUpdated: new Date().toISOString()
+      });
+      
+      console.log(`✅ Set default category "${categoryName}" for supplier ${rfc}`);
+      return true;
+    } catch (error) {
+      console.error("Error setting supplier default category:", error);
+      return false;
+    }
+  },
+
+  /**
    * Extract suppliers from invoices and update the suppliers collection
    */
   async syncSuppliersFromInvoices(clientId: string): Promise<{
@@ -538,7 +573,7 @@ export const invoiceService = {
       const invoices = await this.getInvoices(clientId);
       
       // Filter for received invoices only
-      const receivedInvoices = invoices.filter(invoice => invoice.recibida);
+      const receivedInvoices = invoices.filter(invoice => invoice.esEgreso);
       
       if (receivedInvoices.length === 0) {
         return { added: 0, updated: 0, unchanged: 0 };
@@ -636,14 +671,14 @@ export const invoiceService = {
       console.log("Step 1: Getting invoices to evaluate");
       const invoices = await this.getInvoices(clientId);
       const eligibleInvoices = invoices.filter(invoice => 
-        invoice.recibida && 
+        invoice.esEgreso && 
         !invoice.locked && 
         invoice.tipoDeComprobante !== 'P' &&
         !invoice.usoCFDI?.startsWith('C') &&
         !invoice.usoCFDI?.startsWith('S')
       );
       
-      const skippedCount = invoices.filter(inv => inv.recibida).length - eligibleInvoices.length;
+      const skippedCount = invoices.filter(inv => inv.esEgreso).length - eligibleInvoices.length;
       console.log(`Found ${eligibleInvoices.length} eligible invoices for evaluation`);
       
       if (eligibleInvoices.length === 0) {
@@ -658,7 +693,7 @@ export const invoiceService = {
         .forEach(pc => {
           if (!pc.docsRelacionadoComplementoPago) return;
           
-          pc.docsRelacionadoComplementoPago.forEach((uuid: string) => {
+          pc.docsRelacionadoComplementoPago.forEach(uuid => {
             const key = uuid.toUpperCase();
             const paymentDate = new Date(pc.fecha);
             
@@ -675,15 +710,20 @@ export const invoiceService = {
       const suppliersRef = collection(db, 'clients', clientId, 'suppliers');
       const suppliersSnapshot = await getDocs(suppliersRef);
       const supplierStatusMap = new Map<string, boolean>();
+      const supplierCategoryMap = new Map<string, string | undefined>(); // Map for default categories
       
       suppliersSnapshot.forEach(doc => {
         const supplier = doc.data() as Supplier;
-        console.log(`Supplier ${supplier.rfc}: deductible=${supplier.isDeductible}`);
+        console.log(`Supplier ${supplier.rfc}: deductible=${supplier.isDeductible}, category=${supplier.categoriaDefault || 'none'}`);
         // Store the deductibility status with RFC as key (case insensitive)
         supplierStatusMap.set(supplier.rfc.toUpperCase(), supplier.isDeductible);
+        // Store the default category
+        if (supplier.categoriaDefault) {
+          supplierCategoryMap.set(supplier.rfc.toUpperCase(), supplier.categoriaDefault);
+        }
       });
       
-      console.log(`Loaded ${supplierStatusMap.size} suppliers directly from Firestore`);
+      console.log(`Loaded ${supplierStatusMap.size} suppliers directly from Firestore (${supplierCategoryMap.size} with default categories)`);
       
       // Helper functions for consistent evaluation
       const hasPaymentComplement = (invoice: CFDI): boolean => {
@@ -731,8 +771,9 @@ export const invoiceService = {
         const supplierRfcKey = invoice.rfcEmisor.toUpperCase();
         const hasSupplierInfo = supplierStatusMap.has(supplierRfcKey);
         const supplierIsDeductible = hasSupplierInfo ? supplierStatusMap.get(supplierRfcKey) : true;
+        const supplierDefaultCategory = supplierCategoryMap.get(supplierRfcKey);
         
-        console.log(`Supplier "${invoice.rfcEmisor}": ${hasSupplierInfo ? `Found, deductible=${supplierIsDeductible}` : "Not found (defaulting to deductible)"}`);
+        console.log(`Supplier "${invoice.rfcEmisor}": ${hasSupplierInfo ? `Found, deductible=${supplierIsDeductible}, category=${supplierDefaultCategory || 'none'}` : "Not found (defaulting to deductible)"}`);
         
         // Initialize new status
         let newStatus = {
@@ -803,51 +844,64 @@ export const invoiceService = {
           }
         }
         
-        // Check if update is needed
-        const needsUpdate = currentStatus.isDeductible !== newStatus.isDeductible || 
+        // Check if update is needed for deductibility OR if category needs to be assigned
+        const needsCategoryUpdate = !invoice.categoria && supplierDefaultCategory;
+        const needsDeductibilityUpdate = currentStatus.isDeductible !== newStatus.isDeductible || 
                            currentStatus.month !== newStatus.month;
+        const needsUpdate = needsDeductibilityUpdate || needsCategoryUpdate;
         
-        console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"}`);
-        console.log(`- From: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}`);
-        console.log(`- To:   Deductible=${newStatus.isDeductible}, Month=${newStatus.month}`);
+        console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"} (deductibility: ${needsDeductibilityUpdate}, category: ${needsCategoryUpdate})`);
+        console.log(`- From: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}, Category=${invoice.categoria || 'none'}`);
+        console.log(`- To:   Deductible=${newStatus.isDeductible}, Month=${newStatus.month}, Category=${needsCategoryUpdate ? supplierDefaultCategory : (invoice.categoria || 'none')}`);
         
         if (needsUpdate) {
           const invoiceRef = doc(db, 'clients', clientId, 'cfdi', invoice.uuid);
-          const updateData: Partial<CFDI> = {
-            esDeducible: newStatus.isDeductible,
-            mesDeduccion: newStatus.month
-          };
+          const updateData: Partial<CFDI> = {};
+          
+          // Only update deductibility fields if they changed
+          if (needsDeductibilityUpdate) {
+            updateData.esDeducible = newStatus.isDeductible;
+            updateData.mesDeduccion = newStatus.month;
+          }
           
           // Type D invoices should always have anual=true
           if (invoice.usoCFDI?.startsWith('D')) {
             updateData.anual = true;
           }
           
-          // Set gravado values based on deductibility - BUT RESPECT MANUALLY MODIFIED VALUES
-          if (newStatus.isDeductible) {
-            // CRITICAL: Only update gravado values if NOT manually modified
-            if (invoice.gravadoModificado !== true) {
-              const baseInvoice = { ...invoice, ...updateData };
-              const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
-              updateData.gravadoISR = gravadoISR;
-              updateData.gravadoIVA = gravadoIVA;
-              updateData.gravadoModificado = false;
-              console.log(`Updated gravados: ISR=${gravadoISR}, IVA=${gravadoIVA}`);
+          // Set gravado values based on deductibility - BUT ONLY IF DEDUCTIBILITY CHANGED
+          if (needsDeductibilityUpdate) {
+            if (newStatus.isDeductible) {
+              // CRITICAL: Only update gravado values if NOT manually modified
+              if (invoice.gravadoModificado !== true) {
+                const baseInvoice = { ...invoice, ...updateData };
+                const { gravadoISR, gravadoIVA } = calculateGravados(baseInvoice);
+                updateData.gravadoISR = gravadoISR;
+                updateData.gravadoIVA = gravadoIVA;
+                updateData.gravadoModificado = false;
+                console.log(`Updated gravados: ISR=${gravadoISR}, IVA=${gravadoIVA}`);
+              } else {
+                // Skip updating gravado values if manually modified
+                console.log(`Preserving manually modified gravado values: ISR=${invoice.gravadoISR}, IVA=${invoice.gravadoIVA}`);
+              }
             } else {
-              // Skip updating gravado values if manually modified
-              console.log(`Preserving manually modified gravado values: ISR=${invoice.gravadoISR}, IVA=${invoice.gravadoIVA}`);
+              // Only reset to zero if not manually modified
+              if (invoice.gravadoModificado !== true) {
+                updateData.gravadoISR = 0;
+                updateData.gravadoIVA = 0;
+                updateData.gravadoModificado = false;
+                console.log(`Reset gravados to zero (not manually modified)`);
+              } else {
+                // Don't reset manually modified values even when turning off deductibility
+                console.log(`Preserving manually modified gravado values despite turning off deductibility`);
+              }
             }
-          } else {
-            // Only reset to zero if not manually modified
-            if (invoice.gravadoModificado !== true) {
-              updateData.gravadoISR = 0;
-              updateData.gravadoIVA = 0;
-              updateData.gravadoModificado = false;
-              console.log(`Reset gravados to zero (not manually modified)`);
-            } else {
-              // Don't reset manually modified values even when turning off deductibility
-              console.log(`Preserving manually modified gravado values despite turning off deductibility`);
-            }
+          }
+          
+          // STEP: Assign supplier's default category if invoice doesn't have one
+          if (!invoice.categoria && supplierDefaultCategory) {
+            updateData.categoria = supplierDefaultCategory;
+            console.log(`Assigned supplier's default category: ${supplierDefaultCategory}`);
           }
           
           batch.update(invoiceRef, this._sanitizeForFirestore({
@@ -891,18 +945,18 @@ export const invoiceService = {
       const invoices = await this.getInvoices(clientId);
       
       // Log how many invoices are locked so we can verify the filter is working
-      const lockedCount = invoices.filter(inv => !inv.recibida && inv.locked).length;
+      const lockedCount = invoices.filter(inv => inv.esIngreso && inv.locked).length;
       console.log(`Found ${lockedCount} locked income invoices that will be skipped`);
       
       // Only evaluate issued (not received) invoices
       const eligibleInvoices = invoices.filter(invoice => 
-        !invoice.recibida && // This is the key difference - we want issued invoices
+        invoice.esIngreso && // This is the key difference - we want issued invoices
         !invoice.locked && 
         invoice.tipoDeComprobante !== 'P' &&
         !invoice.usoCFDI?.startsWith('C')
       );
       
-      const skippedCount = invoices.filter(inv => !inv.recibida).length - eligibleInvoices.length;
+      const skippedCount = invoices.filter(inv => inv.esIngreso).length - eligibleInvoices.length;
       console.log(`Found ${eligibleInvoices.length} eligible income invoices for evaluation`);
       
       if (eligibleInvoices.length === 0) {
@@ -912,6 +966,20 @@ export const invoiceService = {
       // 2. Get payment complement information
       console.log("Step 2: Mapping payment complements");
       const paymentMap = await this._buildPaymentComplementMap(clientId);
+      
+      // 2.5. Build a map of RFC -> last known category from existing invoices
+      console.log("Step 2.5: Building receptor category map from existing invoices");
+      const receptorCategoryMap = new Map<string, string>();
+      
+      // Look at ALL income invoices to find existing categories by receptor RFC
+      invoices
+        .filter(inv => inv.esIngreso && inv.categoria && inv.rfcReceptor)
+        .forEach(inv => {
+          // Store the category for this receptor RFC (last one wins, which is fine)
+          receptorCategoryMap.set(inv.rfcReceptor!.toUpperCase(), inv.categoria!);
+        });
+      
+      console.log(`Found ${receptorCategoryMap.size} receptors with existing categories`);
       
       // 3. Batch update preparation
       const batch = writeBatch(db);
@@ -937,42 +1005,58 @@ export const invoiceService = {
           isRecognized: invoice.esDeducible === true,
           month: invoice.mesDeduccion
         };
-        console.log(`Current status: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}`);
+        console.log(`Current status: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}, Category=${invoice.categoria || 'none'}`);
+        
+        // Check if receptor has a known category
+        const receptorRfcKey = invoice.rfcReceptor?.toUpperCase() || '';
+        const receptorDefaultCategory = receptorCategoryMap.get(receptorRfcKey);
         
         // Determine if this invoice should be recognized as income
         const { shouldBeRecognized, recognitionMonth } = 
           this._determineInvoiceIncome(invoice, paymentMap);
         
-        // Check if update is needed
-        const needsUpdate = currentStatus.isRecognized !== shouldBeRecognized || 
+        // Check if update is needed for income recognition OR if category needs to be assigned
+        const needsCategoryUpdate = !invoice.categoria && receptorDefaultCategory;
+        const needsIncomeUpdate = currentStatus.isRecognized !== shouldBeRecognized || 
                            currentStatus.month !== recognitionMonth;
+        const needsUpdate = needsIncomeUpdate || needsCategoryUpdate;
         
-        console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"}`);
-        console.log(`- From: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}`);
-        console.log(`- To:   Recognized=${shouldBeRecognized}, Month=${recognitionMonth}`);
+        console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"} (income: ${needsIncomeUpdate}, category: ${needsCategoryUpdate})`);
+        console.log(`- From: Recognized=${currentStatus.isRecognized}, Month=${currentStatus.month}, Category=${invoice.categoria || 'none'}`);
+        console.log(`- To:   Recognized=${shouldBeRecognized}, Month=${recognitionMonth}, Category=${needsCategoryUpdate ? receptorDefaultCategory : (invoice.categoria || 'none')}`);
         
         if (needsUpdate) {
           const invoiceRef = doc(db, 'clients', clientId, 'cfdi', invoice.uuid);
-          const updateData: Partial<CFDI> = {
-            esDeducible: shouldBeRecognized,
-            mesDeduccion: recognitionMonth
-          };
+          const updateData: Partial<CFDI> = {};
           
-          // Set gravado values based on recognition - for income, this represents taxable income
-          if (shouldBeRecognized) {
-            // For issued invoices, gravadoISR is the net income (subtract retentions)
-            const baseAmount = invoice.subTotal || 0;
-            const isrWithheld = invoice.isrRetenido || 0;
-            const ivaWithheld = invoice.ivaRetenido || 0;
-            
-            // Calculate "gravado" values - these represent taxable amounts for income invoices
-            updateData.gravadoISR = Math.round((baseAmount - isrWithheld) * 100) / 100;
-            updateData.gravadoIVA = Math.round(baseAmount * 0.16 * 100) / 100; // Estimate IVA at 16%
-            updateData.gravadoModificado = false;
-          } else {
-            updateData.gravadoISR = 0;
-            updateData.gravadoIVA = 0;
-            updateData.gravadoModificado = false;
+          // Only update income fields if they changed
+          if (needsIncomeUpdate) {
+            updateData.esDeducible = shouldBeRecognized;
+            updateData.mesDeduccion = recognitionMonth;
+          }
+          
+          // Assign receptor's known category if invoice doesn't have one
+          if (needsCategoryUpdate) {
+            updateData.categoria = receptorDefaultCategory;
+            console.log(`Assigned receptor's known category: ${receptorDefaultCategory}`);
+          }
+          
+          // Set gravado values based on recognition - BUT ONLY IF INCOME STATUS CHANGED
+          if (needsIncomeUpdate) {
+            if (shouldBeRecognized) {
+              // For issued invoices, gravadoISR is the net income (subtract retentions)
+              const baseAmount = invoice.subTotal || 0;
+              const isrWithheld = invoice.isrRetenido || 0;
+              
+              // Calculate "gravado" values - these represent taxable amounts for income invoices
+              updateData.gravadoISR = Math.round((baseAmount - isrWithheld) * 100) / 100;
+              updateData.gravadoIVA = Math.round(baseAmount * 0.16 * 100) / 100; // Estimate IVA at 16%
+              updateData.gravadoModificado = false;
+            } else {
+              updateData.gravadoISR = 0;
+              updateData.gravadoIVA = 0;
+              updateData.gravadoModificado = false;
+            }
           }
           
           batch.update(invoiceRef, this._sanitizeForFirestore({

@@ -97,9 +97,9 @@ export default function OPFUploader({ clientId, onClientUpdate, client }: OPFUpl
   };
 
   return (
-    <div className="">
-      <div className="bg-gray-50 px-3 py-2 border-b flex justify-between items-center">
-        <h3 className="">Opinión de Cumplimiento Fiscal</h3>
+    <div className="bg-white">
+      <div className="bg-gray-100 px-4 py-2 border-b border-gray-300 flex justify-between items-center">
+        <h3 className="text-sm font-medium text-gray-700">Opinión de Cumplimiento</h3>
         
         {/* Always show upload button in header */}
         <div className="flex items-center space-x-2">
@@ -112,50 +112,46 @@ export default function OPFUploader({ clientId, onClientUpdate, client }: OPFUpl
           />
           <label
             htmlFor="opf-upload"
-            className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 cursor-pointer"
+            className="px-2.5 py-1 bg-black text-white text-xs rounded hover:bg-gray-800 cursor-pointer transition-colors"
           >
-            {uploading ? 'Subiendo...' : client?.lastOPFUrl ? 'Reemplazar OPF' : 'Subir OPF'}
+            {uploading ? 'Subiendo...' : client?.lastOPFUrl ? 'Reemplazar' : 'Subir OPF'}
           </label>
         </div>
       </div>
       
       {error && (
-        <div className="text-red-600 text-sm mb-3 px-3 pt-2">{error}</div>
+        <div className="text-red-600 text-xs px-4 pt-2">{error}</div>
       )}
 
-      <div className="bg-white p-3 text-sm ">
+      <div className="text-xs p-4">
         {client?.lastOPFUrl ? (
-          <div className="flex flex-col md:flex-row md:items-center gap-3">
-            <div className="flex items-center gap-2">
-              <FiDownload className="h-5 w-5 text-blue-500" />
-              <button 
-                onClick={() => handleDownload(client.lastOPFUrl as string)}
-                className="text-blue-600 hover:text-blue-800"
-              >
-                Descargar
-              </button>
-            </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <button 
+              onClick={() => handleDownload(client.lastOPFUrl as string)}
+              className="inline-flex items-center gap-1.5 text-purple-600 hover:text-purple-800 font-medium"
+            >
+              <FiDownload className="h-3.5 w-3.5" />
+              Descargar
+            </button>
             <button
               onClick={handleDelete}
-              className="text-red-600 hover:text-red-800 text-sm"
+              className="inline-flex items-center gap-1 text-red-500 hover:text-red-700"
             >
-              <FiTrash2 className="inline mr-1" />
+              <FiTrash2 className="h-3.5 w-3.5" />
               Eliminar
             </button>
             {client.lastOPFDate && (
-              <div className="flex items-center gap-2 text-gray-500 ml-auto">
-                <span>
-                  Actualizado: {formatDate(client.lastOPFDate)} 
-                  {Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24)) === 0 
-                  ? ' (hoy)'
-                  : ` (${Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))} días atrás)`}
-                </span>
-              </div>
+              <span className="text-gray-400 ml-auto">
+                Actualizado: {formatDate(client.lastOPFDate)} 
+                {Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24)) === 0 
+                ? ' (hoy)'
+                : ` (${Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))} días)`}
+              </span>
             )}
           </div>
         ) : (
           <div className="flex items-center">
-            <FiFileText className="h-5 w-5 text-gray-400 mr-2" />
+            <FiFileText className="h-4 w-4 text-gray-400 mr-2" />
             <p className="text-gray-500">No hay opinión de cumplimiento cargada.</p>
           </div>
         )}

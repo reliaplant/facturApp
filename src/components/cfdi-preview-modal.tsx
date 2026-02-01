@@ -5,18 +5,18 @@ import { useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CheckCircle, Loader2, XCircle, AlertTriangle } from "lucide-react";
 
-interface InvoicePreviewModalProps {
-  invoice: CFDI | null;
+interface CFDIPreviewModalProps {
+  cfdi: CFDI | null;
   isOpen: boolean;
   onClose: () => void;
-  onUpdate: (invoice: CFDI) => void;
+  onUpdate: (cfdi: CFDI) => void;
 }
 
-export function InvoicePreviewModal({ invoice, isOpen, onClose, onUpdate }: InvoicePreviewModalProps) {
-  if (!invoice) return null;
+export function CFDIPreviewModal({ cfdi, isOpen, onClose, onUpdate }: CFDIPreviewModalProps) {
+  if (!cfdi) return null;
   
   // State for tab selection
-  const [activeTab, setActiveTab] = useState<string>("invoice");
+  const [activeTab, setActiveTab] = useState<string>("cfdi");
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState<any | null>(null);
   const [verificationError, setVerificationError] = useState<string | null>(null);
@@ -51,10 +51,10 @@ export function InvoicePreviewModal({ invoice, isOpen, onClose, onUpdate }: Invo
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          uuid: invoice.uuid,
-          rfcEmisor: invoice.rfcEmisor,
-          rfcReceptor: invoice.rfcReceptor,
-          total: invoice.total,
+          uuid: cfdi.uuid,
+          rfcEmisor: cfdi.rfcEmisor,
+          rfcReceptor: cfdi.rfcReceptor,
+          total: cfdi.total,
         }),
       });
       if (!response.ok) throw new Error("Error verificando CFDI");
@@ -71,7 +71,7 @@ export function InvoicePreviewModal({ invoice, isOpen, onClose, onUpdate }: Invo
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-auto">
         <DialogHeader>
-          <DialogTitle>Factura: {invoice.uuid}</DialogTitle>
+          <DialogTitle>Factura: {cfdi.uuid}</DialogTitle>
         </DialogHeader>
         
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -90,7 +90,7 @@ export function InvoicePreviewModal({ invoice, isOpen, onClose, onUpdate }: Invo
               <h3 className="text-lg font-medium mb-4">Debug - All Invoice Fields</h3>
               
               <div className="grid grid-cols-1 gap-1 text-sm">
-                {Object.entries(invoice).map(([key, value]) => (
+                {Object.entries(cfdi).map(([key, value]) => (
                   <div key={key} className="grid grid-cols-2 gap-4 border-b py-2">
                     <div className="font-medium">{key}:</div>
                     <div className="overflow-auto max-h-36">

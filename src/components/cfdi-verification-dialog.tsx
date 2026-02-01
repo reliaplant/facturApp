@@ -3,10 +3,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Check, X, AlertTriangle, Loader2 } from "lucide-react";
-import { Invoice } from "@/models/Invoice";
+import { CFDI } from "@/models/CFDI";
 
 interface CFDIVerificationDialogProps {
-  invoice: Invoice | null;
+  invoice: CFDI | null;
   isOpen: boolean;
   onClose: () => void;
 }

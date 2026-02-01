@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Custom skeleton animation for evaluated invoices */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-skeleton-purple {
+  background: linear-gradient(
+    90deg,
+    rgb(250 245 255) 0%,
+    rgb(233 213 255) 50%,
+    rgb(250 245 255) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 2.5s ease-in-out infinite;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -59,7 +80,7 @@
 
 @layer base {
   th, td {
-    @apply text-sm;
+    @apply text-xs;
   }
 }
 
@@ -71,7 +92,7 @@
 
 @layer base {
   tr:not(:last-child) {
-    @apply border-b hover:bg-gray-50;
+    @apply border-b hover:bg-purple-50;
   }
 }
 

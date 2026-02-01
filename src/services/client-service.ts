@@ -55,6 +55,7 @@ export const clientService = {
           nombreEntidadFederativa: ''
         },
         actividadesEconomicas: [],
+        regimenesFiscales: [],
         obligaciones: [],
         estatusPago: 'PENDIENTE',
         estatusCliente: 'ACTIVO',

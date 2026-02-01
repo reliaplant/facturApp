@@ -12,169 +12,160 @@ export default function AddressSection({
   saveChanges
 }: SectionProps) {
   return (
-    <div className="border rounded-lg shadow-sm overflow-hidden">
+    <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
       <SectionHeader 
         title="Dirección" 
         isEditing={isEditing} 
         toggleEditMode={toggleEditMode} 
       />
-      <div className="p-3 bg-white text-sm">
+      <div className={`p-4 pb-24 text-xs ${isEditing ? 'bg-gray-50' : 'bg-white'}`}>
         {!isEditing ? (
           client.address ? (
-            <div className="space-y-2">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="font-medium">Tipo Vialidad: </span>
-                  <span>{client.address.tipoVialidad || 'No especificado'}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Nombre Vialidad: </span>
-                  <span>{client.address.nombreVialidad || 'No especificado'}</span>
-                </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Tipo Vialidad</p>
+                <p className="font-medium">{client.address.tipoVialidad || 'N/A'}</p>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="font-medium">Número Exterior: </span>
-                  <span>{client.address.numeroExterior || 'No especificado'}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Número Interior: </span>
-                  <span>{client.address.numeroInterior || 'No especificado'}</span>
-                </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Vialidad</p>
+                <p className="font-medium">{client.address.nombreVialidad || 'N/A'}</p>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="font-medium">Colonia: </span>
-                  <span>{client.address.nombreColonia || 'No especificado'}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Localidad: </span>
-                  <span>{client.address.nombreLocalidad || 'No especificado'}</span>
-                </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">No. Exterior</p>
+                <p className="font-medium">{client.address.numeroExterior || 'N/A'}</p>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="font-medium">Municipio: </span>
-                  <span>{client.address.municipio || 'No especificado'}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Estado: </span>
-                  <span>{client.address.nombreEntidadFederativa || 'No especificado'}</span>
-                </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">No. Interior</p>
+                <p className="font-medium">{client.address.numeroInterior || 'N/A'}</p>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="font-medium">Código Postal: </span>
-                  <span>{client.address.codigoPostal || 'No especificado'}</span>
-                </div>
-                <div>
-                  <span className="font-medium">Entre Calles: </span>
-                  <span>{client.address.entreCalles || 'No especificado'}</span>
-                </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Colonia</p>
+                <p className="font-medium">{client.address.nombreColonia || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Localidad</p>
+                <p className="font-medium">{client.address.nombreLocalidad || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Municipio</p>
+                <p className="font-medium">{client.address.municipio || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Estado</p>
+                <p className="font-medium">{client.address.nombreEntidadFederativa || 'N/A'}</p>
+              </div>
+              <div>
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">C.P.</p>
+                <p className="font-medium">{client.address.codigoPostal || 'N/A'}</p>
+              </div>
+              <div className="col-span-2 md:col-span-3">
+                <p className="text-gray-500 text-[10px] uppercase tracking-wide mb-0.5">Entre Calles</p>
+                <p className="font-medium">{client.address.entreCalles || 'N/A'}</p>
               </div>
             </div>
           ) : (
-            <p className="text-gray-500">No hay información de dirección disponible</p>
+            <div className="px-4 py-3 text-center text-gray-400 text-xs italic">
+              Sin información de dirección
+            </div>
           )
         ) : (
-          <>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+          <div className="space-y-3">
+            {/* Row 1 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
-                <label className="font-medium block mb-1">Tipo Vialidad</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Tipo Vialidad</label>
                 <input 
                   type="text" 
                   value={editClient.address?.tipoVialidad || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'tipoVialidad')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
               <div>
-                <label className="font-medium block mb-1">Nombre Vialidad</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Vialidad</label>
                 <input 
                   type="text" 
                   value={editClient.address?.nombreVialidad || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'nombreVialidad')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
               <div>
-                <label className="font-medium block mb-1">Número Exterior</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">No. Ext</label>
                 <input 
                   type="text" 
                   value={editClient.address?.numeroExterior || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'numeroExterior')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
               <div>
-                <label className="font-medium block mb-1">Número Interior</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">No. Int</label>
                 <input 
                   type="text" 
                   value={editClient.address?.numeroInterior || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'numeroInterior')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            {/* Row 2 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
-                <label className="font-medium block mb-1">Colonia</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Colonia</label>
                 <input 
                   type="text" 
                   value={editClient.address?.nombreColonia || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'nombreColonia')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
               <div>
-                <label className="font-medium block mb-1">Localidad</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Localidad</label>
                 <input 
                   type="text" 
                   value={editClient.address?.nombreLocalidad || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'nombreLocalidad')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
               <div>
-                <label className="font-medium block mb-1">Municipio</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Municipio</label>
                 <input 
                   type="text" 
                   value={editClient.address?.municipio || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'municipio')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
               <div>
-                <label className="font-medium block mb-1">Estado</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Estado</label>
                 <input 
                   type="text" 
                   value={editClient.address?.nombreEntidadFederativa || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'nombreEntidadFederativa')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 mb-2">
+            {/* Row 3 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
-                <label className="font-medium block mb-1">Código Postal</label>
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">C.P.</label>
                 <input 
                   type="text" 
                   value={editClient.address?.codigoPostal || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'codigoPostal')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
-              <div>
-                <label className="font-medium block mb-1">Entre Calles</label>
+              <div className="md:col-span-3">
+                <label className="text-gray-500 text-[10px] uppercase tracking-wide mb-1 block">Entre Calles</label>
                 <input 
                   type="text" 
                   value={editClient.address?.entreCalles || ''} 
                   onChange={(e) => handleInputChange('address', e.target.value, 'address', 'entreCalles')}
-                  className="w-full border rounded p-1 text-sm" 
+                  className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-500" 
                 />
               </div>
             </div>
@@ -183,7 +174,7 @@ export default function AddressSection({
               onSave={saveChanges} 
               saving={saving} 
             />
-          </>
+          </div>
         )}
       </div>
     </div>

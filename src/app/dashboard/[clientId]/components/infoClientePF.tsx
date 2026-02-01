@@ -3,29 +3,79 @@
 import { useEffect, useState } from 'react';
 import { Client } from '@/models/Client';
 import { clientService } from '@/services/client-service';
-import CSFUploader from './CSFUploader';
+import CSFSection from './CSFSection';
 import OPFUploader from './OPFUploader';
 import FielDocumentsSection from './sections/fiel';
 import { LoadingSkeleton } from './sections/LoadingSkeleton';
-import PersonalInfoSection from './sections/PersonalInfoSection';
-import AddressSection from './sections/AddressSection';
-import ActivitiesSection from './sections/ActivitiesSection';
-import ObligationsSection from './sections/ObligationsSection';
 import TasksSection from './sections/TasksSection';
 import PlanSection from './sections/PlanSection';
-import { FiDownload, FiFileText, FiCalendar, FiTrash2 } from 'react-icons/fi';
+import { FiDownload, FiFileText, FiCalendar, FiTrash2, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
+
+// Function to calculate profile completion score
+function calculateProfileScore(client: Client): { filled: number; total: number; percentage: number; missing: string[] } {
+  const missing: string[] = [];
+  
+  // Personal info fields to check
+  const personalFields: { field: keyof Client | string; label: string; check: (c: Client) => boolean }[] = [
+    { field: 'rfc', label: 'RFC', check: (c) => !!c.rfc?.trim() },
+    { field: 'curp', label: 'CURP', check: (c) => !!c.curp?.trim() },
+    { field: 'nombres', label: 'Nombres', check: (c) => !!c.nombres?.trim() },
+    { field: 'primerApellido', label: 'Primer Apellido', check: (c) => !!c.primerApellido?.trim() },
+    { field: 'email', label: 'Email', check: (c) => !!c.email?.trim() },
+    { field: 'telefono', label: 'Teléfono', check: (c) => !!c.telefono?.trim() },
+    { field: 'fechaInicioOperaciones', label: 'Fecha Inicio Operaciones', check: (c) => !!c.fechaInicioOperaciones?.trim() },
+    { field: 'estatusEnElPadron', label: 'Estatus en Padrón', check: (c) => !!c.estatusEnElPadron?.trim() },
+  ];
+
+  // Address fields to check
+  const addressFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
+    { field: 'codigoPostal', label: 'Código Postal', check: (c) => !!c.address?.codigoPostal?.trim() },
+    { field: 'nombreVialidad', label: 'Calle', check: (c) => !!c.address?.nombreVialidad?.trim() },
+    { field: 'numeroExterior', label: 'Número Exterior', check: (c) => !!c.address?.numeroExterior?.trim() },
+    { field: 'nombreColonia', label: 'Colonia', check: (c) => !!c.address?.nombreColonia?.trim() },
+    { field: 'municipio', label: 'Municipio', check: (c) => !!c.address?.municipio?.trim() },
+    { field: 'nombreEntidadFederativa', label: 'Estado', check: (c) => !!c.address?.nombreEntidadFederativa?.trim() },
+  ];
+
+  // Arrays to check (at least one item)
+  const arrayFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
+    { field: 'actividadesEconomicas', label: 'Actividades Económicas', check: (c) => (c.actividadesEconomicas?.length || 0) > 0 },
+    { field: 'regimenesFiscales', label: 'Regímenes Fiscales', check: (c) => (c.regimenesFiscales?.length || 0) > 0 },
+    { field: 'obligaciones', label: 'Obligaciones', check: (c) => (c.obligaciones?.length || 0) > 0 },
+  ];
+
+  // FIEL documents to check
+  const fielFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
+    { field: 'cerUrl', label: 'Certificado (.cer)', check: (c) => !!c.cerUrl },
+    { field: 'keyCerUrl', label: 'Llave Privada (.key)', check: (c) => !!c.keyCerUrl },
+    { field: 'claveFielUrl', label: 'Contraseña FIEL', check: (c) => !!c.claveFielUrl },
+  ];
+
+  const allFields = [...personalFields, ...addressFields, ...arrayFields, ...fielFields];
+  const total = allFields.length;
+  let filled = 0;
+
+  for (const f of allFields) {
+    if (f.check(client)) {
+      filled++;
+    } else {
+      missing.push(f.label);
+    }
+  }
+
+  return {
+    filled,
+    total,
+    percentage: Math.round((filled / total) * 100),
+    missing
+  };
+}
 
 interface InfoClientePFProps {
   clientId: string;
 }
 
 export interface EditSections {
-  personal: boolean;
-  fiscal: boolean;
-  address: boolean;
-  status: boolean;
-  activities: boolean;
-  obligations: boolean;
   plan: boolean;
 }
 
@@ -46,12 +96,6 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState<EditSections>({
-    personal: false,
-    fiscal: false,
-    address: false,
-    status: false,
-    activities: false,
-    obligations: false,
     plan: false
   });
 
@@ -221,7 +265,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
   };
 
   return (
-    <div className="space-y-4 max-w-5xl mx-auto py-12">
+    <div className="space-y-3 max-w-4xl mx-auto py-6 px-4">
       {loading ? (
         <LoadingSkeleton />
       ) : error ? (
@@ -275,14 +319,49 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
         // We have a client, now we can render the components
         // Don't check for editClient since it's derived from client
         <>
-          {/* CSF Section */}
-          <div className="border rounded-lg shadow-sm overflow-hidden">
-            <CSFUploader 
-              clientId={clientId} 
-              onClientUpdate={handleClientUpdate} 
-              client={client}
-            />
-          </div>
+          {/* Profile Completion Score */}
+          {(() => {
+            const score = calculateProfileScore(client);
+            const isComplete = score.percentage === 100;
+            return (
+              <div className={`border rounded-xl p-6 ${isComplete ? 'bg-purple-50 border-purple-200' : 'bg-red-50 border-red-200'}`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    {isComplete ? (
+                      <FiCheckCircle className="w-8 h-8 text-purple-600" />
+                    ) : (
+                      <FiAlertCircle className="w-8 h-8 text-red-500" />
+                    )}
+                    <div className="flex flex-col">
+                      <span className={`text-lg font-bold ${isComplete ? 'text-purple-800' : 'text-red-700'}`}>
+                        Perfil {isComplete ? 'completo' : 'incompleto'}
+                      </span>
+                      <span className="text-sm text-gray-500">
+                        {score.filled} de {score.total} campos
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="w-40 h-3 bg-gray-200 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full rounded-full transition-all ${isComplete ? 'bg-purple-500' : 'bg-red-500'}`}
+                        style={{ width: `${score.percentage}%` }}
+                      />
+                    </div>
+                    <span className={`text-lg font-bold min-w-[50px] text-right ${isComplete ? 'text-purple-700' : 'text-red-600'}`}>
+                      {score.percentage}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* CSF Section - Contiene toda la información del cliente */}
+          <CSFSection 
+            client={client} 
+            onClientUpdate={handleClientUpdate} 
+          />
 
           {/* OPF Section */}
           <div className="border rounded-lg shadow-sm overflow-hidden">
@@ -300,50 +379,6 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
               onClientUpdated={handleClientUpdate}
             />
           </div>
-
-          {/* Personal Info Section */}
-          <PersonalInfoSection 
-            client={client}
-            editClient={editClient!}
-            isEditing={editMode.personal}
-            saving={saving}
-            toggleEditMode={() => toggleEditMode('personal')}
-            handleInputChange={handleInputChange}
-            saveChanges={() => saveChanges('personal')}
-          />
-
-          {/* Address Section */}
-          <AddressSection 
-            client={client}
-            editClient={editClient!}
-            isEditing={editMode.address}
-            saving={saving}
-            toggleEditMode={() => toggleEditMode('address')}
-            handleInputChange={handleInputChange}
-            saveChanges={() => saveChanges('address')}
-          />
-
-          {/* Activities Section */}
-          <ActivitiesSection 
-            client={client}
-            editClient={editClient!}
-            isEditing={editMode.activities}
-            saving={saving}
-            toggleEditMode={() => toggleEditMode('activities')}
-            handleInputChange={handleInputChange}
-            saveChanges={() => saveChanges('activities')}
-          />
-
-          {/* Obligations Section */}
-          <ObligationsSection 
-            client={client}
-            editClient={editClient!}
-            isEditing={editMode.obligations}
-            saving={saving}
-            toggleEditMode={() => toggleEditMode('obligations')}
-            handleInputChange={handleInputChange}
-            saveChanges={() => saveChanges('obligations')}
-          />
 
           {/* Tasks Section (if exists) */}
           {client.listaPendientes && client.listaPendientes.length > 0 && (
