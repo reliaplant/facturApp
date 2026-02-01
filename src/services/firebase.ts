@@ -2,6 +2,8 @@ import {
   getAuth, 
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   updateProfile,
   signOut,
   deleteUser,
@@ -38,7 +40,7 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+export const db = getFirestore(app);
 
 // User CRUD operations
 export const userService = {
@@ -95,6 +97,44 @@ export const userService = {
       return userCredential;
     } catch (error) {
       console.error("Error logging in:", error);
+      throw error;
+    }
+  },
+  
+  // Login with Google
+  async loginWithGoogle(): Promise<UserCredential> {
+    try {
+      const provider = new GoogleAuthProvider();
+      const userCredential = await signInWithPopup(auth, provider);
+      
+      const { user } = userCredential;
+      
+      // Check if user already exists in Firestore
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      
+      if (!userDoc.exists()) {
+        // Create new user document for first-time Google sign in
+        const newUser: User = {
+          uid: user.uid,
+          email: user.email || '',
+          displayName: user.displayName || undefined,
+          photoURL: user.photoURL || undefined,
+          createdAt: new Date().toISOString(),
+          role: 'cliente', // Default role for new Google users
+          isActive: true
+        };
+        
+        await setDoc(doc(db, 'users', user.uid), newUser);
+      } else {
+        // Update last login timestamp
+        await updateDoc(doc(db, 'users', user.uid), {
+          lastLogin: new Date().toISOString()
+        });
+      }
+      
+      return userCredential;
+    } catch (error) {
+      console.error("Error logging in with Google:", error);
       throw error;
     }
   },

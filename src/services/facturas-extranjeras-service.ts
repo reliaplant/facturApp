@@ -22,6 +22,10 @@ export const facturasExtranjerasService = {
   async createFacturaExtranjera(clientId: string, factura: Omit<FacturaExtranjera, 'id'>): Promise<string> {
     try {
       const id = uuidv4();
+      console.log(`🆕 Creating factura extranjera for client: ${clientId}`);
+      console.log(`   Path: clients/${clientId}/facturasManuales/${id}`);
+      console.log(`   Data:`, JSON.stringify(factura, null, 2));
+      
       const facturaRef = doc(db, 'clients', clientId, 'facturasManuales', id);
       
       const facturaCompleta = {
@@ -31,10 +35,10 @@ export const facturasExtranjerasService = {
       };
       
       await setDoc(facturaRef, facturaCompleta);
-      console.log('Factura extranjera created successfully with ID:', id);
+      console.log('✅ Factura extranjera created successfully with ID:', id);
       return id;
     } catch (error) {
-      console.error('Error creating foreign invoice:', error);
+      console.error('❌ Error creating foreign invoice:', error);
       throw error;
     }
   },
@@ -42,15 +46,20 @@ export const facturasExtranjerasService = {
   // Get all foreign invoices for a client in a specific year
   async getFacturasExtranjeras(clientId: string, year: number): Promise<FacturaExtranjera[]> {
     try {
+      console.log(`🔍 Getting facturas extranjeras for client: ${clientId}, year: ${year}`);
+      
       // Simplify the query to avoid needing a composite index
       const facturasRef = collection(db, 'clients', clientId, 'facturasManuales');
       
       // Just get all the manual invoices for this client without filtering by year
       const querySnapshot = await getDocs(facturasRef);
       
+      console.log(`📦 Total documents found: ${querySnapshot.size}`);
+      
       const facturas: FacturaExtranjera[] = [];
       querySnapshot.forEach((doc) => {
         const factura = doc.data() as FacturaExtranjera;
+        console.log(`  - Factura: ${factura.emisor}, ejercicioFiscal: ${factura.ejercicioFiscal}, fecha: ${factura.fecha}`);
         // Filter by year in JavaScript rather than in the query
         if (factura.ejercicioFiscal === year) {
           facturas.push(factura);
@@ -64,7 +73,7 @@ export const facturasExtranjerasService = {
         return dateB.getTime() - dateA.getTime();
       });
       
-      console.log(`Retrieved ${facturas.length} foreign invoices for year ${year}`);
+      console.log(`✅ Retrieved ${facturas.length} foreign invoices for year ${year}`);
       return facturas;
     } catch (error) {
       console.error('Error getting foreign invoices:', error);
