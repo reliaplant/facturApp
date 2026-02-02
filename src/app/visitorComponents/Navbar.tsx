@@ -20,17 +20,17 @@ export default function Navbar() {
             </Link>
           </div>
         
-          <div className="flex space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <a
               href="/login"
-              className="inline-flex items-center px-4 py-2 border border-zinc-300 text-sm font-medium rounded-full text-zinc-700 bg-white hover:bg-zinc-50"
+              className="hidden sm:inline-flex items-center px-3 sm:px-4 py-2 border border-zinc-300 text-xs sm:text-sm font-medium rounded-full text-zinc-700 bg-white hover:bg-zinc-50"
             >
               Área de clientes
             </a>
             
             {/* Make sure this button opens the modal directly without navigation */}
             <ContactButton 
-              buttonText="Empieza ahora" 
+              buttonText="Empieza" 
               origin="navbar"
               modalTitle="Contáctanos para comenzar" 
             />

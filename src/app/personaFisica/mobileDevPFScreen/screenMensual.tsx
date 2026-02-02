@@ -2,19 +2,13 @@
 
 import { motion, AnimatePresence } from 'framer-motion';
 
-interface DeclaracionItem {
-  fecha: string;
-  estatus: string;
-  statusColor: string;
-  monto: string;
-}
-
 export default function ScreenDeclaraciones() {
-  const items: DeclaracionItem[] = [
-    { fecha: 'Enero 2023', estatus: 'Presentada', statusColor: 'bg-emerald-100 text-emerald-800', monto: 'IVA/ISR' },
-    { fecha: 'Febrero 2023', estatus: 'Presentada', statusColor: 'bg-emerald-100 text-emerald-800', monto: 'IVA/ISR' },
-    { fecha: 'Marzo 2023', estatus: 'Pendiente', statusColor: 'bg-amber-100 text-amber-800', monto: 'IVA/ISR' },
-    { fecha: 'Abril 2023', estatus: 'Pendiente', statusColor: 'bg-amber-100 text-amber-800', monto: 'IVA/ISR' },
+  const declaraciones = [
+    { mes: 'Enero 2026', tipo: 'Ord.', monto: '$12,450', pagada: false },
+    { mes: 'Diciembre 2025', tipo: 'Ord.', monto: '$8,320', pagada: true },
+    { mes: 'Noviembre 2025', tipo: 'Ord.', monto: '$9,150', pagada: true },
+    { mes: 'Octubre 2025', tipo: 'Ord.', monto: '$7,890', pagada: true },
+    { mes: 'Septiembre 2025', tipo: 'Compl.', monto: '$6,540', pagada: true },
   ];
 
   return (
@@ -27,27 +21,52 @@ export default function ScreenDeclaraciones() {
         transition={{ duration: 0.3 }}
         className="h-full"
       >
-        <div className="text-center mb-4">
-          <h3 className="text-lg font-semibold text-zinc-800">Declaraciones</h3>
-          <p className="text-sm text-zinc-600">Información actualizada</p>
+        <div className="text-center mb-3">
+          <h3 className="text-lg font-semibold text-zinc-800">Declaraciones Mensuales</h3>
+          <p className="text-xs text-zinc-500">Estado de declaraciones 2025-2026</p>
         </div>
+
+        {/* Banner de pago pendiente */}
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="bg-emerald-700 p-3 rounded-xl text-white mb-3"
+        >
+          <div className="flex items-center gap-2">
+            <div className="h-7 w-7 bg-emerald-600 rounded-full flex items-center justify-center">
+              <span className="text-xs">💵</span>
+            </div>
+            <div>
+              <p className="text-[10px] font-semibold">Pago pendiente: Enero 2026</p>
+              <p className="text-[9px] opacity-80">Monto: $12,450.00</p>
+            </div>
+          </div>
+        </motion.div>
         
-        <div className="space-y-2 overflow-y-auto max-h-[400px] scrollbar-hide">
-          {items.map((item, index) => (
+        <div className="space-y-2 overflow-y-auto max-h-[320px] scrollbar-hide">
+          {declaraciones.map((decl, index) => (
             <motion.div
               key={index}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.1 }}
+              transition={{ delay: 0.15 + index * 0.05 }}
               className="bg-white p-3 rounded-lg shadow-sm border border-zinc-100"
             >
-              <div className="flex justify-between items-center">
-                <p className="text-sm text-zinc-600">{item.fecha}</p>
-                <span className={`px-2 py-1 ${item.statusColor} text-xs rounded-full`}>
-                  {item.estatus}
-                </span>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-zinc-800">{decl.mes}</p>
+                    <span className="text-[9px] font-bold text-violet-600">{decl.tipo}</span>
+                  </div>
+                  <p className="text-[10px] text-zinc-400">
+                    {decl.pagada ? 'Pagada' : 'Pendiente de pago'}
+                  </p>
+                </div>
+                <p className={`text-sm font-semibold ${decl.pagada ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {decl.monto}
+                </p>
               </div>
-              <p className="text-lg font-semibold mt-1 text-zinc-800">{item.monto}</p>
             </motion.div>
           ))}
         </div>

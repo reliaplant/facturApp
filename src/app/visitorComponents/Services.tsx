@@ -17,23 +17,24 @@ export default function Services() {
   return (
     <section id="services" className="">
       {/* Sección Original de Contabilidad */}
-      <div className="py-20 px-8">
+      <div className="py-12 md:py-20 px-4 md:px-8">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
             <div className="order-2 md:order-1">
-              <h3 className="text-2xl font-bold mb-4 !bg-gradient-to-r !from-zinc-700 !to-zinc-900 !text-transparent !bg-clip-text">
-                ¿Por que debes usar contis?
+              <h3 className="text-xl md:text-2xl font-bold mb-4 !bg-gradient-to-r !from-zinc-700 !to-zinc-900 !text-transparent !bg-clip-text">
+                Contabilidad sin dolores de cabeza
               </h3>
               <p className="text-gray-600 mb-6">
-                Ya seas un profesional independiente, un emprendedor o una empresa establecida, nuestros servicios se adaptan a tus necesidades específicas para ayudarte a mantener el control de tus finanzas y cumplir con tus obligaciones fiscales.
+                Deja de perseguir fechas límite y preocuparte por multas. Nos encargamos de todo para que tú te dediques a hacer crecer tu negocio.
               </p>
               <ul className="space-y-2">
                 {[
-                  "Declaraciones mensuales y anuales",
-                  "Facturación electrónica",
-                  "Cálculo para pago de impuestos",
-                  "Consultas a tu contador",
-                  "Toda tu info en tu app",
+                  "Declaraciones mensuales siempre a tiempo",
+                  "Tus facturas organizadas automáticamente",
+                  "ISR e IVA calculados correctamente",
+                  "Portal donde ves todo en tiempo real",
+                  "Sin sorpresas del SAT",
+                  "Historial completo de tus impuestos",
                 ].map((item, i) => (
                   <li key={i} className="flex items-center">
                     <span className="text-zinc-600 mr-2 flex-shrink-0">✓</span> {item}
@@ -59,20 +60,20 @@ export default function Services() {
       </div>
 
       {/* Nueva Sección de Cuadrícula */}
-      <div className="py-20 px-8">
+      <div className="py-12 md:py-20 px-4 md:px-8">
         <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 gap-4 h-[300px]">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:h-[300px]">
             {/* Cuadro superior izquierdo */}
-            <div className="bg-sky-100 rounded-3xl p-10 flex items-center justify-center">
-              <h2 className="text-4xl font-bold text-zinc-800 leading-tight">
-                Tu info contable, <br/>siempre disponible
+            <div className="bg-sky-100 rounded-2xl md:rounded-3xl p-6 md:p-10 flex items-center justify-center">
+              <h2 className="text-2xl md:text-4xl font-bold text-zinc-800 leading-tight text-center">
+                Tu información fiscal <br/>siempre a la mano
               </h2>
             </div>
 
             {/* Cuadro superior derecho */}
-            <div className="bg-purple-600 rounded-3xl p-10 flex items-center justify-center">
-              <h2 className="text-4xl font-bold text-white leading-tight">
-                ¿Todo listo para <br/>comenzar?
+            <div className="bg-purple-600 rounded-2xl md:rounded-3xl p-6 md:p-10 flex items-center justify-center">
+              <h2 className="text-2xl md:text-4xl font-bold text-white leading-tight text-center">
+                Tú trabajas, <br/>nosotros declaramos
               </h2>
             </div>
 

@@ -1374,6 +1374,18 @@ export default function MiContabilidadPage() {
             </div>
           )}
         </main>
+
+        {/* Footer */}
+        <footer className="mt-auto py-4 px-6 border-t bg-gray-50">
+          <div className="flex items-center justify-between text-xs text-gray-500">
+            <span>© {new Date().getFullYear()} Kontia</span>
+            <div className="flex gap-4">
+              <a href="/terminos" target="_blank" className="hover:text-violet-600">Términos y Condiciones</a>
+              <a href="/privacidad" target="_blank" className="hover:text-violet-600">Política de Privacidad</a>
+              <a href="/aviso-privacidad" target="_blank" className="hover:text-violet-600">Aviso de Privacidad</a>
+            </div>
+          </div>
+        </footer>
       </div>
     </ProtectedRoute>
   );

@@ -8,6 +8,7 @@ import { ListaClientesPF } from "./components/listaClientesPF";
 import { Configuracion } from "./components/Configuracion";
 import UserManagement from "@/components/user-management";
 import Facturacion from "./components/Facturacion";
+import LegalDocuments from "./components/LegalDocuments";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -132,6 +133,7 @@ export default function DashboardPage() {
                     <TabsTrigger size="default" value="facturacion">Facturación</TabsTrigger>
                     <TabsTrigger size="default" value="usuarios">Usuarios</TabsTrigger>
                     <TabsTrigger size="default" value="configuracion">Categorías</TabsTrigger>
+                    <TabsTrigger size="default" value="legal">Legal</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
@@ -206,6 +208,10 @@ export default function DashboardPage() {
           
           <TabsContent value="configuracion">
             <Configuracion />
+          </TabsContent>
+          
+          <TabsContent value="legal">
+            <LegalDocuments />
           </TabsContent>
         </Tabs>
       </main>

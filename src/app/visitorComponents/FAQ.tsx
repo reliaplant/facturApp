@@ -9,28 +9,28 @@ export default function FAQ() {
 
   const faqs = [
     {
-      question: "¿Qué servicios incluye la contabilidad mensual?",
-      answer: "Incluye registro de ingresos y gastos, declaraciones mensuales, emisión de facturas, cálculo de impuestos y reportes financieros básicos.",
+      question: "¿Qué hago yo y qué hacen ustedes?",
+      answer: "Tú solo nos das acceso a tu información del SAT y nosotros nos encargamos del resto: descargamos tus facturas, calculamos tus impuestos, preparamos y presentamos tus declaraciones. Tú solo pagas lo que debas.",
     },
     {
-      question: "¿Cómo funciona el soporte técnico?",
-      answer: "Ofrecemos soporte por email, teléfono y chat según el plan contratado. Los tiempos de respuesta varían desde 24 horas hasta atención inmediata.",
+      question: "¿Cómo sé que mis declaraciones están al día?",
+      answer: "Cada vez que presentamos una declaración te notificamos. Además, en tu portal 'Mi Contabilidad' puedes ver el estado de todas tus declaraciones: cuáles están pagadas, cuáles tienen saldo a favor y cuáles están pendientes.",
     },
     {
-      question: "¿Puedo cambiar de plan en cualquier momento?",
-      answer: "Sí, puedes actualizar o cambiar tu plan en cualquier momento. Los cambios se reflejarán en tu siguiente ciclo de facturación.",
+      question: "¿Y si tengo un problema con el SAT?",
+      answer: "Tranquilo, para eso estamos. Si el SAT te envía algún requerimiento o tienes alguna duda sobre tu situación fiscal, nosotros te asesoramos y te ayudamos a resolverlo.",
     },
     {
-      question: "¿Qué pasa si necesito servicios adicionales?",
-      answer: "Ofrecemos servicios adicionales a la carta que puedes contratar según tus necesidades específicas. Contáctanos para más información.",
+      question: "¿Cómo sé cuánto tengo que pagar de impuestos?",
+      answer: "Muy fácil: en tu portal ves el monto exacto de cada declaración con su línea de captura lista para pagar en el banco o por transferencia. Sin sorpresas.",
     },
     {
-      question: "¿Cómo garantizan la seguridad de mi información?",
-      answer: "Utilizamos encriptación de nivel bancario y seguimos las mejores prácticas de seguridad para proteger tu información confidencial.",
+      question: "¿También hacen la declaración anual?",
+      answer: "Sí, está incluida. Preparamos tu declaración anual con todas las deducciones personales que identificamos durante el año. Si te toca devolución, te ayudamos a solicitarla.",
     },
     {
-      question: "¿Ofrecen periodo de prueba?",
-      answer: "Sí, ofrecemos un periodo de prueba de 14 días para que puedas evaluar nuestros servicios sin compromiso.",
+      question: "¿Qué pasa si tengo meses atrasados?",
+      answer: "No hay problema. Podemos regularizar tu situación fiscal presentando las declaraciones pendientes. Te decimos exactamente qué se debe y cómo ponerte al corriente sin estrés.",
     },
   ];
 
@@ -40,11 +40,11 @@ export default function FAQ() {
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold mb-4">
             <span className="text-black">
-              Preguntas Frecuentes
+              ¿Todavía tienes dudas?
             </span>
           </h2>
           <p className="text-xl text-gray-600">
-            Resolvemos tus dudas sobre nuestros servicios
+            Aquí respondemos lo que más nos preguntan
           </p>
         </div>
 

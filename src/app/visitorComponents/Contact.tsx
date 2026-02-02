@@ -11,7 +11,7 @@ export default function Contact() {
           <div className="bg-gradient-to-r from-sky-200 via-sky-400 to-purple-500 px-10 py-24 lg:min-h-[400px] flex items-center">
             <div className="max-w-xl mx-auto lg:mx-0">
               <h2 className="text-4xl lg:text-6xl font-bold text-white leading-tight">
-                Transforma tus finanzas en historias de éxito
+                Deja tu contabilidad en manos expertas
                 <span className="text-black">.</span>
               </h2>
             </div>
@@ -21,7 +21,7 @@ export default function Contact() {
           <div className="bg-zinc-800 px-10 py-20">
             <div className="max-w-xl mx-auto lg:mx-0">
               <h3 className="text-2xl text-white font-medium mb-10 flex items-center">
-                Estamos aquí para tu tranquilidad
+                Estamos aquí para ayudarte
               </h3>
               
               {/* Social Icons */}
@@ -48,7 +48,7 @@ export default function Contact() {
                 href="mailto:contacto@kontia.mx"
                 className="text-white text-lg hover:text-purple-300 transition-colors"
               >
-                info`@kontia.mx
+                contacto@kontia.mx
               </a>
             </div>
           </div>

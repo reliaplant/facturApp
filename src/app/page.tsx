@@ -2,7 +2,6 @@ import Hero from "./visitorComponents/Hero";
 import Services from "./visitorComponents/Services";
 import Features from "./visitorComponents/Features";
 import Contact from "./visitorComponents/Contact";
-import Pricing from "./visitorComponents/Pricing";
 import FAQ from "./visitorComponents/FAQ";
 import Navbar from "./visitorComponents/Navbar";
 import Footer from "./visitorComponents/Footer";
@@ -28,10 +27,6 @@ export default function Home() {
 
         <section id="contabilidad" className="pt-8">
           <PersonaFisicaPage />
-        </section>
-
-        <section id="precios" className="pt-8">
-          <Pricing />
         </section>
 
         <section id="faq" className="pt-8">

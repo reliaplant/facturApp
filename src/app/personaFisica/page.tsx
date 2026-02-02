@@ -3,15 +3,11 @@ import { useEffect, useState } from 'react';
 import MobileDevicePF from './mobileDevPF';
 import ScreenDeclaraciones from './mobileDevPFScreen/screenMensual';
 import ScreenAnual from './mobileDevPFScreen/screenAnual';
-import ScreenEmision from './mobileDevPFScreen/screenEmision';
-import ScreenRecibidas from './mobileDevPFScreen/screenRecibidas';
-import ScreenEmitidas from './mobileDevPFScreen/screenEmitidas';
-import ScreenSimulacion from './mobileDevPFScreen/screenSimulacion';
-import ScreenConstancia from './mobileDevPFScreen/screenConstancia';
-import ScreenOpinion from './mobileDevPFScreen/screenOpinion';
-import ScreenHistorial from './mobileDevPFScreen/screenHistorial';
-import ScreenDeducciones from './mobileDevPFScreen/screenDeducciones';
-import ScreenAsesoria from './mobileDevPFScreen/screenAsesoria';
+import ScreenFacturas from './mobileDevPFScreen/screenFacturas';
+import ScreenActivos from './mobileDevPFScreen/screenActivos';
+import ScreenExtranjeras from './mobileDevPFScreen/screenExtranjeras';
+import ScreenResumen from './mobileDevPFScreen/screenResumen';
+import ScreenPortal from './mobileDevPFScreen/screenPortal';
 
 export default function PersonaFisicaPage() {
   const [activeSection, setActiveSection] = useState('');
@@ -19,53 +15,38 @@ export default function PersonaFisicaPage() {
   const includedServices = [
     {
       title: "Declaraciones mensuales",
-      description: "Cálculo y presentación de impuestos mensuales",
+      description: "Cálculo y presentación de ISR e IVA cada mes",
       id: "declaraciones"
     },
     {
       title: "Declaración anual",
-      description: "Preparación completa de tu declaración",
+      description: "Preparación y presentación de tu anual",
       id: "anual"
     },
     {
-      title: "Emisión de facturas",
-      description: "Generación de CFDIs versión 4.0",
-      id: "emision"
+      title: "Control de facturas",
+      description: "Seguimiento de facturas emitidas y recibidas",
+      id: "facturas"
     },
     {
-      title: "Revisión facturas recibidas",
-      description: "Validación de facturas de proveedores",
-      id: "recibidas"
+      title: "Activos fijos",
+      description: "Control de activos y depreciación fiscal",
+      id: "activos"
     },
     {
-      title: "Revisión facturas emitidas",
-      description: "Control y seguimiento de tus ingresos",
-      id: "emitidas"
+      title: "Facturas extranjeras",
+      description: "Registro de pagos a proveedores del exterior",
+      id: "extranjeras"
     },
     {
-      title: "Simulación de impuestos",
-      description: "Planificación tributaria anticipada",
-      id: "simulacion"
+      title: "Resumen fiscal",
+      description: "Ingresos, gastos y utilidad en tiempo real",
+      id: "resumen"
     },
     {
-      title: "Constancia fiscal",
-      description: "Obtención de constancia actualizada del SAT",
-      id: "constancia"
-    },
-    {
-      title: "Opinión de cumplimiento",
-      description: "Verificación de estatus ante el SAT",
-      id: "opinion"
-    },
-    {
-      title: "Acceso a historial",
-      description: "Consulta tus declaraciones anteriores",
-      id: "historial"
-    },
-    {
-      title: "Asesoría continua",
-      description: "Consultas ilimitadas con expertos fiscales",
-      id: "asesoria"
+      title: "Portal Mi Contabilidad",
+      description: "Acceso 24/7 a toda tu información fiscal",
+      id: "portal"
     }
   ];
 
@@ -104,48 +85,40 @@ export default function PersonaFisicaPage() {
         return <ScreenDeclaraciones />;
       case 'anual':
         return <ScreenAnual />;
-      case 'emision':
-        return <ScreenEmision />;
-      case 'recibidas':
-        return <ScreenRecibidas />;
-      case 'emitidas':
-        return <ScreenEmitidas />;
-      case 'simulacion':
-        return <ScreenSimulacion />;
-      case 'constancia':
-        return <ScreenConstancia />;
-      case 'opinion':
-        return <ScreenOpinion />;
-      case 'historial':
-        return <ScreenHistorial />;
-      case 'deducciones':
-        return <ScreenDeducciones />;
-      case 'asesoria':
-        return <ScreenAsesoria />;
+      case 'facturas':
+        return <ScreenFacturas />;
+      case 'activos':
+        return <ScreenActivos />;
+      case 'extranjeras':
+        return <ScreenExtranjeras />;
+      case 'resumen':
+        return <ScreenResumen />;
+      case 'portal':
+        return <ScreenPortal />;
       default:
         return <ScreenDeclaraciones />;
     }
   };
 
   return (
-    <div className="mt-16 py-16  max-w-7xl mx-auto">
-      <div className="mb-16 flex flex-col items-center">
+    <div className="mt-8 md:mt-16 py-8 md:py-16 max-w-7xl mx-auto px-4 md:px-6">
+      <div className="mb-8 md:mb-16 flex flex-col items-center">
         <span className="inline-flex items-center px-3 py-0.5 rounded-full text-sm font-medium bg-sky-100 text-sky-800 mb-4">
           Servicio contable
         </span>
-        <h1 className="text-4xl font-bold text-gray-900 mb-3">
+        <h1 className="text-2xl md:text-4xl font-bold text-gray-900 mb-3 text-center">
           Contabilidad para Personas Físicas
         </h1>
-        <p className="text-xl text-gray-500 max-w-2xl text-center">
-          Gestiona tus impuestos de manera eficiente y cumple con tus obligaciones ante el SAT con nuestro servicio integral de contabilidad.
+        <p className="text-base md:text-xl text-gray-500 max-w-2xl text-center">
+          Gestiona tus impuestos de manera eficiente y cumple con tus obligaciones ante el SAT.
         </p>
       </div>
 
-      {/* Contenedor principal con altura fija */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 relative"> {/* altura total menos altura del menú */}
-        {/* Sidebar izquierdo */}
-        <div className="lg:col-span-3">
-          <div className="sticky top-48 max-h-[calc(100vh-6rem)]"> {/* Altura máxima y sticky normal */}
+      {/* Contenedor principal */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 relative">
+        {/* Sidebar izquierdo - hidden on mobile */}
+        <div className="hidden lg:block lg:col-span-3">
+          <div className="sticky top-48 max-h-[calc(100vh-6rem)]">
             <div className="pt-1 pb-6 pr-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-6">
                 Servicios incluidos
@@ -176,7 +149,6 @@ export default function PersonaFisicaPage() {
                       }`}>
                         {service.title}
                       </p>
-                      {/* <p className="text-xs text-gray-500">{service.description}</p> */}
                     </div>
                   </li>
                 ))}
@@ -185,206 +157,138 @@ export default function PersonaFisicaPage() {
           </div>
         </div>
 
-        {/* Contenido principal - mantiene su scroll */}
+        {/* Contenido principal */}
         <div className="lg:col-span-6 lg:px-8">
-          <div className="space-y-40"> {/* Espaciado uniforme entre secciones */}
-            <section id="declaraciones" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'declaraciones' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
+          <div className="space-y-12 md:space-y-24 lg:space-y-40">
+            <section id="declaraciones" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'declaraciones' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
                   Declaraciones Mensuales
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
                     Nos encargamos del cálculo y presentación de tus declaraciones provisionales
-                    mensuales ante el SAT. Incluye:
+                    mensuales ante el SAT.
                   </p>
-                  <ul className="space-y-4">
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
                     <li>Cálculo de IVA mensual (16%)</li>
-                    <li>Determinación de ISR provisional según régimen fiscal</li>
-                    <li>Presentación en la plataforma del SAT en tiempo y forma</li>
-                    <li>Cálculo correcto de retenciones de ISR e IVA</li>
-                    <li>Avisos de fechas límite según calendario del SAT</li>
+                    <li>Determinación de ISR provisional</li>
+                    <li>Presentación en tiempo y forma</li>
+                    <li>Línea de captura lista para pagar</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="anual" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'anual' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
+            <section id="anual" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'anual' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
                   Declaración Anual
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Preparamos tu declaración anual optimizando al máximo tus deducciones
-                    personales conforme a la legislación fiscal vigente:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Preparamos tu declaración anual optimizando tus deducciones personales.
                   </p>
-                  <ul className="space-y-4">
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
                     <li>Integración anual de ingresos y gastos</li>
-                    <li>Aplicación de deducciones personales (gastos médicos, intereses hipotecarios, etc.)</li>
-                    <li>Cálculo de impuesto anual según tablas vigentes del ISR</li>
-                    <li>Aplicación de estímulos fiscales aplicables</li>
-                    <li>Presentación en el aplicativo DeclaraSAT</li>
+                    <li>Deducciones personales (médicos, educación)</li>
+                    <li>Aplicación de saldos a favor</li>
+                    <li>Presentación en DeclaraSAT</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="emision" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'emision' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Emisión de Facturas
+            <section id="facturas" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'facturas' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
+                  Control de Facturas
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Facilitamos la emisión de facturas CFDI 4.0 cumpliendo con todos los requisitos fiscales:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Control de facturas emitidas y recibidas del SAT:
                   </p>
-                  <ul className="space-y-4">
-                    <li>Emisión de CFDI de Ingreso, Egreso, Nómina y otros</li>
-                    <li>Inclusión de complementos requeridos según el tipo de operación</li>
-                    <li>Validación automática de datos fiscales de tus clientes</li>
-                    <li>Envío directo a tus clientes por correo</li>
-                    <li>Emisiones ilimitadas de facturas dentro de tu plan</li>
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
+                    <li>Descarga automática del SAT</li>
+                    <li>Ingresos por cliente, gastos por proveedor</li>
+                    <li>Identificación de deducibles</li>
+                    <li>Consulta en tiempo real</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="recibidas" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'recibidas' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Revisión de Facturas Recibidas
+            <section id="activos" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'activos' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
+                  Activos Fijos
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Verificamos y procesamos todas las facturas que recibes de tus proveedores:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Control y depreciación fiscal de tus activos:
                   </p>
-                  <ul className="space-y-4">
-                    <li>Validación en tiempo real con el SAT</li>
-                    <li>Verificación de requisitos fiscales completos</li>
-                    <li>Clasificación por tipo de gasto para deducciones</li>
-                    <li>Alertas de facturas apócrifas o de contribuyentes en lista negra</li>
-                    <li>Organización por categorías fiscales</li>
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
+                    <li>Registro de equipo, mobiliario y maquinaria</li>
+                    <li>Depreciación según tasas fiscales</li>
+                    <li>Deducción mensual automática</li>
+                    <li>Historial de activos</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="emitidas" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'emitidas' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Revisión de Facturas Emitidas
+            <section id="extranjeras" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'extranjeras' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
+                  Facturas Extranjeras
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Monitoreamos y gestionamos todas tus facturas emitidas:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Pagos a proveedores del exterior como gastos deducibles:
                   </p>
-                  <ul className="space-y-4">
-                    <li>Registro y control de ingresos facturados</li>
-                    <li>Seguimiento de facturas pagadas y pendientes</li>
-                    <li>Verificación de complementos de pago requeridos</li>
-                    <li>Control de cancelaciones según normativa vigente</li>
-                    <li>Reportes mensuales de facturación</li>
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
+                    <li>Registro de Adobe, AWS, etc.</li>
+                    <li>Conversión a pesos mexicanos</li>
+                    <li>Clasificación deducible</li>
+                    <li>Integración con facturas nacionales</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="simulacion" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'simulacion' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Simulación de Impuestos
+            <section id="resumen" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'resumen' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
+                  Resumen Fiscal
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Proyecta tus obligaciones fiscales futuras y planifica tus pagos:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Tu situación fiscal en tiempo real:
                   </p>
-                  <ul className="space-y-4">
-                    <li>Cálculo predictivo de impuestos según ingresos estimados</li>
-                    <li>Simulación de escenarios fiscales</li>
-                    <li>Proyección de IVA e ISR a pagar</li>
-                    <li>Recomendaciones para optimización fiscal</li>
-                    <li>Planificación de flujo de efectivo para obligaciones fiscales</li>
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
+                    <li>Ingresos facturados del año</li>
+                    <li>Gastos deducibles acumulados</li>
+                    <li>Utilidad fiscal</li>
+                    <li>ISR e IVA pagado</li>
                   </ul>
                 </div>
               </div>
             </section>
 
-            <section id="constancia" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'constancia' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Constancia Fiscal Actualizada
+            <section id="portal" className="min-h-0 lg:min-h-[50vh] flex items-start lg:items-center transition-all duration-700 transform scroll-mt-24">
+              <div className={`${activeSection === 'portal' ? 'opacity-100 translate-y-0' : 'lg:opacity-30 lg:-translate-y-4'} transition-all duration-500`}>
+                <h2 className="text-xl md:text-2xl font-semibold text-gray-900 mb-3">
+                  Portal Mi Contabilidad
                 </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Obtenemos y mantenemos actualizada tu constancia de situación fiscal:
+                <div className="prose prose-sm md:prose-lg text-gray-600">
+                  <p className="text-sm md:text-base">
+                    Acceso 24/7 a toda tu información fiscal:
                   </p>
-                  <ul className="space-y-4">
-                    <li>Descarga directa desde el portal del SAT</li>
-                    <li>Verificación de datos registrales correctos</li>
-                    <li>Validación de régimen fiscal apropiado</li>
-                    <li>Gestión de actualizaciones cuando sea necesario</li>
-                    <li>Disponibilidad inmediata para trámites fiscales</li>
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            <section id="opinion" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'opinion' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Opinión de Cumplimiento
-                </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Monitoreamos y mantenemos positiva tu opinión de cumplimiento ante el SAT:
-                  </p>
-                  <ul className="space-y-4">
-                    <li>Obtención periódica de la opinión de cumplimiento</li>
-                    <li>Verificación preventiva de obligaciones fiscales</li>
-                    <li>Resolución de discrepancias con el SAT</li>
-                    <li>Alertas ante posibles incumplimientos</li>
-                    <li>Asistencia para mantener el estatus positivo</li>
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            <section id="historial" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'historial' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Acceso a Historial
-                </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Mantén un registro completo y accesible de toda tu información fiscal:
-                  </p>
-                  <ul className="space-y-4">
-                    <li>Repositorio digital de todas tus declaraciones</li>
-                    <li>Archivo organizado de facturas emitidas y recibidas</li>
-                    <li>Seguimiento histórico de pagos de impuestos</li>
-                    <li>Consulta de declaraciones complementarias</li>
-                    <li>Respaldo seguro y cumplimiento con conservación de 5 años</li>
-                  </ul>
-                </div>
-              </div>
-            </section>
-
-            <section id="asesoria" className="min-h-[50vh] flex items-center transition-all duration-700 transform scroll-mt-32">
-              <div className={`${activeSection === 'asesoria' ? 'opacity-100 translate-y-0' : 'opacity-30 -translate-y-4'} transition-all duration-500`}>
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">
-                  Asesoría Continua
-                </h2>
-                <div className="prose prose-lg text-gray-600">
-                  <p>
-                    Contarás con expertos fiscales para resolver todas tus dudas:
-                  </p>
-                  <ul className="space-y-4">
-                    <li>Consultas ilimitadas con contadores certificados</li>
-                    <li>Orientación sobre reformas fiscales y su impacto</li>
-                    <li>Resolución de requerimientos del SAT</li>
-                    <li>Asesoría en cambios de régimen fiscal</li>
-                    <li>Recomendaciones de planificación fiscal personalizada</li>
+                  <ul className="space-y-2 md:space-y-3 text-sm md:text-base">
+                    <li>Consulta tu RFC y régimen</li>
+                    <li>Descarga líneas de captura</li>
+                    <li>Revisa todas tus facturas</li>
+                    <li>Constancia de Situación Fiscal</li>
                   </ul>
                 </div>
               </div>
@@ -392,9 +296,9 @@ export default function PersonaFisicaPage() {
           </div>
         </div>
         
-        {/* Teléfono móvil */}
-        <div className="lg:col-span-3">
-            <div className="sticky top-[calc(50vh-18rem)] max-h-[calc(100vh-12rem)]"> {/* Centrado vertical considerando altura del menú */}
+        {/* Teléfono móvil - hidden on mobile */}
+        <div className="hidden lg:block lg:col-span-3">
+          <div className="sticky top-[calc(50vh-18rem)] max-h-[calc(100vh-12rem)]">
             <MobileDevicePF>
               {getScreenComponent()}
             </MobileDevicePF>

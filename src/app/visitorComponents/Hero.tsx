@@ -1,12 +1,9 @@
 'use client';
 
-import { useState } from "react";
 import ContactButton from "./ContactButton";
 import MobileDevice from "./MobileDevice";
 
 export default function Hero() {
-  const [email, setEmail] = useState("");
-
   return (
     <div className="relative w-full">
       {/* Navigation menu */}
@@ -16,59 +13,40 @@ export default function Hero() {
         <span>|</span>
         <a href="#comienza" className="font-semibold hover:opacity-80">Como empezar</a>
         <span>|</span>
-        <a href="#precios" className="hover:opacity-80">Precios</a>
-        <span>|</span>
         <a href="#faq" className="hover:opacity-80">FAQ</a>
       </div>
     </nav>
 
-      {/* Hero section with gradient background - restored purple colors */}
-      <div className="bg-gradient-to-r from-purple-700 via-purple-600 to-purple-500 min-h-[600px] lg:min-h-[700px] w-full rounded-2xl overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 lg:py-16">
+      {/* Hero section with gradient background */}
+      <div className="bg-gradient-to-r from-purple-700 via-purple-600 to-purple-500 min-h-[400px] md:min-h-[500px] lg:min-h-[700px] w-full rounded-2xl overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-12 lg:py-16">
           <div className="flex flex-col lg:flex-row items-center justify-between">
             
             {/* Left column: content */}
-            <div className="w-full lg:w-1/2 mb-12 lg:mb-0">
-                <h1 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6 text-white !leading-[1.3]">
-                Contabilidad Personal 
+            <div className="w-full lg:w-1/2 mb-8 lg:mb-0 text-center lg:text-left">
+                <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold mb-4 md:mb-6 text-white !leading-[1.3]">
+                Tu información fiscal{' '}
                 <span className="inline-block bg-white text-purple-600 px-2 py-1 mx-1 rounded-md">
-                  confiable
-                </span> 
-                <span className="ml-3">y sin complicaciones</span>
+                  clara
+                </span>{' '}
+                y a la mano
                 </h1>
               
-              <h2 className="text-xl lg:text-2xl text-white/90 font-normal mb-10">
-                Tu información fiscal disponible 24/7 para consulta en tu app y nos encargamos de todo por ti
+              <h2 className="text-base sm:text-lg lg:text-2xl text-white/90 font-normal mb-6 md:mb-10 px-2 lg:px-0">
+                Con otros contadores nunca sabes qué pasa con tus impuestos. Con Kontia tienes acceso 24/7 a tu información: declaraciones, facturas, pagos.
               </h2>
               
-              {/* Email form */}
-                <div className="flex flex-col sm:flex-row gap-4 w-full">
-                <div className="flex-grow">
-                  <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Escribe tu correo electrónico"
-                  className="shadow-2xl  w-full px-4 py-3 rounded-lg border border-violet-800 focus:ring-2 focus:ring-white text-nowrap"
-                  />
-                </div>
-                <ContactButton
-                  buttonText="Quiero gestionar mi contabilidad"
-                  origin="hero-form"
-                  modalTitle="Solicita información"
-                />
-                </div>
+              {/* CTA Button */}
+              <ContactButton
+                buttonText="🚀 Quiero mi contabilidad con Kontia"
+                origin="hero-form"
+                modalTitle="Solicita información"
+              />
             </div>
             
-            {/* Right column: Mobile device */}
-            <div className="w-full lg:w-1/2 flex justify-center items-center relative">
-              <div className="relative z-10">
-                <MobileDevice />
-              </div>
-              
-              {/* Abstract shape decoration - restored purple colors */}
-              <div className="absolute -right-20 -top-20 w-80 h-80 bg-purple-400/30 rounded-full blur-3xl"></div>
-              <div className="absolute -right-10 bottom-10 w-60 h-60 bg-purple-300/20 rounded-full blur-3xl"></div>
+            {/* Right column: Mobile device - smaller on mobile */}
+            <div className="w-full lg:w-1/2 flex justify-center items-center mt-6 lg:mt-0 scale-90 md:scale-100">
+              <MobileDevice />
             </div>
           </div>
         </div>
