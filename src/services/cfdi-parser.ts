@@ -687,7 +687,13 @@ export function parseCFDIFromString(xmlContent: string, clientId: string, client
     }
     
     // Construir el objeto CFDI
+    const esIngreso = tipo === 'ingreso';
+    const esEgreso = tipo === 'egreso';
+    const now = new Date().toISOString();
+    
     const cfdi: CFDI = {
+      id: '',
+      idCliente: clientId,
       uuid: uuid.trim(),
       rfcEmisor,
       nombreEmisor: emisor.Nombre || '',
@@ -695,39 +701,40 @@ export function parseCFDIFromString(xmlContent: string, clientId: string, client
       nombreReceptor: receptor.Nombre || '',
       fecha: fecha,
       fechaTimbrado: '',
+      fechaCreacion: now,
+      fechaActualizacion: now,
+      ejercicioFiscal,
+      mesFiscal: fecha ? new Date(fecha).getMonth() + 1 : undefined,
       subTotal,
       descuento,
       total,
       tipoDeComprobante: tipoComprobante,
-      metodoPago: comprobante.MetodoPago || undefined,
-      formaPago: comprobante.FormaPago || undefined,
+      esIngreso,
+      esEgreso,
+      metodoPago: comprobante.MetodoPago || '',
+      formaPago: comprobante.FormaPago || '',
       moneda: comprobante.Moneda || 'MXN',
       tipoCambio: comprobante.TipoCambio ? parseFloat(comprobante.TipoCambio) : undefined,
-      usoCfdi: receptor.UsoCFDI || undefined,
-      regimenFiscalEmisor: emisor.RegimenFiscal || undefined,
+      usoCFDI: receptor.UsoCFDI || '',
+      regimenFiscal: emisor.RegimenFiscal || '',
       regimenFiscalReceptor: receptor.RegimenFiscalReceptor || undefined,
       domicilioFiscalReceptor: receptor.DomicilioFiscalReceptor || undefined,
       lugarExpedicion: comprobante.LugarExpedicion || undefined,
       serie: comprobante.Serie || undefined,
       folio: comprobante.Folio || undefined,
       conceptos: conceptosArray.length > 0 ? conceptosArray : undefined,
-      conceptoResumen,
+      concepto: conceptoResumen,
       impuestoTrasladado: impuestoTrasladado || undefined,
       ivaRetenido: ivaRetenido || undefined,
       isrRetenido: isrRetenido || undefined,
       iepsTrasladado: iepsTrasladado || undefined,
       baseIva16: baseIva16 || undefined,
       baseIva8: baseIva8 || undefined,
-      tasa0: tasa0 || undefined,
+      ivaTasa0: tasa0 || undefined,
       exento: exento || undefined,
-      tipo,
-      ejercicioFiscal,
-      mes: fecha ? new Date(fecha).getMonth() + 1 : undefined,
-      estado: 'Vigente',
-      isDeductible: true,
+      docsRelacionadoComplementoPago: [],
+      estaCancelado: false,
       categoria: '',
-      notas: '',
-      source: 'sat_masivo',
     };
     
     return cfdi;

@@ -157,6 +157,7 @@ export interface CFDI {
   // FECHAS
   // ============================================
   fecha: string; // Fecha de emisión YYYY-MM-DD
+  fechaTimbrado?: string; // Fecha de timbrado del SAT
   fechaCreacion: string; // Fecha de carga al sistema
   fechaActualizacion: string; // Fecha de última modificación
   ejercicioFiscal: number; // Año fiscal

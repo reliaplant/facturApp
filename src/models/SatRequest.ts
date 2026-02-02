@@ -19,4 +19,5 @@ export interface SatRequest {
   packagesProcessed?: boolean;
   processedAt?: string;
   processedCount?: number;
+  existingCount?: number;
 }
