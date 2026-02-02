@@ -3,7 +3,7 @@ export interface Declaracion {
   mes: string;
   anio: number;
   tipoDeclaracion?: 'ordinaria' | 'complementaria';
-  estatus?: 'vigente' | 'cancelada';
+  estatus?: 'vigente' | 'sustituida' | 'cancelada';
   
   // Payment status
   clientePagoImpuestos: boolean;

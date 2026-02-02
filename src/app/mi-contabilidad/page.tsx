@@ -71,6 +71,9 @@ export default function MiContabilidadPage() {
   const [facturasModalOpen, setFacturasModalOpen] = useState(false);
   const [facturasModalType, setFacturasModalType] = useState<'emitidas' | 'recibidas' | 'anuales'>('emitidas');
   const [facturasSearchTerm, setFacturasSearchTerm] = useState('');
+  
+  // Modal de detalle de declaración
+  const [selectedDeclaracion, setSelectedDeclaracion] = useState<Declaracion | null>(null);
 
   // Años disponibles para seleccionar
   const currentYear = new Date().getFullYear();
@@ -138,29 +141,41 @@ export default function MiContabilidadPage() {
     }
   };
 
-  // Función para marcar declaración como pagada
-  const handleMarcarPagado = async (declaracionId: string | null) => {
-    if (!declaracionId || !user?.clientId) return;
+  // Función para toggle estado de pago de declaración
+  const handleTogglePago = async (declaracion: Declaracion) => {
+    if (!declaracion.id || !user?.clientId) return;
     
     setMarkingPaid(true);
     try {
-      // Encontrar la declaración completa
-      const declaracionToUpdate = declaraciones.find(d => d.id === declaracionId);
-      if (declaracionToUpdate) {
-        await declaracionService.updateDeclaracion(user.clientId, {
-          ...declaracionToUpdate,
-          clientePagoImpuestos: true
-        });
-      }
+      const nuevoEstado = !declaracion.clientePagoImpuestos;
+      await declaracionService.updateDeclaracion(user.clientId, {
+        ...declaracion,
+        clientePagoImpuestos: nuevoEstado
+      });
       
       // Actualizar declaraciones localmente
       setDeclaraciones(prev => prev.map(d => 
-        d.id === declaracionId ? { ...d, clientePagoImpuestos: true } : d
+        d.id === declaracion.id ? { ...d, clientePagoImpuestos: nuevoEstado } : d
       ));
+      
+      // Actualizar el modal si está abierto
+      if (selectedDeclaracion?.id === declaracion.id) {
+        setSelectedDeclaracion({ ...declaracion, clientePagoImpuestos: nuevoEstado });
+      }
     } catch (error) {
-      console.error('Error al marcar como pagado:', error);
+      console.error('Error al actualizar estado de pago:', error);
     } finally {
       setMarkingPaid(false);
+    }
+  };
+
+  // Función para marcar declaración como pagada (desde banner)
+  const handleMarcarPagado = async (declaracionId: string | null) => {
+    if (!declaracionId || !user?.clientId) return;
+    
+    const declaracion = declaraciones.find(d => d.id === declaracionId);
+    if (declaracion) {
+      await handleTogglePago(declaracion);
     }
   };
 
@@ -201,7 +216,7 @@ export default function MiContabilidadPage() {
   const depreciacionMensualTotal = activosActivos.reduce((sum, a) => sum + (a.monthlyDepreciation || 0), 0);
 
   const declaracionesPresentadas = declaraciones.filter(d => d.estatus === 'vigente').length;
-  const declaracionesPendientes = Math.max(0, new Date().getMonth() + 1 - declaracionesPresentadas);
+  const declaracionesPendientesCount = Math.max(0, new Date().getMonth() + 1 - declaracionesPresentadas);
 
   // Contar facturas emitidas y recibidas
   const facturasEmitidas = cfdis.filter(c => !c.esEgreso && !c.estaCancelado).length;
@@ -331,85 +346,29 @@ export default function MiContabilidadPage() {
   
   const ultimasRecibidas = todasFacturasRecibidas.slice(0, 5);
 
-  // Calcular estado del pago provisional
-  const getEstadoProvisional = () => {
-    const mesActual = new Date().getMonth() + 1; // 1-12
-    const anioActual = new Date().getFullYear();
-    const mesARevisar = mesActual - 1; // El mes que ya pasó
-    
-    if (mesARevisar < 1) {
-      // Estamos en enero, revisar diciembre del año anterior
-      return { 
-        estado: 'inicio_anio', 
-        mensaje: 'Nuevo año fiscal', 
-        descripcion: 'Comienza tu contabilidad del año',
-        color: 'violet',
-        montoTotal: 0,
-        fechaLimite: null,
-        declaracionId: null
-      };
-    }
-    
-    const declaracionMesPasado = declaraciones.find(d => parseInt(d.mes) === mesARevisar && d.anio === selectedYear);
-    
-    // Calcular fecha límite (día 17 del mes actual)
-    const fechaLimite = new Date(anioActual, mesActual - 1, 17);
-    const fechaLimiteStr = fechaLimite.toLocaleDateString('es-MX', { day: 'numeric', month: 'long' });
-    
-    if (!declaracionMesPasado) {
-      // No hay declaración del mes anterior - calcular provisional estimado
-      // Filtrar facturas del mes anterior
-      const facturasDelMes = cfdis.filter(c => {
-        const fechaCfdi = new Date(c.fecha);
-        return fechaCfdi.getMonth() + 1 === mesARevisar && 
-               fechaCfdi.getFullYear() === selectedYear &&
-               !c.estaCancelado;
-      });
+  // Buscar TODAS las declaraciones pendientes de pago (solo vigentes)
+  const getDeclaracionesPendientesPago = () => {
+    // Buscar todas las declaraciones VIGENTES que no estén pagadas y tengan monto > 0
+    return declaraciones.filter(d => {
+      const montoTotal = (d.montoISR || 0) + (d.montoIVA || 0);
+      return d.estatus !== 'sustituida' && !d.clientePagoImpuestos && montoTotal > 0;
+    }).map(declaracionPendiente => {
+      const montoTotal = (declaracionPendiente.montoISR || 0) + (declaracionPendiente.montoIVA || 0);
+      const mesNombre = getMesNombre(declaracionPendiente.mes);
       
-      const ingresosDelMes = facturasDelMes.filter(c => !c.esEgreso).reduce((sum, c) => sum + (c.subTotal || 0), 0);
-      const gastosDelMes = facturasDelMes.filter(c => c.esEgreso).reduce((sum, c) => sum + (c.subTotal || 0), 0);
-      const utilidadEstimada = ingresosDelMes - gastosDelMes;
-      const isrEstimado = Math.max(0, utilidadEstimada * 0.10); // Estimación simplificada ~10%
-      
-      return { 
-        estado: 'sin_declaracion', 
-        mensaje: `Provisional estimado: ${formatCurrency(isrEstimado)}`, 
-        descripcion: `Tu contador aún no ha presentado la declaración de ${getMesNombre(mesARevisar.toString())}`,
-        color: 'amber',
-        montoTotal: isrEstimado,
-        fechaLimite: fechaLimiteStr,
-        declaracionId: null
-      };
-    }
-    
-    const montoTotal = (declaracionMesPasado.montoISR || 0) + (declaracionMesPasado.montoIVA || 0);
-    
-    if (!declaracionMesPasado.clientePagoImpuestos && montoTotal > 0) {
-      // Hay declaración pero no ha pagado
-      return { 
-        estado: 'pago_pendiente', 
-        mensaje: `Tienes pendiente el pago de tu declaración`, 
-        descripcion: `Monto a pagar: ${formatCurrency(montoTotal)} • Fecha límite: ${fechaLimiteStr}`,
-        color: 'orange',
+      return {
+        estado: 'pago_pendiente',
+        mensaje: `Tienes pendiente el pago de ${mesNombre} ${declaracionPendiente.anio}`,
+        descripcion: `Monto a pagar: ${formatCurrency(montoTotal)}`,
         montoTotal,
-        fechaLimite: fechaLimiteStr,
-        declaracionId: declaracionMesPasado.id
+        declaracionId: declaracionPendiente.id,
+        urlLineaCaptura: declaracionPendiente.urlArchivoLineaCaptura,
+        urlDeclaracion: declaracionPendiente.urlArchivoDeclaracion
       };
-    }
-    
-    // Todo al día
-    return { 
-      estado: 'al_dia', 
-      mensaje: '¡Todo en orden! ✓', 
-      descripcion: `Declaración de ${getMesNombre(mesARevisar.toString())} presentada y pagada`,
-      color: 'green',
-      montoTotal: 0,
-      fechaLimite: null,
-      declaracionId: null
-    };
+    });
   };
 
-  const estadoProvisional = getEstadoProvisional();
+  const declaracionesPendientes = getDeclaracionesPendientesPago();
 
   // Función para abrir el modal de facturas
   const openFacturasModal = (type: 'emitidas' | 'recibidas' | 'anuales') => {
@@ -579,6 +538,143 @@ export default function MiContabilidadPage() {
           </DialogContent>
         </Dialog>
 
+        {/* Modal de Detalle de Declaración */}
+        <Dialog open={!!selectedDeclaracion} onOpenChange={(open) => !open && setSelectedDeclaracion(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5 text-violet-600" />
+                Detalle de Declaración
+              </DialogTitle>
+            </DialogHeader>
+            
+            {selectedDeclaracion && (
+              <div className="space-y-4">
+                {/* Info básica */}
+                <div className="bg-gray-50 rounded-lg p-4 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Período</span>
+                    <span className="font-semibold">{getMesNombre(selectedDeclaracion.mes)} {selectedDeclaracion.anio}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Tipo</span>
+                    <Badge className={`border-0 font-normal ${
+                      selectedDeclaracion.tipoDeclaracion === 'complementaria' 
+                        ? 'bg-amber-100 text-amber-700' 
+                        : 'bg-violet-100 text-violet-700'
+                    }`}>
+                      {selectedDeclaracion.tipoDeclaracion === 'complementaria' ? 'Complementaria' : 'Ordinaria'}
+                    </Badge>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-gray-500">Estatus</span>
+                    <Badge className={`border-0 font-normal ${
+                      selectedDeclaracion.estatus === 'vigente' 
+                        ? 'bg-emerald-100 text-emerald-700' 
+                        : 'bg-gray-200 text-gray-600'
+                    }`}>
+                      {selectedDeclaracion.estatus === 'vigente' ? 'Vigente' : 'Sustituida'}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Montos */}
+                <div className="bg-gray-50 rounded-lg p-4 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500">ISR</span>
+                    <span>{formatCurrency(selectedDeclaracion.montoISR || 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500">IVA</span>
+                    <span>{formatCurrency(selectedDeclaracion.montoIVA || 0)}</span>
+                  </div>
+                  <div className="border-t pt-2 flex justify-between items-center">
+                    <span className="font-medium">Total a pagar</span>
+                    <span className="font-bold text-lg">
+                      {formatCurrency((selectedDeclaracion.montoISR || 0) + (selectedDeclaracion.montoIVA || 0))}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Archivos */}
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-gray-700">Documentos</p>
+                  
+                  {selectedDeclaracion.urlArchivoLineaCaptura ? (
+                    <a 
+                      href={selectedDeclaracion.urlArchivoLineaCaptura} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      <Download className="h-5 w-5 text-blue-600" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-blue-700">Línea de Captura</p>
+                        <p className="text-xs text-blue-500">Click para descargar</p>
+                      </div>
+                    </a>
+                  ) : (
+                    <div className="flex items-center gap-3 p-3 bg-gray-100 rounded-lg">
+                      <FileText className="h-5 w-5 text-gray-400" />
+                      <p className="text-sm text-gray-500">Línea de captura no disponible</p>
+                    </div>
+                  )}
+
+                  {selectedDeclaracion.urlArchivoDeclaracion ? (
+                    <a 
+                      href={selectedDeclaracion.urlArchivoDeclaracion} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors"
+                    >
+                      <Download className="h-5 w-5 text-blue-600" />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-blue-700">Acuse de Declaración</p>
+                        <p className="text-xs text-blue-500">Click para descargar</p>
+                      </div>
+                    </a>
+                  ) : (
+                    <div className="flex items-center gap-3 p-3 bg-gray-100 rounded-lg">
+                      <FileText className="h-5 w-5 text-gray-400" />
+                      <p className="text-sm text-gray-500">Acuse no disponible</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Botón de pago */}
+                {(selectedDeclaracion.montoISR || 0) + (selectedDeclaracion.montoIVA || 0) > 0 && (
+                  <Button
+                    onClick={() => handleTogglePago(selectedDeclaracion)}
+                    disabled={markingPaid}
+                    className={`w-full ${
+                      selectedDeclaracion.clientePagoImpuestos
+                        ? 'bg-gray-200 hover:bg-gray-300 text-gray-700'
+                        : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    }`}
+                  >
+                    {markingPaid ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Guardando...
+                      </>
+                    ) : selectedDeclaracion.clientePagoImpuestos ? (
+                      <>
+                        <X className="h-4 w-4 mr-2" />
+                        Marcar como no pagada
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                        Marcar como pagada
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+
         {/* Header */}
         <header className="bg-white dark:bg-gray-800 shadow-sm border-b border-gray-200">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
@@ -655,60 +751,61 @@ export default function MiContabilidadPage() {
                 </div>
               </div>
 
-              {/* Banner de estado provisional */}
-              <div className={`rounded-xl p-4 flex items-center gap-4 ${
-                estadoProvisional.color === 'green' ? 'bg-emerald-50 border border-emerald-200' :
-                estadoProvisional.color === 'amber' ? 'bg-amber-50 border border-amber-200' :
-                estadoProvisional.color === 'orange' ? 'bg-orange-50 border border-orange-200' :
-                'bg-violet-50 border border-violet-200'
-              }`}>
-                <div className={`h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  estadoProvisional.color === 'green' ? 'bg-emerald-100' :
-                  estadoProvisional.color === 'amber' ? 'bg-amber-100' :
-                  estadoProvisional.color === 'orange' ? 'bg-orange-100' :
-                  'bg-violet-100'
-                }`}>
-                  {estadoProvisional.estado === 'al_dia' ? (
-                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                  ) : estadoProvisional.estado === 'sin_declaracion' ? (
-                    <Clock className="h-6 w-6 text-amber-600" />
-                  ) : estadoProvisional.estado === 'pago_pendiente' ? (
-                    <DollarSign className="h-6 w-6 text-orange-600" />
-                  ) : (
-                    <Calendar className="h-6 w-6 text-violet-600" />
-                  )}
-                </div>
-                <div className="flex-1">
-                  <p className={`font-semibold ${
-                    estadoProvisional.color === 'green' ? 'text-emerald-800' :
-                    estadoProvisional.color === 'amber' ? 'text-amber-800' :
-                    estadoProvisional.color === 'orange' ? 'text-orange-800' :
-                    'text-violet-800'
-                  }`}>{estadoProvisional.mensaje}</p>
-                  <p className={`text-sm ${
-                    estadoProvisional.color === 'green' ? 'text-emerald-600' :
-                    estadoProvisional.color === 'amber' ? 'text-amber-600' :
-                    estadoProvisional.color === 'orange' ? 'text-orange-600' :
-                    'text-violet-600'
-                  }`}>{estadoProvisional.descripcion}</p>
-                </div>
-                {estadoProvisional.estado === 'pago_pendiente' && (
-                  <Button
-                    onClick={() => handleMarcarPagado(estadoProvisional.declaracionId || null)}
-                    disabled={markingPaid}
-                    className="bg-orange-600 hover:bg-orange-700 text-white flex-shrink-0"
-                  >
-                    {markingPaid ? (
-                      <>
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Guardando...
-                      </>
-                    ) : (
-                      '¿Ya la pagaste?'
+              {/* Banners de pago pendiente - uno por cada declaración pendiente */}
+              {declaracionesPendientes.map((pendiente, index) => (
+                <div key={pendiente.declaracionId || index} className="rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-4 bg-emerald-700">
+                  <div className="flex items-center gap-4 flex-1">
+                    <div className="h-12 w-12 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-600">
+                      <DollarSign className="h-6 w-6 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-semibold text-white">{pendiente.mensaje}</p>
+                      <p className="text-sm text-emerald-100">{pendiente.descripcion}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2 sm:flex-shrink-0">
+                    {pendiente.urlLineaCaptura && (
+                      <a
+                        href={pendiente.urlLineaCaptura}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Línea de Captura
+                      </a>
                     )}
-                  </Button>
-                )}
-              </div>
+                    {pendiente.urlDeclaracion && (
+                      <a
+                        href={pendiente.urlDeclaracion}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Declaración
+                      </a>
+                    )}
+                    <Button
+                      onClick={() => handleMarcarPagado(pendiente.declaracionId || null)}
+                      disabled={markingPaid}
+                      className="bg-white hover:bg-emerald-50 text-emerald-700 group"
+                    >
+                      {markingPaid ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          Guardando...
+                        </>
+                      ) : (
+                        <>
+                          <span className="group-hover:hidden">¿Ya la pagaste?</span>
+                          <span className="hidden group-hover:inline">Marcar como pagada</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ))}
 
               {/* Banner de información fiscal */}
               {clientData && (
@@ -815,31 +912,50 @@ export default function MiContabilidadPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-6 pt-0">
-                    <div className="space-y-2">
-                      {Array.from({ length: 12 }, (_, i) => i + 1).map(mes => {
-                        const decl = declaraciones.find(d => parseInt(d.mes) === mes);
-                        const esFuturo = mes > new Date().getMonth() + 1;
-                        
-                        return (
-                          <div key={mes} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-                            <span className="text-sm text-gray-600">{getMesNombre(mes.toString())}</span>
-                            {esFuturo ? (
-                              <span className="text-xs text-gray-400">Próximo</span>
-                            ) : decl ? (
-                              <Badge className="bg-violet-100 text-violet-700 border-0 font-normal">
-                                <CheckCircle2 className="h-3 w-3 mr-1" />
-                                Presentada
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-gray-100 text-gray-600 border-0 font-normal">
-                                <Clock className="h-3 w-3 mr-1" />
-                                Pendiente
-                              </Badge>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {declaraciones.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">No hay declaraciones registradas</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {declaraciones.map(decl => {
+                          const montoTotal = (decl.montoISR || 0) + (decl.montoIVA || 0);
+                          const esSustituida = decl.estatus === 'sustituida';
+                          
+                          return (
+                            <div 
+                              key={decl.id} 
+                              className={`flex items-center justify-between py-2 border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50 transition-colors ${
+                                esSustituida ? 'opacity-50' : ''
+                              }`}
+                              onClick={() => setSelectedDeclaracion(decl)}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <p className={`text-sm font-medium ${esSustituida ? 'text-gray-500' : 'text-gray-900'}`}>
+                                    {getMesNombre(decl.mes)} {decl.anio}
+                                  </p>
+                                  <span className={`text-[10px] font-bold uppercase ${
+                                    esSustituida ? 'text-red-500' : 'text-violet-600'
+                                  }`}>
+                                    {decl.tipoDeclaracion === 'complementaria' ? 'Compl.' : 'Ord.'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-gray-400">
+                                  {esSustituida ? 'Sustituida' : (decl.clientePagoImpuestos ? 'Pagada' : 'Pendiente de pago')}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className={`text-sm font-semibold ${
+                                  esSustituida ? 'text-gray-400 line-through' : 
+                                  decl.clientePagoImpuestos ? 'text-emerald-600' : 'text-amber-600'
+                                }`}>
+                                  {formatCurrency(montoTotal)}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
@@ -901,8 +1017,8 @@ export default function MiContabilidadPage() {
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-sm text-gray-500">Declaraciones</p>
-                            <p className="text-xl font-bold text-gray-900 mt-1">{declaracionesPresentadas}/12</p>
-                            <p className="text-xs text-gray-400 mt-1">Presentadas este año</p>
+                            <p className="text-xl font-bold text-gray-900 mt-1">{declaracionesPresentadas}</p>
+                            <p className="text-xs text-gray-400 mt-1">Presentadas {selectedYear}</p>
                           </div>
                           <div className="h-10 w-10 bg-violet-100 rounded-lg flex items-center justify-center">
                             <FileText className="h-5 w-5 text-violet-600" />

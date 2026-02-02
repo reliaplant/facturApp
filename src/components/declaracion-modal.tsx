@@ -318,24 +318,7 @@ const DeclaracionModal: React.FC<DeclaracionModalProps> = ({
             description: `Se ha actualizado la declaración de ${getMesNombre(declaracionData.mes)} ${year}`,
           });
         } else {
-          // Check if declaration already exists for this month/year
-          const exists = await declaracionService.declaracionExists(
-            clientId, 
-            declaracionData.mes, 
-            declaracionData.anio
-          );
-          
-          if (exists) {
-            toast({
-              title: "Declaración duplicada",
-              description: `Ya existe una declaración para ${getMesNombre(declaracionData.mes)} ${year}`,
-              variant: "destructive"
-            });
-            setSaving(false);
-            return;
-          }
-          
-          // Create new declaration
+          // Create new declaration (service will automatically mark previous ones as 'sustituida')
           const declaracionId = await declaracionService.createDeclaracion(clientId, declaracionData);
           declaracionData.id = declaracionId;
           

@@ -99,6 +99,7 @@ export const declaracionService = {
 
   /**
    * Create a new declaration for a client
+   * Automatically marks all previous declarations of the same month as 'sustituida'
    */
   async createDeclaracion(clientId: string, declaracion: Declaracion): Promise<string> {
     if (!clientId) {
@@ -109,6 +110,22 @@ export const declaracionService = {
 
     try {
       console.log(`Creating declaration for client ${clientId}:`, declaracion);
+      
+      // First, mark all existing declarations for the same month/year as 'sustituida'
+      const existingDeclaraciones = await this.getDeclaraciones(clientId, declaracion.anio);
+      const declaracionesDelMes = existingDeclaraciones.filter(
+        d => d.mes === declaracion.mes && d.estatus !== 'sustituida'
+      );
+      
+      // Mark each existing declaration as 'sustituida'
+      for (const existingDecl of declaracionesDelMes) {
+        if (existingDecl.id) {
+          const existingRef = doc(db, 'clients', clientId, 'declaraciones', existingDecl.id);
+          await updateDoc(existingRef, { estatus: 'sustituida' });
+          console.log(`Marked declaration ${existingDecl.id} as sustituida`);
+        }
+      }
+      
       const id = declaracion.id || uuidv4();
       const declaracionRef = doc(db, 'clients', clientId, 'declaraciones', id);
       
@@ -120,6 +137,7 @@ export const declaracionService = {
         mes: declaracion.mes,
         anio: declaracion.anio,
         tipoDeclaracion: declaracion.tipoDeclaracion || 'ordinaria',
+        estatus: 'vigente', // Always set new declarations as 'vigente'
         clientePagoImpuestos: declaracion.clientePagoImpuestos || false,
         clientePagoServicio: declaracion.clientePagoServicio || false,
         montoISR: declaracion.montoISR || 0,

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { Eye, FileText, Upload, Trash2 } from "lucide-react";
+import { Eye, FileText, Upload, Trash2, MoreVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Declaracion } from '../models/declaracion';
@@ -11,6 +11,12 @@ import DeclaracionModal from './declaracion-modal';
 import DeclaracionViewerModal from './declaracionViewer-modal';
 import { useToast } from '@/components/ui/use-toast';
 import { declaracionService } from '@/services/declaracion-service';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   AlertDialog,
   AlertDialogAction,
@@ -259,7 +265,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
         type="file"
         ref={fileInputRef}
         onChange={handleFileChange}
-        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+        accept=".pdf,application/pdf"
         style={{ display: 'none' }}
       />
       
@@ -279,7 +285,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-sm">
                   <th className="pl-6 pr-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-left">Período</th>
-                  <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Cliente pagó Serv.</th>
+                  <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Cliente pagó Imp.</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-right">Total</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Linea Captura</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Declaracion</th>
@@ -303,30 +309,32 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                   declaraciones.map((declaracion) => (
                     <tr 
                       key={declaracion.id || `${declaracion.mes}-${declaracion.anio}`} 
-                      className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800"
+                      className={`border-t border-gray-100 dark:border-gray-800 ${declaracion.estatus === 'sustituida' ? 'bg-red-50 hover:bg-red-100' : 'hover:bg-gray-50 dark:hover:bg-gray-800'}`}
                     >
                       {/* Período */}
                       <td className="pl-6 pr-2 py-2.5 align-middle">
                         <div className="flex flex-col">
-                          <span className="font-medium">{getNombreMes(declaracion.mes)} {declaracion.anio}</span>
-                          <span className="text-[10px] text-gray-500 capitalize">
-                            {declaracion.tipoDeclaracion || 'ordinaria'} ({declaracion.estatus ? 'vigente' : 'cancelada'})
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium ${declaracion.estatus === 'sustituida' ? 'text-red-700' : ''}`}>{getNombreMes(declaracion.mes)} {declaracion.anio}</span>
+                          </div>
+                          <span className={`text-[10px] capitalize ${declaracion.estatus === 'sustituida' ? 'text-red-500' : 'text-gray-500'}`}>
+                            {declaracion.tipoDeclaracion || 'ordinaria'} ({declaracion.estatus || 'vigente'})
                           </span>
-                          <span className="text-[10px] text-gray-500">Presentada en {formatDate(declaracion.fechaPresentacion)}</span>
+                          <span className={`text-[10px] ${declaracion.estatus === 'sustituida' ? 'text-red-400' : 'text-gray-500'}`}>Presentada en {formatDate(declaracion.fechaPresentacion)}</span>
                         </div>
                       </td>
 
-                        {/* Estado Servicio */}
+                        {/* Estado Pago Impuestos */}
                         <td className="px-2 py-2.5 align-middle text-center">
                           <Badge 
-                          variant={declaracion.clientePagoServicio ? "secondary" : "default"}
+                          variant={declaracion.clientePagoImpuestos ? "secondary" : "default"}
                           className={`text-[10px] ${
-                          declaracion.clientePagoServicio 
+                          declaracion.clientePagoImpuestos 
                           ? 'bg-green-100 text-green-800 hover:bg-green-200' 
                           : 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
                           }`}
                           >
-                          {declaracion.clientePagoServicio ? 'Pagado' : 'Pendiente'}
+                          {declaracion.clientePagoImpuestos ? 'Pagado' : 'Pendiente'}
                           </Badge>
                         </td>
 
@@ -377,14 +385,26 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                           >
                             Ver
                           </Button>
-                          <Button 
-                            variant="danger" 
-                            size="sm"
-                            className="h-7 w-7 p-0 bg-red-50 text-red-500 border-red-200 hover:bg-red-100"
-                            onClick={() => setDialog({ type: 'delete', declaracion })}
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem 
+                                onClick={() => setDialog({ type: 'delete', declaracion })}
+                                className="text-red-600"
+                              >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Eliminar
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </div>
                       </td>
                     </tr>
