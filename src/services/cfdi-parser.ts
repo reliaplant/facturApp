@@ -504,6 +504,240 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
 }
 
 /**
+ * Parsea un XML string y lo convierte en un objeto CFDI
+ * Útil para procesar XMLs que vienen de ZIPs o de otras fuentes
+ */
+export function parseCFDIFromString(xmlContent: string, clientId: string, clientRfc: string): CFDI | null {
+  try {
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '',
+    });
+    
+    const result = parser.parse(xmlContent);
+    
+    // Obtener el nodo principal Comprobante
+    const comprobante = result['cfdi:Comprobante'] || result.Comprobante;
+    if (!comprobante) {
+      return null;
+    }
+    
+    // Obtener TimbreFiscalDigital para el UUID
+    let uuid = '';
+    try {
+      const complemento = comprobante['cfdi:Complemento'] || comprobante.Complemento || {};
+      const timbreFiscal = complemento['tfd:TimbreFiscalDigital'] || complemento.TimbreFiscalDigital || {};
+      uuid = timbreFiscal.UUID || '';
+      
+      // Si no hay UUID, no es un CFDI válido timbrado
+      if (!uuid) {
+        console.warn('CFDI sin UUID (no timbrado), ignorando');
+        return null;
+      }
+    } catch (error) {
+      console.error('Error extrayendo UUID:', error);
+      return null;
+    }
+    
+    // Extraer información del emisor y receptor
+    const emisor = comprobante['cfdi:Emisor'] || comprobante.Emisor || {};
+    const receptor = comprobante['cfdi:Receptor'] || comprobante.Receptor || {};
+    
+    // Obtener información básica de la factura
+    const fecha = (comprobante.Fecha || '').split('T')[0];
+    const ejercicioFiscal = fecha ? new Date(fecha).getFullYear() : new Date().getFullYear();
+    
+    // Normalizar RFCs para comparación
+    const rfcEmisor = (emisor.Rfc || '').trim().toUpperCase();
+    const rfcReceptor = (receptor.Rfc || '').trim().toUpperCase();
+    const clientRfcNormalizado = clientRfc.trim().toUpperCase();
+    
+    // Impuestos y montos
+    const subTotal = parseFloat(comprobante.SubTotal) || 0;
+    const total = parseFloat(comprobante.Total) || 0;
+    const descuento = comprobante.Descuento ? parseFloat(comprobante.Descuento) : undefined;
+    
+    // Extraer datos de impuestos
+    const impuestos = comprobante['cfdi:Impuestos'] || comprobante.Impuestos || {};
+    
+    // Procesamiento de impuestos
+    let impuestoTrasladado = 0;
+    let ivaRetenido = 0;
+    let isrRetenido = 0;
+    let iepsTrasladado = 0;
+    
+    // Valores para deducibilidad
+    let baseIva16 = 0;
+    let baseIva8 = 0;
+    let tasa0 = 0;
+    let exento = 0;
+    
+    // Procesar traslados
+    try {
+      const traslados = impuestos['cfdi:Traslados'] || impuestos.Traslados || {};
+      const trasladosArray = traslados['cfdi:Traslado'] || traslados.Traslado || [];
+      const trasladosList = Array.isArray(trasladosArray) ? trasladosArray : [trasladosArray];
+      
+      for (const traslado of trasladosList) {
+        if (!traslado) continue;
+        
+        const impuesto = traslado.Impuesto || '';
+        const importe = parseFloat(traslado.Importe) || 0;
+        const base = parseFloat(traslado.Base) || 0;
+        const tasa = parseFloat(traslado.TasaOCuota) || 0;
+        const tipoFactor = traslado.TipoFactor || '';
+        
+        if (impuesto === '002' || impuesto === 'IVA') {
+          impuestoTrasladado += importe;
+          
+          if (tipoFactor === 'Exento') {
+            exento += base;
+          } else if (tasa === 0.16 || tasa === 0.160000) {
+            baseIva16 += base;
+          } else if (tasa === 0.08 || tasa === 0.080000) {
+            baseIva8 += base;
+          } else if (tasa === 0) {
+            tasa0 += base;
+          }
+        } else if (impuesto === '003' || impuesto === 'IEPS') {
+          iepsTrasladado += importe;
+        }
+      }
+    } catch (error) {
+      // Ignorar
+    }
+    
+    // Procesar retenciones
+    try {
+      const retenciones = impuestos['cfdi:Retenciones'] || impuestos.Retenciones || {};
+      const retencionesArray = retenciones['cfdi:Retencion'] || retenciones.Retencion || [];
+      const retencionesList = Array.isArray(retencionesArray) ? retencionesArray : [retencionesArray];
+      
+      for (const retencion of retencionesList) {
+        if (!retencion) continue;
+        
+        const impuesto = retencion.Impuesto || '';
+        const importe = parseFloat(retencion.Importe) || 0;
+        
+        if (impuesto === '002' || impuesto === 'IVA') {
+          ivaRetenido += importe;
+        } else if (impuesto === '001' || impuesto === 'ISR') {
+          isrRetenido += importe;
+        }
+      }
+    } catch (error) {
+      // Ignorar
+    }
+    
+    // Extraer conceptos
+    const conceptosArray: CFDIConcepto[] = [];
+    let conceptoResumen = '';
+    try {
+      const conceptosNode = comprobante['cfdi:Conceptos'] || comprobante.Conceptos || {};
+      const conceptosXml = conceptosNode['cfdi:Concepto'] || conceptosNode.Concepto || [];
+      const conceptosList = Array.isArray(conceptosXml) ? conceptosXml : [conceptosXml];
+
+      for (const concepto of conceptosList) {
+        if (!concepto) continue;
+        
+        const importe = parseFloat(concepto.Importe) || 0;
+        const impuestosConcepto = concepto['cfdi:Impuestos'] || concepto.Impuestos || {};
+        
+        if (!impuestosConcepto.Traslados && !impuestosConcepto.Retenciones && 
+            !impuestosConcepto['cfdi:Traslados'] && !impuestosConcepto['cfdi:Retenciones']) {
+          exento += importe;
+        }
+        
+        const cfdiConcepto: CFDIConcepto = {
+          claveProdServ: concepto.ClaveProdServ || '',
+          noIdentificacion: concepto.NoIdentificacion || undefined,
+          cantidad: parseFloat(concepto.Cantidad) || 0,
+          claveUnidad: concepto.ClaveUnidad || '',
+          unidad: concepto.Unidad || undefined,
+          descripcion: concepto.Descripcion || '',
+          valorUnitario: parseFloat(concepto.ValorUnitario) || 0,
+          importe: importe,
+          descuento: concepto.Descuento ? parseFloat(concepto.Descuento) : undefined,
+          objetoImp: concepto.ObjetoImp || undefined,
+        };
+        
+        conceptosArray.push(cfdiConcepto);
+        
+        if (!conceptoResumen && concepto.Descripcion) {
+          conceptoResumen = concepto.Descripcion;
+        }
+      }
+    } catch (error) {
+      // Ignorar
+    }
+    
+    // Determinar tipo (ingreso o egreso) basándose en quién es el cliente
+    const tipoComprobante = comprobante.TipoDeComprobante || 'I';
+    let tipo: 'ingreso' | 'egreso';
+    
+    if (rfcEmisor === clientRfcNormalizado) {
+      // Cliente es el emisor
+      tipo = tipoComprobante === 'E' ? 'egreso' : 'ingreso';
+    } else if (rfcReceptor === clientRfcNormalizado) {
+      // Cliente es el receptor
+      tipo = tipoComprobante === 'E' ? 'ingreso' : 'egreso';
+    } else {
+      // Por defecto basado en tipoComprobante
+      tipo = tipoComprobante === 'E' ? 'egreso' : 'ingreso';
+    }
+    
+    // Construir el objeto CFDI
+    const cfdi: CFDI = {
+      uuid: uuid.trim(),
+      rfcEmisor,
+      nombreEmisor: emisor.Nombre || '',
+      rfcReceptor,
+      nombreReceptor: receptor.Nombre || '',
+      fecha: fecha,
+      fechaTimbrado: '',
+      subTotal,
+      descuento,
+      total,
+      tipoDeComprobante: tipoComprobante,
+      metodoPago: comprobante.MetodoPago || undefined,
+      formaPago: comprobante.FormaPago || undefined,
+      moneda: comprobante.Moneda || 'MXN',
+      tipoCambio: comprobante.TipoCambio ? parseFloat(comprobante.TipoCambio) : undefined,
+      usoCfdi: receptor.UsoCFDI || undefined,
+      regimenFiscalEmisor: emisor.RegimenFiscal || undefined,
+      regimenFiscalReceptor: receptor.RegimenFiscalReceptor || undefined,
+      domicilioFiscalReceptor: receptor.DomicilioFiscalReceptor || undefined,
+      lugarExpedicion: comprobante.LugarExpedicion || undefined,
+      serie: comprobante.Serie || undefined,
+      folio: comprobante.Folio || undefined,
+      conceptos: conceptosArray.length > 0 ? conceptosArray : undefined,
+      conceptoResumen,
+      impuestoTrasladado: impuestoTrasladado || undefined,
+      ivaRetenido: ivaRetenido || undefined,
+      isrRetenido: isrRetenido || undefined,
+      iepsTrasladado: iepsTrasladado || undefined,
+      baseIva16: baseIva16 || undefined,
+      baseIva8: baseIva8 || undefined,
+      tasa0: tasa0 || undefined,
+      exento: exento || undefined,
+      tipo,
+      ejercicioFiscal,
+      mes: fecha ? new Date(fecha).getMonth() + 1 : undefined,
+      estado: 'Vigente',
+      isDeductible: true,
+      categoria: '',
+      notas: '',
+      source: 'sat_masivo',
+    };
+    
+    return cfdi;
+  } catch (error) {
+    console.error('Error parseando CFDI:', error);
+    return null;
+  }
+}
+
+/**
  * Lee un archivo como texto
  */
 async function readFileAsText(file: File): Promise<string> {

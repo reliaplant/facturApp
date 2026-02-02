@@ -10,7 +10,8 @@ import {
     getDocs,
     serverTimestamp,
     orderBy,
-    limit
+    limit,
+    deleteDoc
 } from "firebase/firestore";
 import { getStorage, ref, getDownloadURL } from "firebase/storage"; // Add this import
 import app from "@/services/firebase";
@@ -499,6 +500,21 @@ export default class SatRequestService {
     } catch (error: any) {
       console.error(`❌ Error general generando URLs:`, error);
       return {};
+    }
+  }
+
+  /**
+   * Delete a SAT request (super admin only)
+   */
+  static async deleteRequest(rfc: string, requestDocId: string): Promise<void> {
+    try {
+      console.log(`🗑️ Eliminando solicitud ${requestDocId} para RFC ${rfc}`);
+      const requestRef = doc(db, `clients/${rfc}/satRequests`, requestDocId);
+      await deleteDoc(requestRef);
+      console.log(`✅ Solicitud eliminada: ${requestDocId}`);
+    } catch (error: any) {
+      console.error(`❌ Error al eliminar solicitud:`, error);
+      throw new Error(error.message || "Error al eliminar la solicitud");
     }
   }
 }

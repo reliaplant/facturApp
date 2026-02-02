@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { userService } from '@/services/firebase';
+import { useAuth } from '@/contexts/AuthContext';
 import { getFirestore, doc, getDoc } from 'firebase/firestore';
 import app from '@/services/firebase';
 
@@ -11,8 +12,20 @@ const db = getFirestore(app);
 
 const Login = () => {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Redirigir si ya está logueado
+  useEffect(() => {
+    if (!authLoading && user) {
+      if (user.role === 'cliente') {
+        router.push('/mi-contabilidad');
+      } else {
+        router.push('/dashboard');
+      }
+    }
+  }, [user, authLoading, router]);
 
   const handleGoogleLogin = async () => {
     setLoading(true);
@@ -46,6 +59,50 @@ const Login = () => {
       setLoading(false);
     }
   };
+
+  // Mostrar loading mientras verifica autenticación
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <Image 
+              src="/assets/logoKontia.png" 
+              alt="Kontia" 
+              width={120} 
+              height={40}
+              className="animate-pulse"
+            />
+          </div>
+          <div className="flex gap-1">
+            <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+            <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+            <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Si ya está logueado, no mostrar nada (el useEffect lo redirigirá)
+  if (user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white">
+        <div className="flex flex-col items-center gap-4">
+          <div className="relative">
+            <Image 
+              src="/assets/logoKontia.png" 
+              alt="Kontia" 
+              width={120} 
+              height={40}
+              className="animate-pulse"
+            />
+          </div>
+          <p className="text-sm text-gray-500 animate-pulse">Redirigiendo...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-white">

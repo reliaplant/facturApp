@@ -118,6 +118,36 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
     };
   }, { isr: 0, iva: 0, total: 0 }), [declaraciones]);
 
+  // Toggle pago servicio (admin cobra al cliente)
+  const handleTogglePagoServicio = useCallback(async (declaracion: Declaracion) => {
+    if (!declaracion.id || !clientId) return;
+    
+    try {
+      const nuevoEstado = !declaracion.clientePagoServicio;
+      await declaracionService.updateDeclaracion(clientId, {
+        ...declaracion,
+        clientePagoServicio: nuevoEstado
+      });
+      
+      // Actualizar localmente
+      setDeclaraciones(prev => prev.map(d => 
+        d.id === declaracion.id ? { ...d, clientePagoServicio: nuevoEstado } : d
+      ));
+
+      toast({
+        title: nuevoEstado ? "Pago registrado" : "Pago desmarcado",
+        description: `Declaración de ${getNombreMes(declaracion.mes)} ${declaracion.anio}`,
+      });
+    } catch (error) {
+      console.error('Error al actualizar pago de servicio:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo actualizar el estado de pago",
+        variant: "destructive",
+      });
+    }
+  }, [clientId, toast]);
+
   // Action handlers
   const handleSaveDeclaracion = useCallback(async () => {
     try {
@@ -285,7 +315,8 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <thead className="sticky top-0 z-20">
                 <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-sm">
                   <th className="pl-6 pr-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-left">Período</th>
-                  <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Cliente pagó Imp.</th>
+                  <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Pagó Imp.</th>
+                  <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Pagó Servicio</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-right">Total</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Linea Captura</th>
                   <th className="px-2 py-2.5 font-medium bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 text-center">Declaracion</th>
@@ -295,13 +326,13 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
               <tbody>
                 {isLoadingData ? (
                   <tr>
-                    <td colSpan={6} className="p-4 text-center text-gray-500">
+                    <td colSpan={7} className="p-4 text-center text-gray-500">
                       Cargando declaraciones...
                     </td>
                   </tr>
                 ) : declaraciones.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="p-4 text-center text-gray-500">
+                    <td colSpan={7} className="p-4 text-center text-gray-500">
                       No hay declaraciones registradas para {selectedYear}
                     </td>
                   </tr>
@@ -324,7 +355,7 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                         </div>
                       </td>
 
-                        {/* Estado Pago Impuestos */}
+                        {/* Estado Pago Impuestos (cliente pagó al SAT) */}
                         <td className="px-2 py-2.5 align-middle text-center">
                           <Badge 
                           variant={declaracion.clientePagoImpuestos ? "secondary" : "default"}
@@ -338,7 +369,20 @@ const DeclaracionMensualPF: React.FC<DeclaracionMensualPFProps> = ({
                           </Badge>
                         </td>
 
-                       
+                        {/* Estado Pago Servicio (cliente nos pagó a nosotros) */}
+                        <td className="px-2 py-2.5 align-middle text-center">
+                          <Badge 
+                            variant={declaracion.clientePagoServicio ? "secondary" : "default"}
+                            className={`text-[10px] cursor-pointer ${
+                              declaracion.clientePagoServicio 
+                                ? 'bg-violet-100 text-violet-800 hover:bg-violet-200' 
+                                : 'bg-orange-100 text-orange-800 hover:bg-orange-200'
+                            }`}
+                            onClick={() => handleTogglePagoServicio(declaracion)}
+                          >
+                            {declaracion.clientePagoServicio ? '✓ Cobrado' : 'Sin cobrar'}
+                          </Badge>
+                        </td>
 
 
                       {/* Importes */}

@@ -265,7 +265,7 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
   };
 
   return (
-    <div className="space-y-3 max-w-4xl mx-auto py-6 px-4">
+    <div className="space-y-3 py-6" style={{ paddingLeft: '5vw', paddingRight: '5vw' }}>
       {loading ? (
         <LoadingSkeleton />
       ) : error ? (

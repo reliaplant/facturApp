@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserRole } from '@/models/User';
+import Image from 'next/image';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -46,8 +47,21 @@ export function ProtectedRoute({
   // Mostrar loading mientras verifica
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-50">
+        <div className="animate-pulse">
+          <Image
+            src="/assets/logoKontia.png"
+            alt="Kontia"
+            width={120}
+            height={40}
+            priority
+          />
+        </div>
+        <div className="flex gap-1 mt-4">
+          <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+          <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+          <div className="w-2 h-2 bg-violet-600 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+        </div>
       </div>
     );
   }

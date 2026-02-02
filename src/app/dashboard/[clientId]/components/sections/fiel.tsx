@@ -312,24 +312,24 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
     return (
         <>
             {/* Main Card */}
-            <div className="w-full bg-white rounded-lg">
+            <div className="w-full bg-white rounded-lg overflow-hidden">
                 {/* Card Header */}
                 <div className="bg-gray-100 px-4 py-2 border-b border-gray-300">
                     <h3 className="text-sm font-medium text-gray-700">Documentos FIEL</h3>
                 </div>
 
                 {/* Card Content */}
-                <div className="">
+                <div className="overflow-x-auto">
                     <div className="">
                         {/* Table */}
-                        <table className="w-full text-xs">
+                        <table className="w-full text-xs table-fixed min-w-[500px]">
                             {/* Table Header */}
                             <thead>
                                 <tr className="border-b bg-gray-50">
-                                    <th className="w-[60%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+                                    <th className="w-[45%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
                                         Documento
                                     </th>
-                                    <th className="w-[20%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
+                                    <th className="w-[35%] px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wide">
                                         Actualizado
                                     </th>
                                     <th className="w-[20%] px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wide">

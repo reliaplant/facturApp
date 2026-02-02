@@ -15,6 +15,7 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Badge } from '@/components/ui/badge';
 import { toast } from '@/components/ui/use-toast';
 import { Users, UserPlus, Search, Activity, Building2 } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 // Función para formatear tiempo relativo
 function timeAgo(dateString: string): string {
@@ -358,9 +359,40 @@ export default function UserManagement() {
       {/* Table */}
       <div className="bg-white rounded-lg border">
         {loading && users.length === 0 ? (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
-          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Usuario</TableHead>
+                <TableHead>Rol</TableHead>
+                <TableHead>Contabilidad</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead>Último acceso</TableHead>
+                <TableHead>Uso</TableHead>
+                {canEdit && <TableHead className="text-right">Acciones</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <TableRow key={i}>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-9 w-9 rounded-full" />
+                      <div>
+                        <Skeleton className="h-4 w-28 mb-1" />
+                        <Skeleton className="h-3 w-36" />
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell><Skeleton className="h-6 w-20 rounded-full" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-32" /></TableCell>
+                  <TableCell><Skeleton className="h-6 w-16 rounded-full" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-12" /></TableCell>
+                  {canEdit && <TableCell className="text-right"><Skeleton className="h-8 w-16 ml-auto" /></TableCell>}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         ) : (
           <Table>
             <TableHeader>
@@ -497,11 +529,21 @@ export default function UserManagement() {
                 onChange={(e) => setEditUserData({...editUserData, clientId: e.target.value || undefined})}
               >
                 <option value="">Sin asignar</option>
-                {clients.map(client => (
-                  <option key={client.id} value={client.id}>
-                    {client.name} ({client.rfc})
-                  </option>
-                ))}
+                {clients.map(client => {
+                  // Verificar si este cliente ya tiene un usuario asignado (diferente al usuario actual)
+                  const assignedUser = users.find(u => u.clientId === client.id && u.uid !== currentUser?.uid);
+                  const isDisabled = !!assignedUser;
+                  
+                  return (
+                    <option 
+                      key={client.id} 
+                      value={client.id}
+                      disabled={isDisabled}
+                    >
+                      {client.name} ({client.rfc}){isDisabled ? ` - Asignado a ${assignedUser?.displayName || assignedUser?.email}` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             {isSuperAdmin && (

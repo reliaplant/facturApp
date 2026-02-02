@@ -3,28 +3,38 @@ import { SatRequest } from '@/models/SatRequest';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { 
-  Download, 
   Loader2, 
   RefreshCw, 
   FileArchive, 
   FileCheck,
-  Calendar,
   Archive,
-  ExternalLink
+  ExternalLink,
+  Zap,
+  AlertCircle,
+  Trash2,
+  Download,
+  Play
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import SatRequestService from "@/services/sat-request-service";
+import SatSyncService from "@/services/sat-sync-service";
+import { cfdiService } from "@/services/cfdi-service";
+import { parseCFDIFromString } from "@/services/cfdi-parser";
+import JSZip from "jszip";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 
@@ -73,14 +83,8 @@ const formatDateString = (dateStr: string): string => {
   }
 };
 
-// Format date range for display with proper locale formatting
-const formatDateRange = (fromDate: string, toDate: string): string => {
-  return `${formatDateString(fromDate)} - ${formatDateString(toDate)}`;
-};
-
 const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   const { toast } = useToast();
-  const [isLoading, setIsLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
@@ -89,27 +93,26 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   const [downloadUrls, setDownloadUrls] = useState<{ [key: string]: string }>({});
   const [loadingUrls, setLoadingUrls] = useState<{ [key: string]: boolean }>({});
   
-  // Date selection state
-  const currentYear = new Date().getFullYear();
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-
-  // Format yesterday as YYYY-MM-DD
-  const formatDateToYYYYMMDD = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  const [fromDate, setFromDate] = useState<string>(`${currentYear}-01-01`);
-  const [toDate, setToDate] = useState<string>(formatDateToYYYYMMDD(yesterday));
-  const [showDatePicker, setShowDatePicker] = useState(false);
-
+  // Sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  
+  // Auth context
+  const { isSuperAdmin } = useAuth();
+  const [syncStatus, setSyncStatus] = useState<{
+    needsSync: boolean;
+    isFirstSync?: boolean;
+    hasPendingRequests?: boolean;
+    pendingRequestsCount?: number;
+    issued: { from: string; to: string; daysBehind: number; needsSync?: boolean; hasPendingRequest?: boolean };
+    received: { from: string; to: string; daysBehind: number; needsSync?: boolean; hasPendingRequest?: boolean };
+  } | null>(null);
+  
   // Load real data when component mounts or RFC changes
   useEffect(() => {
     fetchRequests();
+    fetchSyncStatus();
   }, [clientRfc]);
 
   const fetchRequests = async () => {
@@ -130,59 +133,107 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
     }
   };
 
-  // Updated handler for date selection
-  const handleSolicitarDescarga = async (downloadType: "issued" | "received") => {
-    setIsLoading(true);
+  // Fetch sync status to show what needs to be synced
+  const fetchSyncStatus = async () => {
     try {
-      // Format the date strings for the SAT API
-      const from = `${fromDate} 00:00:00`;
-      const to = `${toDate} 23:59:59`;
-      
-      // Now we pass both the downloadType and the date range to createRequest
-      const newRequest = await SatRequestService.createRequest(
-        clientRfc, 
-        from, 
-        to, 
-        downloadType
-      );
-      
-      toast({
-        title: "Solicitud enviada",
-        description: `Solicitud de descarga de facturas ${downloadType === "issued" ? "emitidas" : "recibidas"} desde ${format(new Date(fromDate), 'dd/MM/yyyy', { locale: es })} hasta ${format(new Date(toDate), 'dd/MM/yyyy', { locale: es })}.`,
-      });
-      
-      // Refresh the list to show the new request
-      fetchRequests();
-    } catch (error: any) {
-      console.error("Error creating SAT request:", error);
-      toast({
-        title: "Error",
-        description: error.message || "Error al solicitar la descarga",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
+      const status = await SatSyncService.getSyncStatus(clientRfc);
+      setSyncStatus(status);
+    } catch (error) {
+      console.error("Error fetching sync status:", error);
     }
   };
 
-  // Function to validate date range
-  const isValidDateRange = (): boolean => {
-    if (!fromDate || !toDate) return false;
+  // Smart sync - automatically syncs pending dates
+  const handleSmartSync = async () => {
+    // Si hay pendientes y no hay nada nuevo que sincronizar, mostrar modal explicativo
+    if (syncStatus?.hasPendingRequests && !syncStatus?.needsSync) {
+      setShowPendingModal(true);
+      return;
+    }
     
-    const start = new Date(fromDate);
-    const end = new Date(toDate);
+    // Si todo está al día, mostrar toast
+    if (!syncStatus?.needsSync && !syncStatus?.hasPendingRequests) {
+      toast({
+        title: "Ya sincronizado",
+        description: "Todo está al día. No hay fechas pendientes.",
+      });
+      return;
+    }
     
-    // Check if dates are valid
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) return false;
+    setIsSyncing(true);
+    try {
+      const result = await SatSyncService.syncClient(clientRfc);
+      
+      if (result.success) {
+        if (result.requestsCreated > 0) {
+          // Construir mensaje detallado
+          const tiposSolicitados = [];
+          if (result.details?.issued?.requestId) tiposSolicitados.push('emitidas');
+          if (result.details?.received?.requestId) tiposSolicitados.push('recibidas');
+          
+          toast({
+            title: "Sincronización iniciada",
+            description: `Se solicitaron facturas ${tiposSolicitados.join(' y ')} al SAT`,
+          });
+        } else {
+          toast({
+            title: "Ya sincronizado",
+            description: "No hay fechas pendientes de sincronizar. Todo está al día.",
+          });
+        }
+        
+        // Refresh requests and sync status
+        fetchRequests();
+        fetchSyncStatus();
+      } else {
+        toast({
+          title: "Error",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Error al sincronizar",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Handle delete request (super admin only)
+  const handleDeleteRequest = async (request: SatRequest) => {
+    if (!isSuperAdmin) return;
     
-    // Check start date is before end date
-    if (start > end) return false;
+    const confirmDelete = window.confirm(
+      `¿Estás seguro de borrar esta solicitud?\n\nRequest ID: ${request.requestId}\nTipo: ${request.downloadType === 'issued' ? 'Emitidas' : 'Recibidas'}\n\nEsta acción no se puede deshacer.`
+    );
     
-    // Check that range is not more than 2 years
-    const twoYearsInMs = 2 * 365 * 24 * 60 * 60 * 1000;
-    if (end.getTime() - start.getTime() > twoYearsInMs) return false;
+    if (!confirmDelete) return;
     
-    return true;
+    setDeletingId(request.id);
+    try {
+      await SatRequestService.deleteRequest(clientRfc, request.id);
+      
+      toast({
+        title: "Solicitud eliminada",
+        description: `Se eliminó la solicitud ${request.requestId.substring(0, 8)}...`,
+      });
+      
+      // Refresh
+      fetchRequests();
+      fetchSyncStatus();
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error.message || "Error al eliminar la solicitud",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   // Helper function to format a date string for display
@@ -195,7 +246,7 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   };
 
   // Modified download packages function - removes automatic processing
-  const handleDownloadPackages = async (request: SatRequest) => {
+  const handleDownloadPackages = async (request: SatRequest, processAfter: boolean = true) => {
     if (!request.packageIds || request.packageIds.length === 0) {
       toast({
         title: "Error",
@@ -227,8 +278,23 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
 
         toast({
           title: "Descarga exitosa",
-          description: `Se descargaron ${downloadResult.savedPaths.length} paquetes correctamente.`,
+          description: `Se descargaron ${downloadResult.savedPaths.length} paquetes. ${processAfter ? 'Procesando XMLs...' : ''}`,
         });
+        
+        // Refresh to show updated status
+        fetchRequests();
+        
+        // Si processAfter es true, automáticamente procesar los XMLs
+        if (processAfter) {
+          // Pequeña pausa para que se actualice el estado
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Procesar los paquetes
+          await handleProcessPackages({
+            ...request,
+            packagesDownloaded: true
+          });
+        }
       } else {
         toast({
           title: "Error en la descarga",
@@ -251,7 +317,7 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
     }
   };
 
-  // Improved process packages function with better error handling
+  // Process packages locally - downloads ZIP, extracts XMLs, parses and saves to Firestore
   const handleProcessPackages = async (request: SatRequest) => {
     if (!request.packageIds || request.packageIds.length === 0) {
       toast({
@@ -263,102 +329,125 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
     }
 
     setProcessingId(request.id);
+    
+    let totalCfdisProcessed = 0;
+    let totalCfdisSaved = 0;
+    let totalCfdisExisting = 0;
+    let totalErrors = 0;
+    
     try {
-      // Use packageIds directly from the request
       const packageIds = request.packageIds;
-      console.log(`🔍 Procesando ${packageIds.length} paquetes:`, packageIds);
-      
-      // Process each package individually
-      const processResults = [];
-      let hasErrors = false;
+      console.log(`🔍 Procesando ${packageIds.length} paquetes localmente:`, packageIds);
       
       for (const packageId of packageIds) {
         console.log(`📦 Procesando paquete: ${packageId}`);
+        
         try {
-          const result = await SatRequestService.processPackage(clientRfc, packageId);
-          processResults.push(result);
+          // 1. Obtener URL del ZIP
+          console.log(`  ⬇️ Obteniendo URL del ZIP...`);
+          const zipUrl = await SatRequestService.getPackageDownloadUrl(clientRfc, packageId);
           
-          if (result.success) {
-            console.log(`✅ Paquete ${packageId} procesado exitosamente: ${result.savedPaths?.length || 0} XMLs`);
-          } else {
-            console.error(`❌ Error al procesar paquete ${packageId}:`, result.message);
-            hasErrors = true;
+          // 2. Descargar el ZIP
+          console.log(`  ⬇️ Descargando ZIP...`);
+          const response = await fetch(zipUrl);
+          if (!response.ok) {
+            throw new Error(`Error descargando ZIP: ${response.status}`);
           }
+          const zipBlob = await response.blob();
+          
+          // 3. Descomprimir con JSZip
+          console.log(`  📂 Descomprimiendo ZIP...`);
+          const zip = await JSZip.loadAsync(zipBlob);
+          
+          // 4. Procesar cada XML
+          const cfdisToSave = [];
+          const xmlFiles = Object.keys(zip.files).filter(name => name.toLowerCase().endsWith('.xml'));
+          console.log(`  📄 Encontrados ${xmlFiles.length} archivos XML`);
+          
+          for (const fileName of xmlFiles) {
+            try {
+              const xmlContent = await zip.files[fileName].async('string');
+              const cfdi = parseCFDIFromString(xmlContent, clientRfc, clientRfc);
+              
+              if (cfdi) {
+                cfdisToSave.push(cfdi);
+                totalCfdisProcessed++;
+              }
+            } catch (xmlError) {
+              console.error(`  ❌ Error parseando ${fileName}:`, xmlError);
+              totalErrors++;
+            }
+          }
+          
+          // 5. Guardar en Firestore (con verificación de duplicados por UUID)
+          if (cfdisToSave.length > 0) {
+            console.log(`  💾 Guardando ${cfdisToSave.length} CFDIs en Firestore...`);
+            const saveResult = await cfdiService.saveInvoices(clientRfc, cfdisToSave);
+            
+            totalCfdisSaved += saveResult.savedIds?.length || 0;
+            totalCfdisExisting += saveResult.existingIds?.length || 0;
+            
+            console.log(`  ✅ Paquete ${packageId}: ${saveResult.savedIds?.length || 0} nuevos, ${saveResult.existingIds?.length || 0} existentes`);
+          } else {
+            console.log(`  ⚠️ Paquete ${packageId}: No se encontraron CFDIs válidos`);
+          }
+          
         } catch (packageError) {
-          console.error(`❌ Excepción al procesar paquete ${packageId}:`, packageError);
-          processResults.push({ 
-            success: false, 
-            savedPaths: [], 
-            message: packageError instanceof Error ? packageError.message : "Error inesperado" 
-          });
-          hasErrors = true;
+          console.error(`❌ Error procesando paquete ${packageId}:`, packageError);
+          totalErrors++;
         }
       }
 
-      // Count successfully processed packages
-      const successCount = processResults.filter(r => r.success).length;
-      const failCount = processResults.length - successCount;
-
-      // Only mark as processed if all packages were successfully processed
-      if (successCount === packageIds.length) {
-        // All packages were successfully processed
-        await SatRequestService.updateRequestStatus(
-          clientRfc,
-          request.id,
-          { 
-            packagesProcessed: true,
-            processedAt: new Date().toISOString(),
-            processedCount: successCount
-          }
-        );
-        
+      // Actualizar estado del request
+      const allSuccess = totalErrors === 0;
+      
+      await SatRequestService.updateRequestStatus(
+        clientRfc,
+        request.id,
+        { 
+          packagesProcessed: true,
+          processedAt: new Date().toISOString(),
+          processedCount: totalCfdisSaved,
+          existingCount: totalCfdisExisting,
+          ...(totalErrors > 0 && { error: `${totalErrors} errores durante el procesamiento` })
+        }
+      );
+      
+      // Actualizar última fecha de sync
+      if (request.to && request.downloadType) {
+        try {
+          const syncedDate = request.to.split(' ')[0];
+          await SatSyncService.updateLastSyncDate(
+            clientRfc,
+            request.downloadType,
+            syncedDate
+          );
+          console.log(`✅ Actualizada última fecha de sync: ${syncedDate} (${request.downloadType})`);
+        } catch (syncError) {
+          console.error("Error actualizando última fecha de sync:", syncError);
+        }
+      }
+      
+      fetchSyncStatus();
+      
+      // Mostrar resultado
+      if (allSuccess) {
         toast({
-          title: "Procesamiento completado",
-          description: `Se procesaron ${successCount} paquetes correctamente.`,
-        });
-      } else if (successCount > 0) {
-        // Some packages were processed, but some failed
-        await SatRequestService.updateRequestStatus(
-          clientRfc,
-          request.id,
-          { 
-            // Mark as partially processed
-            packagesProcessed: false, 
-            processedAt: new Date().toISOString(),
-            processedCount: successCount,
-            error: `Fallaron ${failCount} de ${packageIds.length} paquetes`
-          }
-        );
-        
-        toast({
-          title: "Procesamiento parcial",
-          description: `Se procesaron ${successCount} de ${packageIds.length} paquetes. ${failCount} fallaron.`,
-          variant: "destructive"
+          title: "Importación completada",
+          description: `${totalCfdisSaved} CFDIs importados, ${totalCfdisExisting} ya existían`,
         });
       } else {
-        // All packages failed
-        await SatRequestService.updateRequestStatus(
-          clientRfc,
-          request.id,
-          { 
-            packagesProcessed: false,
-            error: "Error procesando todos los paquetes"
-          }
-        );
-        
         toast({
-          title: "Error de procesamiento",
-          description: "No se pudo procesar ningún paquete. Revise los logs para más detalles.",
+          title: "Importación con errores",
+          description: `${totalCfdisSaved} importados, ${totalCfdisExisting} existentes, ${totalErrors} errores`,
           variant: "destructive"
         });
       }
 
-      // Refresh the list to show updated status
       fetchRequests();
     } catch (error: any) {
       console.error("Error processing packages:", error);
       
-      // Make sure we mark the request as failed in case of unexpected errors
       await SatRequestService.updateRequestStatus(
         clientRfc,
         request.id,
@@ -374,7 +463,6 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
         variant: "destructive",
       });
       
-      // Refresh to show the error status
       fetchRequests();
     } finally {
       setProcessingId(null);
@@ -492,78 +580,78 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
             Solicitudes SAT
           </h2>
           
-          <div className="flex items-center gap-2">            
-            {/* Replace the simple dropdown with one that includes date selection */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button 
-                  variant="black" 
-                  size="xs" 
-                  disabled={isLoading}
-                  className="flex items-center whitespace-nowrap"
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      Procesando...
-                    </>
+          <div className="flex items-center gap-2">
+            {/* Smart Sync Button */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="xs" 
+                    disabled={isSyncing}
+                    onClick={handleSmartSync}
+                    className={`flex items-center whitespace-nowrap ${
+                      syncStatus?.needsSync 
+                        ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100' 
+                        : syncStatus?.hasPendingRequests
+                          ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                          : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+                    }`}
+                  >
+                    {isSyncing ? (
+                      <>
+                        <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        Sincronizando...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="h-3 w-3 mr-1" />
+                        Sincronizar
+                      </>
+                    )}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  {syncStatus?.isFirstSync ? (
+                    <div className="text-xs space-y-1">
+                      <p className="font-medium">Primera sincronización</p>
+                      <p className="text-gray-400">Se descargará desde el 1 de enero de {new Date().getFullYear()}</p>
+                      <p className="text-gray-400 mt-1">Click para sincronizar</p>
+                    </div>
+                  ) : syncStatus?.needsSync ? (
+                    <div className="text-xs space-y-1">
+                      <p className="font-medium">Hay fechas pendientes:</p>
+                      {syncStatus.issued.needsSync && (
+                        <p>• Emitidas: {syncStatus.issued.daysBehind} días atrás</p>
+                      )}
+                      {syncStatus.received.needsSync && (
+                        <p>• Recibidas: {syncStatus.received.daysBehind} días atrás</p>
+                      )}
+                      {syncStatus.issued.hasPendingRequest && (
+                        <p className="text-blue-500">• Emitidas: solicitud en proceso</p>
+                      )}
+                      {syncStatus.received.hasPendingRequest && (
+                        <p className="text-blue-500">• Recibidas: solicitud en proceso</p>
+                      )}
+                      <p className="text-gray-400 mt-1">Click para sincronizar lo que falta</p>
+                    </div>
+                  ) : syncStatus?.hasPendingRequests ? (
+                    <div className="text-xs space-y-1">
+                      <p className="font-medium">Solicitudes pendientes de procesar:</p>
+                      {syncStatus.issued.hasPendingRequest && (
+                        <p>• Emitidas: pendiente verificar/descargar/procesar</p>
+                      )}
+                      {syncStatus.received.hasPendingRequest && (
+                        <p>• Recibidas: pendiente verificar/descargar/procesar</p>
+                      )}
+                      <p className="text-gray-400 mt-1">Procesa las solicitudes de la tabla</p>
+                    </div>
                   ) : (
-                    <>
-                      <Download className="h-3 w-3 mr-1" />
-                      Solicitar Descarga
-                    </>
+                    <p className="text-xs">Las facturas están sincronizadas hasta ayer</p>
                   )}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[340px]">
-                <DropdownMenuLabel>Rango de fechas</DropdownMenuLabel>
-                <div className="px-2 py-2 grid gap-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="from-date" className="text-xs text-gray-500 block mb-1">Fecha inicial:</label>
-                      <input
-                        id="from-date"
-                        type="date"
-                        value={fromDate}
-                        onChange={(e) => setFromDate(e.target.value)}
-                        className="w-full text-xs px-2 py-1 border rounded"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="to-date" className="text-xs text-gray-500 block mb-1">Fecha final:</label>
-                      <input
-                        id="to-date"
-                        type="date"
-                        value={toDate}
-                        onChange={(e) => setToDate(e.target.value)}
-                        className="w-full text-xs px-2 py-1 border rounded"
-                      />
-                    </div>
-                  </div>
-                  {!isValidDateRange() && (
-                    <p className="text-red-500 text-xs">
-                      La fecha inicial debe ser anterior a la final, y el rango no debe exceder 2 años.
-                    </p>
-                  )}
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuLabel>Tipo de facturas</DropdownMenuLabel>
-                <DropdownMenuItem 
-                  onClick={() => handleSolicitarDescarga("issued")}
-                  disabled={isLoading || !isValidDateRange()}
-                  className="cursor-pointer"
-                >
-                  Facturas Emitidas ({formatDateRange(fromDate, toDate)})
-                </DropdownMenuItem>
-                <DropdownMenuItem 
-                  onClick={() => handleSolicitarDescarga("received")}
-                  disabled={isLoading || !isValidDateRange()}
-                  className="cursor-pointer"
-                >
-                  Facturas Recibidas ({formatDateRange(fromDate, toDate)})
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
 
@@ -579,6 +667,9 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Tipo</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Estado</th>
                   <th className="pr-7 px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Acción</th>
+                  {isSuperAdmin && (
+                    <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600"></th>
+                  )}
                 </tr>
               </thead>
               <tbody className="mt-1">
@@ -672,70 +763,125 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                         </div>
                       </td>
                       <td className="px-2 py-1 align-middle h-[56px]">
-                        <Badge 
-                          variant="outline" 
-                          className={`text-[10px] ${
-                            request.packagesProcessed ? 'bg-blue-50 text-blue-700 border-blue-300' :
-                            request.packagesDownloaded ? 'bg-indigo-50 text-indigo-700 border-indigo-300' :
-                            (request.completed || request.status === "3" || 
-                             request.status === "Finished" || request.status === "finished") ? 
-                               'bg-green-50 text-green-700 border-green-300' : 
-                            request.status === 'requested' ? 'bg-blue-50 text-blue-700 border-blue-300' :
-                            request.error ? 'bg-red-50 text-red-700 border-red-300' : 
-                            'bg-yellow-50 text-yellow-700 border-yellow-300'
-                          }`}
-                        >
-                          {request.packagesProcessed ? 'Procesado' :
-                           request.packagesDownloaded ? 'Descargado' :
-                           (request.completed || request.status === "3" || 
-                            request.status === "Finished" || request.status === "finished") ? 
-                              'Listo para descargar' : 
-                           request.error ? 'Error' : 
-                           request.status || 'Pendiente'}
-                        </Badge>
+                        {/* Estado mejorado */}
+                        {request.packagesProcessed ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-blue-500"></span>
+                            <span className="text-xs text-blue-700 font-medium">Procesado</span>
+                          </div>
+                        ) : request.packagesDownloaded ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-indigo-500"></span>
+                            <span className="text-xs text-indigo-700 font-medium">Descargado</span>
+                          </div>
+                        ) : (request.completed || request.status === "3" || 
+                             request.status === "Finished" || request.status === "finished") ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
+                            <span className="text-xs text-green-700 font-medium">Listo</span>
+                          </div>
+                        ) : request.error ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-red-500"></span>
+                            <span className="text-xs text-red-700 font-medium">Error</span>
+                          </div>
+                        ) : request.status === 'in_progress' || request.status === '1' ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span className="text-xs text-amber-700 font-medium">En proceso</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 rounded-full bg-gray-400 animate-pulse"></span>
+                            <span className="text-xs text-gray-600 font-medium">Solicitado</span>
+                          </div>
+                        )}
                       </td>
                       <td className="pr-7 px-2 py-1 align-middle h-[56px]">
                         <div className="flex justify-center space-x-2">
                           {!request.completed && !request.packagesDownloaded && !request.error && (
-                            <button 
-                              className={`text-xs ${verifyingId === request.id ? 'text-gray-500' : 'text-indigo-600 hover:text-indigo-900 hover:underline'}`}
+                            <Button 
+                              variant="outline"
+                              size="xs"
+                              className="text-xs h-7 px-2 bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"
                               onClick={() => handleVerifyRequest(request)}
                               disabled={verifyingId === request.id}
                             >
                               {verifyingId === request.id ? (
-                                <span className="flex items-center">
+                                <>
                                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                                   Verificando...
-                                </span>
+                                </>
                               ) : (
-                                "Verificar"
+                                <>
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Verificar
+                                </>
                               )}
-                            </button>
+                            </Button>
                           )}
                           {isReadyForDownload(request) && (
-                            <button 
-                              className={`text-xs ${downloadingId === request.id ? 'text-gray-500' : 'text-green-600 hover:text-green-900 hover:underline'}`}
-                              onClick={() => handleDownloadPackages(request)}
-                              disabled={downloadingId === request.id}
-                            >
-                              {downloadingId === request.id ? (
-                                <span className="flex items-center">
-                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                  Descargando...
-                                </span>
-                              ) : (
-                                <span className="flex items-center">
-                                  <FileArchive className="h-3 w-3 mr-1" />
-                                  Descargar ({request.packageIds?.length})
-                                </span>
-                              )}
-                            </button>
+                            <div className="flex items-center gap-1">
+                              <Button 
+                                variant="outline"
+                                size="xs"
+                                className="text-xs h-7 px-2 bg-green-50 border-green-200 text-green-700 hover:bg-green-100"
+                                onClick={() => handleDownloadPackages(request, true)}
+                                disabled={downloadingId === request.id || processingId === request.id}
+                              >
+                                {(downloadingId === request.id || processingId === request.id) ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                    {downloadingId === request.id ? 'Descargando...' : 'Procesando...'}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="h-3 w-3 mr-1" />
+                                    Importar
+                                  </>
+                                )}
+                              </Button>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button 
+                                      variant="ghost"
+                                      size="xs"
+                                      className="text-xs h-7 w-7 p-0 text-gray-400 hover:text-gray-600"
+                                      onClick={() => handleDownloadPackages(request, false)}
+                                      disabled={downloadingId === request.id}
+                                    >
+                                      <Download className="h-3 w-3" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="bottom">
+                                    <p className="text-xs">Solo descargar ZIP (sin procesar)</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
                           )}
                           {(request.packagesDownloaded || request.packagesProcessed) && (
-                            <span className="text-xs text-gray-500">-</span>
+                            <span className="text-xs text-gray-400 italic">Completado</span>
                           )}
                         </div>
                       </td>
+                      {isSuperAdmin && (
+                        <td className="px-2 py-1 align-middle h-[56px] text-center">
+                          <button
+                            onClick={() => handleDeleteRequest(request)}
+                            disabled={deletingId === request.id}
+                            className="text-red-400 hover:text-red-600 disabled:opacity-50"
+                            title="Borrar solicitud"
+                          >
+                            {deletingId === request.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   ))
                 )}
@@ -744,6 +890,42 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           </div>
         </div>
       </div>
+
+      {/* Modal de solicitudes pendientes */}
+      <Dialog open={showPendingModal} onOpenChange={setShowPendingModal}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-blue-500" />
+              Solicitudes en proceso
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-3 pt-2">
+                <p>
+                  No se pueden crear nuevas solicitudes porque hay {syncStatus?.pendingRequestsCount} solicitud(es) pendiente(s) de procesar:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-sm">
+                  {syncStatus?.issued.hasPendingRequest && (
+                    <li><strong>Emitidas:</strong> Pendiente de verificar, descargar o procesar</li>
+                  )}
+                  {syncStatus?.received.hasPendingRequest && (
+                    <li><strong>Recibidas:</strong> Pendiente de verificar, descargar o procesar</li>
+                  )}
+                </ul>
+                <p className="text-sm text-gray-500">
+                  Haz clic en "Verificar" en las solicitudes de la tabla para continuar el proceso.
+                  Una vez procesadas, podrás sincronizar nuevas fechas.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button variant="outline" onClick={() => setShowPendingModal(false)}>
+              Entendido
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

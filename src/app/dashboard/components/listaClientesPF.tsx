@@ -1,14 +1,19 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, Search, Users } from "lucide-react";
+import { Plus, Search, User, CheckCircle, XCircle, AlertCircle, FileText } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { userService } from "@/services/firebase";
+import { declaracionService } from "@/services/declaracion-service";
+import { Declaracion } from "@/models/declaracion";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ListaClientesPFProps {
   clients: Client[];
@@ -20,22 +25,25 @@ interface ListaClientesPFProps {
   newClient: {
     name: string;
     rfc: string;
-    email: string;
-    tipoPersona: 'fisica' | 'moral';
+    selectedUserId: string;
   };
-  setNewClient: (client: { name: string; rfc: string; email: string; tipoPersona: 'fisica' | 'moral' }) => void;
+  setNewClient: (client: { name: string; rfc: string; selectedUserId: string }) => void;
   handleCreateClient: () => Promise<void>;
   isCreating: boolean;
 }
 
-// Client tiers with color scheme
-const clientTiers = [
-  { id: "onboarding", name: "Onboarding", color: "bg-yellow-400" },
-  { id: "basico", name: "Básico", color: "bg-violet-300" },
-  { id: "emprendedores", name: "Emprendedores", color: "bg-violet-500" },
-  { id: "pro", name: "Pro", color: "bg-violet-800" },
-  { id: "perdidos", name: "Perdidos", color: "bg-red-500" }
-];
+interface UserInfo {
+  uid: string;
+  displayName?: string;
+  email?: string;
+  isActive?: boolean;
+  clientId?: string;
+}
+
+interface ClientWithInfo extends Client {
+  usuario?: UserInfo;
+  ultimaDeclaracion?: Declaracion;
+}
 
 export const ListaClientesPF = ({
   clients,
@@ -49,53 +57,124 @@ export const ListaClientesPF = ({
   handleCreateClient,
   isCreating,
 }: ListaClientesPFProps) => {
-  const filteredClients = clients.filter(client => {
-    // Handle clients with either name pattern
+  const [users, setUsers] = useState<UserInfo[]>([]);
+  const [clientsWithInfo, setClientsWithInfo] = useState<ClientWithInfo[]>([]);
+  const [loadingInfo, setLoadingInfo] = useState(true);
+
+  // Usuarios disponibles (activos y sin cliente asignado)
+  const usuariosDisponibles = users.filter(u => u.isActive !== false && !u.clientId);
+
+  // Cargar usuarios y declaraciones
+  useEffect(() => {
+    const loadData = async () => {
+      setLoadingInfo(true);
+      try {
+        // Cargar todos los usuarios
+        const usersData = await userService.getAllUsers();
+        const mappedUsers = usersData.map(u => ({
+          uid: u.uid,
+          displayName: u.displayName,
+          email: u.email,
+          isActive: u.isActive,
+          clientId: u.clientId
+        }));
+        setUsers(mappedUsers);
+
+        // Para cada cliente, buscar su usuario asignado y última declaración
+        const currentYear = new Date().getFullYear();
+        const enrichedClients = await Promise.all(
+          clients.map(async (client) => {
+            // Buscar usuario asignado a este cliente
+            const assignedUser = mappedUsers.find(u => u.clientId === client.id);
+            
+            // Buscar última declaración
+            let ultimaDeclaracion: Declaracion | undefined;
+            try {
+              const declaraciones = await declaracionService.getDeclaraciones(client.id, currentYear);
+              if (declaraciones.length > 0) {
+                // Ordenar por mes descendente
+                declaraciones.sort((a, b) => parseInt(b.mes) - parseInt(a.mes));
+                ultimaDeclaracion = declaraciones[0];
+              } else {
+                // Intentar año anterior si no hay del actual
+                const declaracionesAnterior = await declaracionService.getDeclaraciones(client.id, currentYear - 1);
+                if (declaracionesAnterior.length > 0) {
+                  declaracionesAnterior.sort((a, b) => parseInt(b.mes) - parseInt(a.mes));
+                  ultimaDeclaracion = declaracionesAnterior[0];
+                }
+              }
+            } catch (error) {
+              console.error(`Error loading declarations for ${client.id}:`, error);
+            }
+
+            return {
+              ...client,
+              usuario: assignedUser,
+              ultimaDeclaracion
+            };
+          })
+        );
+
+        setClientsWithInfo(enrichedClients);
+      } catch (error) {
+        console.error('Error loading data:', error);
+      } finally {
+        setLoadingInfo(false);
+      }
+    };
+
+    if (clients.length > 0) {
+      loadData();
+    } else {
+      setLoadingInfo(false);
+    }
+  }, [clients]);
+
+  const filteredClients = clientsWithInfo.filter(client => {
     let clientName = '';
-    
-    // Use name field if available
     if (client.name) {
       clientName = client.name.toLowerCase();
-    } 
-    // Otherwise construct from nombres and apellidos
-    else if (client.nombres || client.primerApellido) {
+    } else if (client.nombres || client.primerApellido) {
       clientName = `${client.nombres || ''} ${client.primerApellido || ''}`.toLowerCase().trim();
     }
     
     const clientRfc = client.rfc ? client.rfc.toLowerCase() : '';
+    const userName = client.usuario?.displayName?.toLowerCase() || '';
     
     return searchTerm === '' || 
            clientName.includes(searchTerm.toLowerCase()) || 
-           clientRfc.includes(searchTerm.toLowerCase());
+           clientRfc.includes(searchTerm.toLowerCase()) ||
+           userName.includes(searchTerm.toLowerCase());
   });
 
-  // Group clients by tier
-  const getClientsByTier = () => {
-    const clientsByTier: Record<string, Client[]> = {};
-    
-    // Initialize empty arrays for each tier
-    clientTiers.forEach(tier => {
-      clientsByTier[tier.id] = [];
-    });
-    
-    // Distribute clients to their respective tiers
-    filteredClients.forEach(client => {
-      const tier = client.tier || "onboarding";
-      if (clientsByTier[tier]) {
-        clientsByTier[tier].push(client);
-      } else {
-        clientsByTier["onboarding"].push(client);
-      }
-    });
-    
-    return clientsByTier;
+  // Separar activos de inactivos
+  const clientesActivos = filteredClients.filter(c => !c.usuario || c.usuario.isActive !== false);
+  const clientesInactivos = filteredClients.filter(c => c.usuario && c.usuario.isActive === false);
+
+  // Helper para obtener nombre del mes
+  const getMesNombre = (mes: string) => {
+    const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+    const num = parseInt(mes);
+    return meses[num - 1] || mes;
   };
 
-  const clientsByTier = getClientsByTier();
+  // Helper para obtener el estado de la declaración
+  const getDeclaracionStatus = (client: ClientWithInfo) => {
+    if (!client.ultimaDeclaracion) {
+      return { text: 'Sin declaraciones', color: 'text-gray-400', bg: 'bg-gray-100', icon: FileText };
+    }
+    
+    const decl = client.ultimaDeclaracion;
+    if (decl.clientePagoServicio === true) {
+      return { text: 'Pagado', color: 'text-green-600', bg: 'bg-green-50', icon: CheckCircle };
+    } else {
+      return { text: 'Pendiente pago', color: 'text-amber-600', bg: 'bg-amber-50', icon: AlertCircle };
+    }
+  };
 
   return (
     <Card className="border-0 shadow-sm">
-      <CardHeader className="bg-gray-100 px-7 py-2 flex flex-row items-center justify-between space-y-0 border-b border-gray-200 ">
+      <CardHeader className="bg-gray-100 px-7 py-2 flex flex-row items-center justify-between space-y-0 border-b border-gray-200">
         <div className="flex items-center gap-4 w-full">
           <CardTitle className="text-base">Clientes</CardTitle>
 
@@ -103,7 +182,7 @@ export const ListaClientesPF = ({
             <Search className="absolute left-2 top-1.5 h-3.5 w-3.5 text-gray-500" />
             <Input
               type="search"
-              placeholder="Buscar..."
+              placeholder="Buscar cliente, RFC o usuario..."
               className="w-full h-7 pl-7 text-xs"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -127,25 +206,8 @@ export const ListaClientesPF = ({
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="tipoPersona" className="text-right">
-                      Tipo*
-                    </Label>
-                    <Select 
-                      value={newClient.tipoPersona} 
-                      onValueChange={(value: 'fisica' | 'moral') => setNewClient({ ...newClient, tipoPersona: value })}
-                    >
-                      <SelectTrigger id="tipoPersona" className="col-span-3">
-                        <SelectValue placeholder="Selecciona el tipo" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="fisica">Persona Física</SelectItem>
-                        <SelectItem value="moral">Persona Moral</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="name" className="text-right">
-                      {newClient.tipoPersona === 'fisica' ? 'Nombre*' : 'Razón Social*'}
+                      Nombre*
                     </Label>
                     <Input
                       id="name"
@@ -168,25 +230,52 @@ export const ListaClientesPF = ({
                     />
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="email" className="text-right">
-                      Email*
+                    <Label htmlFor="usuario" className="text-right">
+                      Usuario*
                     </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={newClient.email}
-                      onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
-                      className="col-span-3"
-                      placeholder="correo@ejemplo.com"
-                      required
-                    />
+                    <Select 
+                      value={newClient.selectedUserId} 
+                      onValueChange={(value) => setNewClient({ ...newClient, selectedUserId: value })}
+                    >
+                      <SelectTrigger id="usuario" className="col-span-3">
+                        <SelectValue placeholder="Selecciona un usuario" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {usuariosDisponibles.length === 0 ? (
+                          <SelectItem value="_none" disabled>
+                            No hay usuarios disponibles
+                          </SelectItem>
+                        ) : (
+                          usuariosDisponibles.map((usuario) => (
+                            <SelectItem key={usuario.uid} value={usuario.uid}>
+                              {usuario.displayName || usuario.email || 'Sin nombre'}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
+                  {newClient.selectedUserId && (
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label className="text-right text-gray-500">
+                        Email
+                      </Label>
+                      <span className="col-span-3 text-sm text-gray-600">
+                        {usuariosDisponibles.find(u => u.uid === newClient.selectedUserId)?.email || '-'}
+                      </span>
+                    </div>
+                  )}
+                  {usuariosDisponibles.length === 0 && (
+                    <p className="text-xs text-amber-600 text-center">
+                      Todos los usuarios ya tienen un cliente asignado
+                    </p>
+                  )}
                 </div>
                 <DialogFooter>
                   <Button
                     type="submit"
                     onClick={handleCreateClient}
-                    disabled={isCreating || !newClient.name || !newClient.rfc}
+                    disabled={isCreating || !newClient.name || !newClient.rfc || !newClient.selectedUserId}
                   >
                     {isCreating ? "Creando..." : "Crear cliente"}
                   </Button>
@@ -197,46 +286,178 @@ export const ListaClientesPF = ({
         </div>
       </CardHeader>
       <CardContent className="p-0">
-        {isLoading ? (
-          <div className="flex justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+        {isLoading || loadingInfo ? (
+          <div className="overflow-auto h-[calc(100vh-140px)]">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Cliente</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">RFC</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Usuario Asignado</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-500">Estado</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Última Declaración</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-3">
+                      <Skeleton className="h-5 w-40" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Skeleton className="h-4 w-32" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Skeleton className="h-6 w-6 rounded-full" />
+                        <div>
+                          <Skeleton className="h-4 w-24 mb-1" />
+                          <Skeleton className="h-3 w-32" />
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Skeleton className="h-6 w-16 rounded-full mx-auto" />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Skeleton className="h-4 w-28" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
-          <div className="grid grid-cols-5 gap-2 bg-gray-100 dark:bg-gray-850 h-[calc(100vh-140px)] overflow-auto p-2">
-            {clientTiers.map(tier => (
-              <div key={tier.id} className="flex flex-col border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-800">
-                <div className="px-3 py-2 bg-gray-100 dark:bg-gray-850 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
-                  <div className="flex items-center">
-                    <div className={`w-2.5 h-2.5 ${tier.color} rounded-full mr-1.5`}></div>
-                    <span className="font-medium text-xs">{tier.name}</span>
-                  </div>
-                  <div className="flex items-center justify-center w-4 h-4 bg-white dark:bg-gray-700 rounded-full text-[10px]">
-                    {clientsByTier[tier.id].length}
-                  </div>
-                </div>
-                <div className="bg-gray-100 dark:bg-gray-850 flex-1 p-2 overflow-y-auto">
-                  {clientsByTier[tier.id].length > 0 ? (
-                    <div className="space-y-2">
-                      {clientsByTier[tier.id].map((client) => (
-                        <Link key={client.id} href={`/dashboard/${client.id}`} passHref>
-                          <div className="bg-white dark:bg-gray-800 p-2 rounded-md shadow-sm hover:shadow-md transition-shadow cursor-pointer border border-gray-200 dark:border-gray-700">
-                            <div className="font-medium truncate text-xs">
+          <div className="overflow-auto h-[calc(100vh-140px)]">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 border-b sticky top-0">
+                <tr>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Cliente</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">RFC</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Usuario Asignado</th>
+                  <th className="px-4 py-3 text-center font-medium text-gray-500">Estado</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-500">Última Declaración</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredClients.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                      No hay clientes
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {/* Clientes Activos */}
+                    {clientesActivos.map((client) => {
+                      const status = getDeclaracionStatus(client);
+                      const StatusIcon = status.icon;
+                      
+                      return (
+                        <tr key={client.id} className="border-b hover:bg-gray-50 cursor-pointer">
+                          <td className="px-4 py-3">
+                            <Link href={`/dashboard/${client.id}`} className="hover:underline">
+                              <div className="font-medium text-gray-900">
+                                {client.name || `${client.nombres || ''} ${client.primerApellido || ''}`.trim()}
+                              </div>
+                            </Link>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="text-gray-600 font-mono text-xs">{client.rfc}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            {client.usuario ? (
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 text-xs font-medium">
+                                  {(client.usuario.displayName || client.usuario.email || 'U').charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="text-sm">{client.usuario.displayName || 'Sin nombre'}</div>
+                                  <div className="text-xs text-gray-500">{client.usuario.email}</div>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-xs flex items-center gap-1">
+                                <User className="h-3 w-3" />
+                                Sin asignar
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            {client.usuario ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-green-50 text-green-700">
+                                <CheckCircle className="h-3 w-3" />
+                                Activo
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {client.ultimaDeclaracion ? (
+                              <div className="text-sm">
+                                <span className="font-medium">{getMesNombre(client.ultimaDeclaracion.mes)}</span>
+                                <span className="text-gray-500"> {client.ultimaDeclaracion.anio}</span>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400 text-xs">Sin declaraciones</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+
+                    {/* Separador si hay inactivos */}
+                    {clientesInactivos.length > 0 && (
+                      <tr className="bg-red-50 border-y-2 border-red-200">
+                        <td colSpan={5} className="px-4 py-2">
+                          <div className="flex items-center gap-2 text-red-700 font-medium text-xs">
+                            <XCircle className="h-4 w-4" />
+                            Clientes Inactivos ({clientesInactivos.length})
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+
+                    {/* Clientes Inactivos - sin info de contabilidad */}
+                    {clientesInactivos.map((client) => (
+                      <tr key={client.id} className="border-b hover:bg-red-50/50 cursor-pointer bg-gray-50/50 opacity-70">
+                        <td className="px-4 py-3">
+                          <Link href={`/dashboard/${client.id}`} className="hover:underline">
+                            <div className="font-medium text-gray-600">
                               {client.name || `${client.nombres || ''} ${client.primerApellido || ''}`.trim()}
                             </div>
-                            <div className="text-[10px] text-gray-500 dark:text-gray-400">{client.rfc}</div>
-                          </div>
-                        </Link>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center h-16 text-gray-400 text-xs">
-                      <Users className="h-4 w-4 mb-1 opacity-40" />
-                      <span>Sin clientes</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-gray-500 font-mono text-xs">{client.rfc}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {client.usuario && (
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-xs font-medium">
+                                {(client.usuario.displayName || client.usuario.email || 'U').charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="text-sm text-gray-500">{client.usuario.displayName || 'Sin nombre'}</div>
+                                <div className="text-xs text-gray-400">{client.usuario.email}</div>
+                              </div>
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-red-50 text-red-700">
+                            <XCircle className="h-3 w-3" />
+                            Inactivo
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-center text-gray-400 text-xs">—</td>
+                      </tr>
+                    ))}
+                  </>
+                )}
+              </tbody>
+            </table>
           </div>
         )}
       </CardContent>

@@ -54,6 +54,8 @@ import {
   Package,
   Download
 } from "lucide-react";
+import { MiContabilidadSkeleton } from "@/components/ui/skeleton";
+import Image from "next/image";
 
 export default function MiContabilidadPage() {
   const { user } = useAuth();
@@ -427,6 +429,15 @@ export default function MiContabilidadPage() {
     anuales: 'Deducciones para Anual'
   };
 
+  // Mostrar skeleton mientras carga
+  if (loading) {
+    return (
+      <ProtectedRoute requiredRole="cliente">
+        <MiContabilidadSkeleton />
+      </ProtectedRoute>
+    );
+  }
+
   return (
     <ProtectedRoute requiredRole="cliente">
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -680,9 +691,13 @@ export default function MiContabilidadPage() {
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
-                <h1 className="font-bold text-gray-900 dark:text-white text-xl">
-                  kontIA.
-                </h1>
+                <Image
+                  src="/assets/logoKontia.png"
+                  alt="Kontia"
+                  width={80}
+                  height={28}
+                  priority
+                />
                 <span className="text-gray-400">|</span>
                 <span className="text-sm text-gray-600">Mi Contabilidad</span>
               </div>
@@ -719,11 +734,7 @@ export default function MiContabilidadPage() {
 
         {/* Content */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {loading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
-            </div>
-          ) : !user?.clientId ? (
+          {!user?.clientId ? (
             <div className="text-center py-12">
               <AlertCircle className="mx-auto h-12 w-12 text-yellow-500 mb-4" />
               <h2 className="text-xl font-semibold text-gray-900 mb-2">Cuenta no vinculada</h2>

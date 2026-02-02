@@ -101,4 +101,19 @@ export interface Client {
   claveFielDate?: string;
   cartaManifiestoUrl?: string;
   cartaManifiestoDate?: string;
+
+  // SAT Sync Status - Para descarga masiva inteligente
+  satSyncStatus?: {
+    // Última fecha sincronizada para facturas emitidas
+    lastSyncDateIssued?: string; // Formato: YYYY-MM-DD
+    lastSyncAtIssued?: string;   // Timestamp de la última sincronización
+    // Última fecha sincronizada para facturas recibidas
+    lastSyncDateReceived?: string; // Formato: YYYY-MM-DD
+    lastSyncAtReceived?: string;   // Timestamp de la última sincronización
+    // Fecha de inicio de operaciones (para saber desde cuándo descargar la primera vez)
+    syncStartDate?: string; // Formato: YYYY-MM-DD
+    // Estado general
+    issyncing?: boolean;
+    lastError?: string;
+  };
 }

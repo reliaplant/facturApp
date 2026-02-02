@@ -21,6 +21,7 @@ import {
   DateTimePeriod,
   DownloadType,
   RequestType,
+  DocumentStatus,
   CfdiPackageReader,
   OpenZipFileException,
 } from "@nodecfdi/sat-ws-descarga-masiva";
@@ -106,10 +107,12 @@ export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
   // Use the provided downloadType parameter (v2.0 sigue usando constructor)
   const downloadTypeObj = new DownloadType(downloadType); // "issued" or "received"
   const requestType = new RequestType("xml"); // xml
+  const documentStatus = new DocumentStatus("active"); // Solo CFDIs vigentes (no cancelados)
 
   const params = QueryParameters.create(periodo)
     .withDownloadType(downloadTypeObj)
-    .withRequestType(requestType);
+    .withRequestType(requestType)
+    .withDocumentStatus(documentStatus);
 
   // 4️⃣ Lanza la consulta
   let query;

@@ -7,6 +7,7 @@ import { Client } from "@/models/Client";
 import { ListaClientesPF } from "./components/listaClientesPF";
 import { Configuracion } from "./components/Configuracion";
 import UserManagement from "@/components/user-management";
+import Facturacion from "./components/Facturacion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -20,7 +21,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, User as UserIcon, Settings } from "lucide-react";
+import { LogOut, User as UserIcon } from "lucide-react";
 
 export default function DashboardPage() {
   const { user } = useAuth();
@@ -41,8 +42,7 @@ export default function DashboardPage() {
   const [newClient, setNewClient] = useState({
     name: "",
     rfc: "",
-    email: "",
-    tipoPersona: 'fisica' as 'fisica' | 'moral'
+    selectedUserId: "" 
   });
   const [isCreating, setIsCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("personaFisica");
@@ -71,30 +71,40 @@ export default function DashboardPage() {
   }, []);
 
   const handleCreateClient = async () => {
-    if (!newClient.name || !newClient.rfc || !newClient.email) {
+    if (!newClient.name || !newClient.rfc || !newClient.selectedUserId) {
       return;
     }
 
     setIsCreating(true);
     try {
+      // Obtener el email del usuario seleccionado
+      const selectedUser = await userService.getUserById(newClient.selectedUserId);
+      const userEmail = selectedUser?.email || '';
+      
       // Simple client data with just name
       const clientData = {
         name: newClient.name,
         rfc: newClient.rfc,
         tier: "onboarding",
-        email: newClient.email && newClient.email.trim() !== '' ? newClient.email : undefined,
-        tipoPersona: newClient.tipoPersona
+        email: userEmail || undefined
       };
 
-      const testClient = await clientService.createClient(clientData);
-      setClients(prev => [...prev, testClient]);
+      const createdClient = await clientService.createClient(clientData);
+      
+      // Asignar el clientId al usuario seleccionado
+      if (createdClient.id && newClient.selectedUserId) {
+        await userService.updateUser(newClient.selectedUserId, {
+          clientId: createdClient.id
+        });
+      }
+      
+      setClients(prev => [...prev, createdClient]);
 
       // Reset form and close dialog
       setNewClient({
         name: "",
         rfc: "",
-        email: "",
-        tipoPersona: 'fisica'
+        selectedUserId: ""
       });
       setIsDialogOpen(false);
     } catch (error) {
@@ -118,10 +128,10 @@ export default function DashboardPage() {
                 
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
                   <TabsList size="default" className="overflow-x-auto bg-transparent">
-                    <TabsTrigger size="default" value="personaFisica">Clientes PF</TabsTrigger>
-                    <TabsTrigger size="default" value="personaMoral">Clientes PM</TabsTrigger>
+                    <TabsTrigger size="default" value="personaFisica">Clientes</TabsTrigger>
+                    <TabsTrigger size="default" value="facturacion">Facturación</TabsTrigger>
                     <TabsTrigger size="default" value="usuarios">Usuarios</TabsTrigger>
-                    <TabsTrigger size="default" value="configuracion">Configuración</TabsTrigger>
+                    <TabsTrigger size="default" value="configuracion">Categorías</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
@@ -152,10 +162,6 @@ export default function DashboardPage() {
                   <DropdownMenuItem className="cursor-pointer">
                     <UserIcon className="mr-2 h-4 w-4" />
                     <span>Mi Perfil</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
-                    <Settings className="mr-2 h-4 w-4" />
-                    <span>Configuración</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600 focus:text-red-600">
@@ -190,17 +196,12 @@ export default function DashboardPage() {
             </div>
           </TabsContent>
           
-          <TabsContent value="personaMoral">
-            <div className="p-6 bg-white dark:bg-gray-800 rounded-md shadow-sm mt-4">
-              <h2 className="text-xl font-semibold mb-4">Clientes - Persona Moral</h2>
-              <p className="text-gray-600 dark:text-gray-300">
-                La sección de personas morales está en desarrollo.
-              </p>
-            </div>
-          </TabsContent>
-          
           <TabsContent value="usuarios">
             <UserManagement />
+          </TabsContent>
+          
+          <TabsContent value="facturacion">
+            <Facturacion />
           </TabsContent>
           
           <TabsContent value="configuracion">

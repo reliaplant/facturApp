@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export function ListaCategorias() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -88,9 +89,16 @@ export function ListaCategorias() {
 
   if (isLoading) {
     return (
-      <div className="py-10 text-center">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-violet-700"></div>
-        <p className="mt-2 text-gray-500">Cargando categorías...</p>
+      <div className="p-6">
+        <div className="flex justify-between items-center mb-6">
+          <Skeleton className="h-7 w-48" />
+          <Skeleton className="h-9 w-36" />
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 rounded-lg" />
+          ))}
+        </div>
       </div>
     );
   }
@@ -110,7 +118,7 @@ export function ListaCategorias() {
   }
 
   return (
-    <div>
+    <div className="p-6 bg-white rounded-lg shadow-sm">
       <h3 className="text-lg font-medium mb-2">Categorías</h3>
       <p className="text-gray-600 dark:text-gray-300 mb-4">
         Administra las categorías para organizar tus facturas y servicios.

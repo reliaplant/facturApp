@@ -524,10 +524,10 @@ export default function CSFSection({ client, onClientUpdate }: CSFSectionProps) 
             <h4 className="text-[10px] text-gray-500 uppercase font-medium mb-2">Datos de Identificación</h4>
             {!editing ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                <div><span className="text-gray-400 block">RFC</span><span className="font-medium">{client.rfc}</span></div>
-                <div><span className="text-gray-400 block">CURP</span><span className="font-medium">{client.curp || 'N/A'}</span></div>
-                <div><span className="text-gray-400 block">Email</span><span className="font-medium">{client.email || 'N/A'}</span></div>
-                <div><span className="text-gray-400 block">Teléfono</span><span className="font-medium">{client.telefono || 'N/A'}</span></div>
+                <div className="min-w-0"><span className="text-gray-400 block">RFC</span><span className="font-medium">{client.rfc}</span></div>
+                <div className="min-w-0"><span className="text-gray-400 block">CURP</span><span className="font-medium">{client.curp || 'N/A'}</span></div>
+                <div className="min-w-0"><span className="text-gray-400 block">Email</span><span className="font-medium truncate block" title={client.email || ''}>{client.email || 'N/A'}</span></div>
+                <div className="min-w-0"><span className="text-gray-400 block">Teléfono</span><span className="font-medium">{client.telefono || 'N/A'}</span></div>
                 <div className="col-span-2"><span className="text-gray-400 block">Nombre</span><span className="font-medium">{client.nombres} {client.primerApellido} {client.segundoApellido || ''}</span></div>
               </div>
             ) : (
