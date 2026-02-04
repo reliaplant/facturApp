@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, Search, User, CheckCircle, XCircle, AlertCircle, FileText } from "lucide-react";
+import { Plus, Search, User, CheckCircle, XCircle, AlertCircle, FileText, Trash2, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -14,6 +14,10 @@ import { userService } from "@/services/firebase";
 import { declaracionService } from "@/services/declaracion-service";
 import { Declaracion } from "@/models/declaracion";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/contexts/AuthContext";
+import { clientService } from "@/services/client-service";
+import { useToast } from "@/components/ui/use-toast";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 interface ListaClientesPFProps {
   clients: Client[];
@@ -30,6 +34,7 @@ interface ListaClientesPFProps {
   setNewClient: (client: { name: string; rfc: string; selectedUserId: string }) => void;
   handleCreateClient: () => Promise<void>;
   isCreating: boolean;
+  onClientDeleted?: () => void; // Callback para refrescar la lista después de eliminar
 }
 
 interface UserInfo {
@@ -56,10 +61,20 @@ export const ListaClientesPF = ({
   setNewClient,
   handleCreateClient,
   isCreating,
+  onClientDeleted,
 }: ListaClientesPFProps) => {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [clientsWithInfo, setClientsWithInfo] = useState<ClientWithInfo[]>([]);
   const [loadingInfo, setLoadingInfo] = useState(true);
+  
+  // Estados para eliminación de cliente
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [clientToDelete, setClientToDelete] = useState<ClientWithInfo | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  
+  const { isSuperAdmin } = useAuth();
+  const { toast } = useToast();
 
   // Usuarios disponibles (activos y sin cliente asignado)
   const usuariosDisponibles = users.filter(u => u.isActive !== false && !u.clientId);
@@ -151,6 +166,57 @@ export const ListaClientesPF = ({
   const clientesActivos = filteredClients.filter(c => !c.usuario || c.usuario.isActive !== false);
   const clientesInactivos = filteredClients.filter(c => c.usuario && c.usuario.isActive === false);
 
+  // Handler para eliminar cliente
+  const handleDeleteClient = async () => {
+    if (!clientToDelete || deleteConfirmText !== clientToDelete.rfc) {
+      toast({
+        title: "Error",
+        description: "Debes escribir el RFC correctamente para confirmar la eliminación.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const result = await clientService.deleteClientAndAllData(clientToDelete.id, clientToDelete.rfc);
+      
+      if (result.success) {
+        toast({
+          title: "Cliente eliminado",
+          description: `Se eliminó ${clientToDelete.name || clientToDelete.rfc} y todos sus datos relacionados.`,
+        });
+        
+        // Llamar al callback para refrescar la lista
+        if (onClientDeleted) {
+          onClientDeleted();
+        }
+      } else {
+        toast({
+          title: "Eliminación parcial",
+          description: `Cliente eliminado con algunos errores: ${result.errors.join(', ')}`,
+          variant: "destructive",
+        });
+      }
+      
+      // Log de lo eliminado
+      console.log('📊 Resumen de eliminación:', result.deletedCounts);
+      
+    } catch (error) {
+      console.error('Error eliminando cliente:', error);
+      toast({
+        title: "Error",
+        description: "No se pudo eliminar el cliente. Intenta de nuevo.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteDialogOpen(false);
+      setClientToDelete(null);
+      setDeleteConfirmText("");
+    }
+  };
+
   // Helper para obtener nombre del mes
   const getMesNombre = (mes: string) => {
     const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
@@ -212,8 +278,8 @@ export const ListaClientesPF = ({
                     <Input
                       id="name"
                       value={newClient.name}
-                      onChange={(e) => setNewClient({ ...newClient, name: e.target.value })}
-                      className="col-span-3"
+                      onChange={(e) => setNewClient({ ...newClient, name: e.target.value.toUpperCase() })}
+                      className="col-span-3 uppercase"
                       placeholder="Nombre completo o razón social"
                     />
                   </div>
@@ -337,12 +403,15 @@ export const ListaClientesPF = ({
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Usuario Asignado</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-500">Estado</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Última Declaración</th>
+                  {isSuperAdmin && (
+                    <th className="px-4 py-3 text-center font-medium text-gray-500">Acciones</th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filteredClients.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-8 text-center text-gray-500">
                       No hay clientes
                     </td>
                   </tr>
@@ -403,6 +472,23 @@ export const ListaClientesPF = ({
                               <span className="text-gray-400 text-xs">Sin declaraciones</span>
                             )}
                           </td>
+                          {isSuperAdmin && (
+                            <td className="px-4 py-3 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setClientToDelete(client);
+                                  setDeleteDialogOpen(true);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -410,7 +496,7 @@ export const ListaClientesPF = ({
                     {/* Separador si hay inactivos */}
                     {clientesInactivos.length > 0 && (
                       <tr className="bg-red-50 border-y-2 border-red-200">
-                        <td colSpan={5} className="px-4 py-2">
+                        <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-2">
                           <div className="flex items-center gap-2 text-red-700 font-medium text-xs">
                             <XCircle className="h-4 w-4" />
                             Clientes Inactivos ({clientesInactivos.length})
@@ -452,6 +538,23 @@ export const ListaClientesPF = ({
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center text-gray-400 text-xs">—</td>
+                        {isSuperAdmin && (
+                          <td className="px-4 py-3 text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setClientToDelete(client);
+                                setDeleteDialogOpen(true);
+                              }}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </>
@@ -466,6 +569,75 @@ export const ListaClientesPF = ({
           {filteredClients.length} de {clients.length} clientes
         </div>
       </CardFooter>
+
+      {/* Diálogo de confirmación para eliminar cliente */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-red-600 flex items-center gap-2">
+              <Trash2 className="h-5 w-5" />
+              Eliminar cliente permanentemente
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-3">
+              <p>
+                Estás a punto de eliminar <strong>{clientToDelete?.name || clientToDelete?.rfc}</strong> y <strong>TODOS</strong> sus datos relacionados:
+              </p>
+              <ul className="list-disc pl-5 text-sm space-y-1 text-gray-600">
+                <li>Todas las facturas (CFDIs)</li>
+                <li>Todas las declaraciones</li>
+                <li>Todos los activos fijos</li>
+                <li>Todas las facturas extranjeras</li>
+                <li>Todos los proveedores</li>
+                <li>Todos los resúmenes fiscales</li>
+                <li>Todas las solicitudes SAT</li>
+                <li>Todos los archivos (FIEL, CSF, etc.)</li>
+              </ul>
+              <p className="text-red-600 font-medium">
+                Esta acción NO se puede deshacer.
+              </p>
+              <div className="pt-2">
+                <Label htmlFor="confirmRfc" className="text-sm font-medium">
+                  Escribe el RFC para confirmar: <span className="font-mono bg-gray-100 px-1">{clientToDelete?.rfc}</span>
+                </Label>
+                <Input
+                  id="confirmRfc"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value.toUpperCase())}
+                  placeholder="Escribe el RFC aquí"
+                  className="mt-2 font-mono"
+                />
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel 
+              onClick={() => {
+                setDeleteConfirmText("");
+                setClientToDelete(null);
+              }}
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteClient}
+              disabled={isDeleting || deleteConfirmText !== clientToDelete?.rfc}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Eliminando...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Eliminar permanentemente
+                </>
+              )}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 };

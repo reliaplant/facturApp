@@ -8,9 +8,11 @@
 */
 
 import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import { initializeApp } from "firebase-admin/app";
 import { getStorage } from "firebase-admin/storage";
+import { getFirestore, FieldValue } from "firebase-admin/firestore";
 
 import {
   Fiel,
@@ -28,6 +30,25 @@ import {
 
 initializeApp();
 
+// ============================================
+// UTILIDADES DE ZONA HORARIA MÉXICO
+// ============================================
+const MEXICO_TZ = "America/Mexico_City";
+
+/**
+ * Obtiene la fecha/hora actual en zona horaria de México
+ */
+function getMexicoDate(): Date {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: MEXICO_TZ }));
+}
+
+/**
+ * Obtiene el año actual en zona horaria de México
+ */
+function getMexicoYear(): number {
+  return getMexicoDate().getFullYear();
+}
+
 /**
  * Función que valida la FIEL y presenta la consulta al SAT en un solo paso.
  */
@@ -35,9 +56,9 @@ export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
   const rfc = req.data.rfc;
   const downloadType = req.data.downloadType || "issued"; // Default to "issued" if not provided
 
-  // Get and validate date range
-  const from = req.data.from || `${new Date().getFullYear()}-01-01 00:00:00`;
-  const to = req.data.to || `${new Date().getFullYear()}-12-31 23:59:59`;
+  // Get and validate date range (usando hora de México)
+  const from = req.data.from || `${getMexicoYear()}-01-01 00:00:00`;
+  const to = req.data.to || `${getMexicoYear()}-12-31 23:59:59`;
 
   // Log the date range
   logger.info(`📅 Rango de fechas para consulta: ${from} - ${to}`);
@@ -120,12 +141,22 @@ export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
     query = await service.query(params);
   } catch (e: any) {
     logger.error("❌ Error al llamar a service.query:", e);
-    throw new HttpsError("internal", "Fallo en la consulta al SAT");
+    // Detectar errores comunes del SAT
+    const errorMsg = e?.message?.toLowerCase() || "";
+    if (errorMsg.includes("solicitud") || errorMsg.includes("límite") || errorMsg.includes("limit")) {
+      throw new HttpsError("resource-exhausted", "Has alcanzado el límite de solicitudes del SAT. Espera unas horas e intenta de nuevo.");
+    }
+    throw new HttpsError("internal", `Fallo en la consulta al SAT: ${e?.message || "Error desconocido"}`);
   }
 
   if (!query.getStatus().isAccepted()) {
     const msg = query.getStatus().getMessage();
     logger.error(`❌ SAT rechazó la petición: ${msg}`);
+    // Detectar mensajes de límite de solicitudes
+    const msgLower = msg?.toLowerCase() || "";
+    if (msgLower.includes("solicitud") || msgLower.includes("límite") || msgLower.includes("máximo") || msgLower.includes("excedido")) {
+      throw new HttpsError("resource-exhausted", `SAT: ${msg}. Has alcanzado el límite de solicitudes. Espera unas horas.`);
+    }
     throw new HttpsError("failed-precondition", `SAT rechazó: ${msg}`);
   }
 
@@ -135,10 +166,20 @@ export const validarFiel = onCall({ timeoutSeconds: 120 }, async (req) => {
   // ————— FASE 3: verificar la consulta —————
   let verify;
   try {
+    // Esperar un poco antes de verificar (el SAT necesita tiempo)
+    await new Promise((resolve) => setTimeout(resolve, 2000));
     verify = await service.verify(requestId);
   } catch (e: any) {
     logger.error("❌ Error en service.verify:", e);
-    throw new HttpsError("internal", "Fallo al verificar la consulta");
+    logger.error("Detalles del error:", JSON.stringify(e, null, 2));
+    // En lugar de fallar, devolvemos que está en progreso
+    // El cliente puede reintentar la verificación más tarde
+    return {
+      success: true,
+      requestId,
+      status: "in_progress",
+      message: "La solicitud fue creada pero aún no se puede verificar. Intenta verificar en unos momentos."
+    };
   }
 
   // 3.1 Revisar estado general de la verificación
@@ -413,4 +454,574 @@ export const procesarPaquete = onCall({ timeoutSeconds: 120 }, async (req) => {
   }
 
   return { success: true, savedPaths };
+});
+
+// ============================================
+// FUNCIONES AUTOMÁTICAS (SCHEDULED)
+// ============================================
+
+/**
+ * Tipos de logs SAT
+ */
+type SatLogType =
+  | "request_created"
+  | "request_creation_error"
+  | "verification_started"
+  | "verification_success"
+  | "verification_error"
+  | "verification_rejected"
+  | "download_started"
+  | "download_success"
+  | "download_error"
+  | "processing_started"
+  | "processing_success"
+  | "processing_error"
+  | "processing_partial"
+  | "auto_sync_started"
+  | "auto_sync_completed"
+  | "auto_sync_skipped"
+  | "fiel_validation_error"
+  | "info";
+
+type SatLogLevel = "info" | "success" | "warning" | "error";
+
+/**
+ * Helper para crear logs de SAT en Firestore
+ */
+async function createSatLog(params: {
+  clientId: string;
+  clientName?: string;
+  requestId?: string;
+  type: SatLogType;
+  level: SatLogLevel;
+  message: string;
+  details?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    const db = getFirestore();
+    await db.collection("satRequestLogs").add({
+      clientId: params.clientId,
+      clientName: params.clientName || params.clientId,
+      requestId: params.requestId,
+      type: params.type,
+      level: params.level,
+      message: params.message,
+      details: params.details,
+      createdAt: FieldValue.serverTimestamp(),
+      createdBy: "system",
+    });
+  } catch (e: any) {
+    logger.error("Error creating SAT log:", e.message);
+  }
+}
+
+/**
+ * Helper para verificar si un cliente tiene FIEL completa y está activo
+ */
+async function isClientValidForAutoSync(
+  clientData: any,
+  rfc: string,
+  bucket: any
+): Promise<{ valid: boolean; reason?: string }> {
+  // Verificar que el cliente tenga autoSync habilitado
+  if (clientData.autoSync !== true) {
+    return { valid: false, reason: "autoSync no está habilitado" };
+  }
+
+  // Verificar que el cliente esté activo
+  if (clientData.status === "inactive" || clientData.deleted === true) {
+    return { valid: false, reason: "Cliente inactivo o eliminado" };
+  }
+
+  // Verificar que tenga los 3 URLs de FIEL
+  if (!clientData.cerUrl || !clientData.keyCerUrl || !clientData.claveFielUrl) {
+    return { valid: false, reason: "FIEL incompleta (faltan URLs)" };
+  }
+
+  // Verificar que los archivos existan en Storage
+  try {
+    const cerFile = bucket.file(`clients/${rfc}/fiel/certificado.cer`);
+    const keyFile = bucket.file(`clients/${rfc}/fiel/llave.key`);
+    const pwdFile = bucket.file(`clients/${rfc}/fiel/clave.txt`);
+
+    const [cerExists] = await cerFile.exists();
+    const [keyExists] = await keyFile.exists();
+    const [pwdExists] = await pwdFile.exists();
+
+    if (!cerExists || !keyExists || !pwdExists) {
+      return {
+        valid: false,
+        reason: `Archivos FIEL faltantes: ${!cerExists ? "cer " : ""}${!keyExists ? "key " : ""}${!pwdExists ? "clave" : ""}`,
+      };
+    }
+  } catch (e: any) {
+    return { valid: false, reason: `Error verificando archivos: ${e.message}` };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Verifica automáticamente solicitudes pendientes cada 2 horas
+ * Solo procesa solicitudes que NO están completadas ni tienen error
+ */
+export const autoVerifyPendingRequests = onSchedule({
+  schedule: "0 */2 * * *", // Cada 2 horas (minuto 0)
+  timeZone: "America/Mexico_City",
+  timeoutSeconds: 540, // 9 minutos max
+}, async () => {
+  logger.info("🔄 Iniciando verificación automática de solicitudes pendientes...");
+
+  const db = getFirestore();
+  const bucket = getStorage().bucket();
+
+  // Buscar todos los clientes que tienen FIEL configurada
+  const clientsSnapshot = await db.collection("clients")
+    .where("cerUrl", "!=", null)
+    .get();
+
+  if (clientsSnapshot.empty) {
+    logger.info("No hay clientes con FIEL configurada");
+    return;
+  }
+
+  let totalVerified = 0;
+  let totalReady = 0;
+  let totalErrors = 0;
+
+  for (const clientDoc of clientsSnapshot.docs) {
+    const clientData = clientDoc.data();
+    const rfc = clientData.rfc;
+
+    if (!rfc) continue;
+
+    // Verificar que el cliente sea válido para auto-sync
+    const validation = await isClientValidForAutoSync(clientData, rfc, bucket);
+    if (!validation.valid) {
+      logger.info(`⏭️ Saltando ${rfc}: ${validation.reason}`);
+      continue;
+    }
+
+    // Buscar solicitudes pendientes de este cliente
+    const requestsSnapshot = await db
+      .collection("clients")
+      .doc(rfc)
+      .collection("satRequests")
+      .where("completed", "==", false)
+      .get();
+
+    if (requestsSnapshot.empty) continue;
+
+    // Filtrar solo las que no tienen packagesDownloaded y no tienen error grave
+    const pendingRequests = requestsSnapshot.docs.filter((doc) => {
+      const data = doc.data();
+      return !data.packagesDownloaded && !data.error && data.requestId;
+    });
+
+    if (pendingRequests.length === 0) continue;
+
+    logger.info(`📋 Cliente ${rfc}: ${pendingRequests.length} solicitudes pendientes de verificar`);
+
+    for (const reqDoc of pendingRequests) {
+      const reqData = reqDoc.data();
+      const requestId = reqData.requestId;
+
+      try {
+        // Cargar FIEL del cliente
+        const [cerBuf] = await bucket.file(`clients/${rfc}/fiel/certificado.cer`).download();
+        const [keyBuf] = await bucket.file(`clients/${rfc}/fiel/llave.key`).download();
+        const [pwdBuf] = await bucket.file(`clients/${rfc}/fiel/clave.txt`).download();
+
+        const fiel = Fiel.create(
+          cerBuf.toString("binary"),
+          keyBuf.toString("binary"),
+          pwdBuf.toString("utf8").trim()
+        );
+
+        const webClient = new HttpsWebClient();
+        const requestBuilder = new FielRequestBuilder(fiel);
+        const service = new Service(requestBuilder, webClient);
+
+        // Verificar solicitud
+        const verify = await service.verify(requestId);
+
+        // Verificar si la respuesta fue aceptada
+        if (!verify.getStatus().isAccepted()) {
+          const msg = verify.getStatus().getMessage();
+          logger.warn(`⚠️ ${rfc}/${requestId.substring(0, 8)}: Verificación no aceptada: ${msg}`);
+
+          await reqDoc.ref.update({
+            verifyError: msg,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastAutoVerify: new Date().toISOString()
+          });
+          continue;
+        }
+
+        // Obtener el estado de la solicitud
+        const statusReq = verify.getStatusRequest();
+
+        if (statusReq.isTypeOf("InProgress") || statusReq.isTypeOf("Accepted")) {
+          // Ya fue aceptada pero aún en proceso
+          logger.info(`⏳ ${rfc}/${requestId.substring(0, 8)}: Aún en proceso`);
+
+          await reqDoc.ref.update({
+            status: "in_progress",
+            updatedAt: FieldValue.serverTimestamp(),
+            lastAutoVerify: new Date().toISOString()
+          });
+        } else if (statusReq.isTypeOf("Finished")) {
+          // ¡Lista! Guardar packageIds
+          const packageIds = verify.getPackageIds();
+          logger.info(`✅ ${rfc}/${requestId.substring(0, 8)}: Terminada con ${packageIds.length} paquetes`);
+
+          await reqDoc.ref.update({
+            status: "finished",
+            completed: true,
+            packageIds,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastAutoVerify: new Date().toISOString()
+          });
+
+          // Log success
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            requestId,
+            type: "verification_success",
+            level: "success",
+            message: `Verificación automática exitosa - ${packageIds.length} paquete(s)`,
+            details: { packageIds, source: "autoVerify" },
+          });
+
+          totalReady++;
+        } else if (statusReq.isTypeOf("Rejected") || statusReq.isTypeOf("Failure") || statusReq.isTypeOf("Expired")) {
+          // Error del SAT
+          const statusValue = statusReq.getValue();
+          logger.warn(`❌ ${rfc}/${requestId.substring(0, 8)}: Rechazada/Error (${statusValue})`);
+
+          await reqDoc.ref.update({
+            error: `SAT: ${statusValue}`,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastAutoVerify: new Date().toISOString()
+          });
+
+          // Log error
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            requestId,
+            type: "verification_rejected",
+            level: "error",
+            message: `Solicitud rechazada por SAT: ${statusValue}`,
+            details: { status: statusValue, source: "autoVerify" },
+          });
+
+          totalErrors++;
+        } else {
+          // Estado desconocido
+          const statusValue = statusReq.getValue();
+          logger.info(`❓ ${rfc}/${requestId.substring(0, 8)}: Estado desconocido: ${statusValue}`);
+
+          await reqDoc.ref.update({
+            status: statusValue,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastAutoVerify: new Date().toISOString()
+          });
+        }
+
+        totalVerified++;
+
+        // Pequeña pausa entre verificaciones para no saturar
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      } catch (err: any) {
+        logger.error(`❌ Error verificando ${rfc}/${requestId}:`, err.message);
+
+        // Log error
+        await createSatLog({
+          clientId: rfc,
+          clientName: clientData.nombres || clientData.name || rfc,
+          requestId,
+          type: "verification_error",
+          level: "error",
+          message: `Error en verificación automática: ${err.message}`,
+          details: { error: err.message, source: "autoVerify" },
+        });
+
+        totalErrors++;
+      }
+    }
+  }
+
+  logger.info(`🏁 Verificación automática completada: ${totalVerified} verificadas, ${totalReady} listas, ${totalErrors} errores`);
+});
+
+/**
+ * Crea solicitudes automáticamente cada día a las 6am
+ * Solo para clientes que tienen fechas pendientes de sincronizar
+ */
+export const autoCreateDailyRequests = onSchedule({
+  schedule: "0 6 * * *", // Todos los días a las 6:00 AM
+  timeZone: "America/Mexico_City",
+  timeoutSeconds: 540,
+}, async () => {
+  logger.info("🌅 Iniciando creación automática de solicitudes diarias...");
+
+  const db = getFirestore();
+  const bucket = getStorage().bucket();
+
+  // Buscar clientes con FIEL configurada
+  const clientsSnapshot = await db.collection("clients")
+    .where("cerUrl", "!=", null)
+    .get();
+
+  if (clientsSnapshot.empty) {
+    logger.info("No hay clientes con FIEL configurada");
+    return;
+  }
+
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().split("T")[0];
+
+  let totalCreated = 0;
+  let totalSkipped = 0;
+
+  for (const clientDoc of clientsSnapshot.docs) {
+    const clientData = clientDoc.data();
+    const rfc = clientData.rfc;
+
+    if (!rfc) continue;
+
+    // Verificar que el cliente sea válido para auto-sync
+    const validation = await isClientValidForAutoSync(clientData, rfc, bucket);
+    if (!validation.valid) {
+      logger.info(`⏭️ Saltando ${rfc}: ${validation.reason}`);
+      totalSkipped++;
+      continue;
+    }
+
+    // Verificar si ya tiene solicitudes pendientes (máximo 2 por tipo)
+    const pendingIssued = await db
+      .collection("clients").doc(rfc)
+      .collection("satRequests")
+      .where("downloadType", "==", "issued")
+      .where("completed", "==", false)
+      .get();
+
+    const pendingReceived = await db
+      .collection("clients").doc(rfc)
+      .collection("satRequests")
+      .where("downloadType", "==", "received")
+      .where("completed", "==", false)
+      .get();
+
+    // Obtener última fecha sincronizada
+    const syncStatusDoc = await db
+      .collection("clients").doc(rfc)
+      .collection("satSync").doc("status")
+      .get();
+
+    const syncStatus = syncStatusDoc.exists ? syncStatusDoc.data() : null;
+
+    // Para emitidas
+    if (pendingIssued.size < 2) {
+      const lastIssuedSync = syncStatus?.lastIssuedSync || `${today.getFullYear()}-01-01`;
+      const lastDate = new Date(lastIssuedSync);
+
+      // Si la última sync es anterior a ayer, crear solicitud
+      if (lastDate < yesterday) {
+        try {
+          const requestId = await createRequestForClient(rfc, "issued", lastIssuedSync, yesterdayStr, bucket, db);
+          totalCreated++;
+          logger.info(`✅ Creada solicitud EMITIDAS para ${rfc}`);
+
+          // Log success
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            requestId,
+            type: "request_created",
+            level: "success",
+            message: `Solicitud automática creada (emitidas) - ${lastIssuedSync} a ${yesterdayStr}`,
+            details: { downloadType: "issued", from: lastIssuedSync, to: yesterdayStr, source: "autoCreate" },
+          });
+        } catch (err: any) {
+          logger.error(`❌ Error creando solicitud emitidas para ${rfc}:`, err.message);
+
+          // Log error
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            type: "request_creation_error",
+            level: "error",
+            message: `Error creando solicitud automática (emitidas): ${err.message}`,
+            details: { downloadType: "issued", error: err.message, source: "autoCreate" },
+          });
+        }
+      } else {
+        totalSkipped++;
+      }
+    }
+
+    // Para recibidas
+    if (pendingReceived.size < 2) {
+      const lastReceivedSync = syncStatus?.lastReceivedSync || `${today.getFullYear()}-01-01`;
+      const lastDate = new Date(lastReceivedSync);
+
+      if (lastDate < yesterday) {
+        try {
+          const requestId = await createRequestForClient(rfc, "received", lastReceivedSync, yesterdayStr, bucket, db);
+          totalCreated++;
+          logger.info(`✅ Creada solicitud RECIBIDAS para ${rfc}`);
+
+          // Log success
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            requestId,
+            type: "request_created",
+            level: "success",
+            message: `Solicitud automática creada (recibidas) - ${lastReceivedSync} a ${yesterdayStr}`,
+            details: { downloadType: "received", from: lastReceivedSync, to: yesterdayStr, source: "autoCreate" },
+          });
+        } catch (err: any) {
+          logger.error(`❌ Error creando solicitud recibidas para ${rfc}:`, err.message);
+
+          // Log error
+          await createSatLog({
+            clientId: rfc,
+            clientName: clientData.nombres || clientData.name || rfc,
+            type: "request_creation_error",
+            level: "error",
+            message: `Error creando solicitud automática (recibidas): ${err.message}`,
+            details: { downloadType: "received", error: err.message, source: "autoCreate" },
+          });
+        }
+      } else {
+        totalSkipped++;
+      }
+    }
+
+    // Pausa entre clientes
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  logger.info(`🏁 Creación automática completada: ${totalCreated} creadas, ${totalSkipped} al día`);
+});
+
+/**
+ * Helper para crear una solicitud para un cliente
+ * @returns requestId de la solicitud creada
+ */
+async function createRequestForClient(
+  rfc: string,
+  downloadType: "issued" | "received",
+  fromDate: string,
+  toDate: string,
+  bucket: any,
+  db: FirebaseFirestore.Firestore
+): Promise<string> {
+  // Cargar FIEL
+  const [cerBuf] = await bucket.file(`clients/${rfc}/fiel/certificado.cer`).download();
+  const [keyBuf] = await bucket.file(`clients/${rfc}/fiel/llave.key`).download();
+  const [pwdBuf] = await bucket.file(`clients/${rfc}/fiel/clave.txt`).download();
+
+  const fiel = Fiel.create(
+    cerBuf.toString("binary"),
+    keyBuf.toString("binary"),
+    pwdBuf.toString("utf8").trim()
+  );
+
+  if (!fiel.isValid()) {
+    throw new Error("FIEL inválida o expirada");
+  }
+
+  const webClient = new HttpsWebClient();
+  const requestBuilder = new FielRequestBuilder(fiel);
+  const service = new Service(requestBuilder, webClient);
+
+  // Formatear fechas
+  const from = `${fromDate} 00:00:00`;
+  const to = `${toDate} 23:59:59`;
+
+  // Crear parámetros - usar constructores como en validarFiel
+  const period = DateTimePeriod.createFromValues(from, to);
+  const downloadTypeObj = new DownloadType(downloadType); // "issued" o "received"
+  const requestTypeObj = new RequestType("xml");
+  const documentStatus = new DocumentStatus("active");
+
+  const params = QueryParameters.create(period)
+    .withDownloadType(downloadTypeObj)
+    .withRequestType(requestTypeObj)
+    .withDocumentStatus(documentStatus);
+
+  // Enviar solicitud
+  const query = await service.query(params);
+  const requestId = query.getRequestId();
+
+  if (!requestId) {
+    throw new Error("El SAT no devolvió un requestId");
+  }
+
+  // Guardar en Firestore
+  await db.collection("clients").doc(rfc)
+    .collection("satRequests").add({
+      rfc,
+      requestId,
+      status: "pending",
+      downloadType,
+      from,
+      to,
+      completed: false,
+      packagesDownloaded: false,
+      packagesProcessed: false,
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+      autoCreated: true // Marca que fue creada automáticamente
+    });
+
+  return requestId;
+}
+
+/**
+ * Función para descargar un paquete ZIP y devolverlo como base64.
+ * Esto evita problemas de CORS y permisos de signed URLs.
+ */
+export const getPackageSignedUrl = onCall({ timeoutSeconds: 120, memory: "512MiB" }, async (req) => {
+  const { rfc, packageId } = req.data;
+
+  if (!rfc || !packageId) {
+    throw new HttpsError("invalid-argument", "Se requiere rfc y packageId");
+  }
+
+  logger.info(`📦 Descargando paquete ${packageId} de RFC ${rfc}`);
+
+  try {
+    const bucket = getStorage().bucket();
+    const filePath = `clients/${rfc}/packages/${packageId}.zip`;
+    const file = bucket.file(filePath);
+
+    // Verificar que el archivo existe
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new HttpsError("not-found", `No se encontró el paquete ${packageId}`);
+    }
+
+    // Descargar el archivo
+    const [fileBuffer] = await file.download();
+
+    // Convertir a base64
+    const base64Data = fileBuffer.toString("base64");
+
+    logger.info(`✅ Paquete ${packageId} descargado: ${(fileBuffer.length / 1024).toFixed(2)} KB`);
+    return { "success": true, "data": base64Data, "size": fileBuffer.length };
+  } catch (error: any) {
+    logger.error("❌ Error descargando paquete:", error);
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    throw new HttpsError("internal", error.message || "Error descargando paquete");
+  }
 });

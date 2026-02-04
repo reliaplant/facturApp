@@ -18,12 +18,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" suppressHydrationWarning>
-      <body className={cn("min-h-screen bg-background font-sans antialiased", inter.className)}>
+    <html lang="es" suppressHydrationWarning translate="no">
+      <head>
+        <meta name="google" content="notranslate" />
+        <meta name="color-scheme" content="light only" />
+      </head>
+      <body className={cn("min-h-screen bg-background font-sans antialiased notranslate", inter.className)}>
         <ThemeProvider
           attribute="class"
-          defaultTheme="system"
-          enableSystem
+          defaultTheme="light"
+          enableSystem={false}
           disableTransitionOnChange
         >
           <AuthProvider>

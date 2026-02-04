@@ -110,13 +110,14 @@ export default function CSFSection({ client, onClientUpdate }: CSFSectionProps) 
   const saveChanges = async () => {
     try {
       setSaving(true);
+      setError(null);
       await clientService.updateClient(client.id, editData);
       const updated = await clientService.getClientById(client.id);
       if (updated) onClientUpdate(updated);
       setEditing(false);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving:', err);
-      setError('Error al guardar cambios');
+      setError(`Error al guardar cambios: ${err?.message || 'Error desconocido'}`);
     } finally {
       setSaving(false);
     }

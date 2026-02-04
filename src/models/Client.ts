@@ -101,6 +101,11 @@ export interface Client {
   claveFielDate?: string;
   cartaManifiestoUrl?: string;
   cartaManifiestoDate?: string;
+  contratoUrl?: string;
+  contratoDate?: string;
+  
+  // Indica si la FIEL está completa y válida (cer, key y clave subidos)
+  tieneFielValida?: boolean;
 
   // SAT Sync Status - Para descarga masiva inteligente
   satSyncStatus?: {
@@ -116,4 +121,7 @@ export interface Client {
     issyncing?: boolean;
     lastError?: string;
   };
+
+  // Automatic SAT sync - Habilita sincronización automática con el SAT
+  autoSync?: boolean;
 }

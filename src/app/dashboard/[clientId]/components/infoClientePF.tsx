@@ -12,46 +12,27 @@ import PlanSection from './sections/PlanSection';
 import { FiDownload, FiFileText, FiCalendar, FiTrash2, FiCheckCircle, FiAlertCircle } from 'react-icons/fi';
 
 // Function to calculate profile completion score
+// Solo campos OBLIGATORIOS para considerar el perfil completo
 function calculateProfileScore(client: Client): { filled: number; total: number; percentage: number; missing: string[] } {
   const missing: string[] = [];
   
-  // Personal info fields to check
-  const personalFields: { field: keyof Client | string; label: string; check: (c: Client) => boolean }[] = [
+  // Campos obligatorios del perfil
+  const requiredFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
+    // Datos básicos
     { field: 'rfc', label: 'RFC', check: (c) => !!c.rfc?.trim() },
-    { field: 'curp', label: 'CURP', check: (c) => !!c.curp?.trim() },
-    { field: 'nombres', label: 'Nombres', check: (c) => !!c.nombres?.trim() },
-    { field: 'primerApellido', label: 'Primer Apellido', check: (c) => !!c.primerApellido?.trim() },
-    { field: 'email', label: 'Email', check: (c) => !!c.email?.trim() },
-    { field: 'telefono', label: 'Teléfono', check: (c) => !!c.telefono?.trim() },
-    { field: 'fechaInicioOperaciones', label: 'Fecha Inicio Operaciones', check: (c) => !!c.fechaInicioOperaciones?.trim() },
-    { field: 'estatusEnElPadron', label: 'Estatus en Padrón', check: (c) => !!c.estatusEnElPadron?.trim() },
-  ];
-
-  // Address fields to check
-  const addressFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
-    { field: 'codigoPostal', label: 'Código Postal', check: (c) => !!c.address?.codigoPostal?.trim() },
-    { field: 'nombreVialidad', label: 'Calle', check: (c) => !!c.address?.nombreVialidad?.trim() },
-    { field: 'numeroExterior', label: 'Número Exterior', check: (c) => !!c.address?.numeroExterior?.trim() },
-    { field: 'nombreColonia', label: 'Colonia', check: (c) => !!c.address?.nombreColonia?.trim() },
-    { field: 'municipio', label: 'Municipio', check: (c) => !!c.address?.municipio?.trim() },
-    { field: 'nombreEntidadFederativa', label: 'Estado', check: (c) => !!c.address?.nombreEntidadFederativa?.trim() },
-  ];
-
-  // Arrays to check (at least one item)
-  const arrayFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
-    { field: 'actividadesEconomicas', label: 'Actividades Económicas', check: (c) => (c.actividadesEconomicas?.length || 0) > 0 },
-    { field: 'regimenesFiscales', label: 'Regímenes Fiscales', check: (c) => (c.regimenesFiscales?.length || 0) > 0 },
-    { field: 'obligaciones', label: 'Obligaciones', check: (c) => (c.obligaciones?.length || 0) > 0 },
-  ];
-
-  // FIEL documents to check
-  const fielFields: { field: string; label: string; check: (c: Client) => boolean }[] = [
+    { field: 'nombre', label: 'Nombre', check: (c) => !!(c.nombres?.trim() || c.name?.trim()) },
+    { field: 'email', label: 'Correo electrónico', check: (c) => !!c.email?.trim() },
+    // CSF
+    { field: 'lastCSFUrl', label: 'Constancia de Situación Fiscal (CSF)', check: (c) => !!c.lastCSFUrl },
+    // Documentos FIEL
     { field: 'cerUrl', label: 'Certificado (.cer)', check: (c) => !!c.cerUrl },
     { field: 'keyCerUrl', label: 'Llave Privada (.key)', check: (c) => !!c.keyCerUrl },
     { field: 'claveFielUrl', label: 'Contraseña FIEL', check: (c) => !!c.claveFielUrl },
+    { field: 'cartaManifiestoUrl', label: 'Carta Manifiesto', check: (c) => !!c.cartaManifiestoUrl },
+    { field: 'contratoUrl', label: 'Contrato', check: (c) => !!c.contratoUrl },
   ];
 
-  const allFields = [...personalFields, ...addressFields, ...arrayFields, ...fielFields];
+  const allFields = requiredFields;
   const total = allFields.length;
   let filled = 0;
 
@@ -324,35 +305,54 @@ export default function InfoClientePF({ clientId }: InfoClientePFProps) {
             const score = calculateProfileScore(client);
             const isComplete = score.percentage === 100;
             return (
-              <div className={`border rounded-xl p-6 ${isComplete ? 'bg-purple-50 border-purple-200' : 'bg-red-50 border-red-200'}`}>
+              <div className={`border rounded-xl p-6 ${isComplete ? 'bg-green-700 border-green-800' : 'bg-red-50 border-red-200'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
                     {isComplete ? (
-                      <FiCheckCircle className="w-8 h-8 text-purple-600" />
+                      <FiCheckCircle className="w-8 h-8 text-green-100" />
                     ) : (
                       <FiAlertCircle className="w-8 h-8 text-red-500" />
                     )}
                     <div className="flex flex-col">
-                      <span className={`text-lg font-bold ${isComplete ? 'text-purple-800' : 'text-red-700'}`}>
+                      <span className={`text-lg font-bold ${isComplete ? 'text-white' : 'text-red-700'}`}>
                         Perfil {isComplete ? 'completo' : 'incompleto'}
                       </span>
-                      <span className="text-sm text-gray-500">
-                        {score.filled} de {score.total} campos
+                      <span className={`text-sm ${isComplete ? 'text-green-200' : 'text-gray-500'}`}>
+                        {score.filled} de {score.total} campos obligatorios
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="w-40 h-3 bg-gray-200 rounded-full overflow-hidden">
+                    <div className={`w-40 h-3 rounded-full overflow-hidden ${isComplete ? 'bg-green-900' : 'bg-gray-200'}`}>
                       <div 
-                        className={`h-full rounded-full transition-all ${isComplete ? 'bg-purple-500' : 'bg-red-500'}`}
+                        className={`h-full rounded-full transition-all ${isComplete ? 'bg-green-300' : 'bg-red-500'}`}
                         style={{ width: `${score.percentage}%` }}
                       />
                     </div>
-                    <span className={`text-lg font-bold min-w-[50px] text-right ${isComplete ? 'text-purple-700' : 'text-red-600'}`}>
+                    <span className={`text-lg font-bold min-w-[50px] text-right ${isComplete ? 'text-white' : 'text-red-600'}`}>
                       {score.percentage}%
                     </span>
                   </div>
                 </div>
+                {/* Mostrar campos faltantes */}
+                {!isComplete && score.missing.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-red-200">
+                    <p className="text-sm font-semibold text-red-700 mb-2">
+                      Campos obligatorios faltantes:
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {score.missing.map((field, index) => (
+                        <span 
+                          key={index}
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-700 text-sm rounded-full border border-red-300"
+                        >
+                          <FiAlertCircle className="w-3 h-3" />
+                          {field}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}

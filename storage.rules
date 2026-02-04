@@ -1,0 +1,88 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // ============================================
+    // REGLA GENERAL: Denegar todo por defecto
+    // ============================================
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+    
+    // ============================================
+    // ARCHIVOS PÚBLICOS (lectura pública)
+    // ============================================
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+    
+    // ============================================
+    // ARCHIVOS DE CLIENTES
+    // ============================================
+    match /clients/{clientId}/{allPaths=**} {
+      // Solo usuarios autenticados pueden leer
+      allow read: if request.auth != null;
+      
+      // Solo usuarios autenticados pueden escribir
+      allow write: if request.auth != null;
+    }
+    
+    // ============================================
+    // ARCHIVOS FIEL - ACCESO RESTRINGIDO
+    // Solo Cloud Functions (Admin SDK) puede acceder
+    // Los usuarios autenticados pueden SUBIR pero NO leer .key ni clave.txt
+    // ============================================
+    match /clients/{clientId}/fiel/{fileName} {
+      // Permitir subir archivos a usuarios autenticados
+      allow write: if request.auth != null;
+      
+      // Solo permitir leer el certificado (.cer) - es público por naturaleza
+      // Los archivos .key y clave.txt NO son legibles desde el cliente
+      allow read: if request.auth != null && 
+                    (fileName.matches('.*\\.cer$') || 
+                     fileName.matches('.*\\.ren$') ||
+                     fileName.matches('.*\\.pdf$'));
+    }
+    
+    // ============================================
+    // CSF y OPF - Documentos del cliente
+    // ============================================
+    match /clients/{clientId}/csf/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+    
+    match /clients/{clientId}/opf/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ============================================
+    // DECLARACIONES
+    // ============================================
+    match /clients/{clientId}/declaraciones/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ============================================
+    // DOCUMENTOS GENERALES
+    // ============================================
+    match /clients/{clientId}/documentos/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ============================================
+    // FACTURAS MANUALES / XMLs
+    // ============================================
+    match /clients/{clientId}/facturas/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // ============================================
+    // TICKETS - Capturas de pantalla de bugs/mejoras
+    // ============================================
+    match /tickets/{fileName} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

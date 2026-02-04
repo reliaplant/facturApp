@@ -42,6 +42,22 @@ interface VerificarSolicitudResponse {
  */
 export default class SatRequestService {
   /**
+   * Verifica cuántas solicitudes activas hay para un RFC
+   * El SAT solo permite 2 solicitudes simultáneas por tipo
+   */
+  static async getActiveRequestsCount(rfc: string, downloadType: "issued" | "received"): Promise<number> {
+    const requests = await this.getRequests(rfc);
+    // Contar solicitudes que no están completadas ni fallidas
+    const activeRequests = requests.filter(r => 
+      r.downloadType === downloadType && 
+      !r.packagesProcessed && 
+      r.status !== 'failed' &&
+      r.status !== 'error'
+    );
+    return activeRequests.length;
+  }
+
+  /**
    * Create a new SAT download request by calling the validarFiel Cloud Function
    */
   static async createRequest(
@@ -52,6 +68,15 @@ export default class SatRequestService {
   ): Promise<SatRequest> {
     try {
       console.log(`📤 Iniciando solicitud de descarga para RFC: ${rfc} (${from} - ${to}) - Tipo: ${downloadType}`);
+      
+      // VERIFICACIÓN DE LÍMITE: El SAT solo permite 2 solicitudes simultáneas por tipo
+      const activeCount = await this.getActiveRequestsCount(rfc, downloadType);
+      console.log(`📊 Solicitudes activas de tipo ${downloadType}: ${activeCount}`);
+      
+      if (activeCount >= 2) {
+        console.warn(`⚠️ Ya hay ${activeCount} solicitudes activas de ${downloadType}. El SAT solo permite 2.`);
+        throw new Error(`Ya tienes ${activeCount} solicitudes de ${downloadType === 'issued' ? 'emitidas' : 'recibidas'} pendientes. Espera a que se procesen antes de crear más.`);
+      }
       
       // Call Cloud Function to validate FIEL
       const functions = getFunctions(app);
@@ -460,7 +485,65 @@ export default class SatRequestService {
   }
 
   /**
-   * Get download URL for a package ZIP file
+   * Download a package ZIP file as base64 using Cloud Function (avoids CORS)
+   */
+  static async downloadPackageAsBase64(rfc: string, packageId: string): Promise<Blob> {
+    try {
+      const functions = getFunctions(app);
+      const downloadPackage = httpsCallable<
+        { rfc: string; packageId: string },
+        { success: boolean; data?: string; size?: number; message?: string }
+      >(functions, "getPackageSignedUrl");
+      
+      const result = await downloadPackage({ rfc, packageId });
+      
+      if (!result.data.success || !result.data.data) {
+        throw new Error(result.data.message || "No se pudo descargar el paquete");
+      }
+      
+      // Convert base64 to Blob
+      const binaryString = atob(result.data.data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      console.log(`✅ Paquete ${packageId} descargado: ${(result.data.size || 0) / 1024} KB`);
+      return new Blob([bytes], { type: "application/zip" });
+    } catch (error: any) {
+      console.error(`❌ Error descargando paquete ${packageId}:`, error);
+      throw new Error(`No se pudo descargar el paquete: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get a signed URL for a package ZIP file using Cloud Function (avoids CORS)
+   * @deprecated Use downloadPackageAsBase64 instead
+   */
+  static async getPackageSignedUrl(rfc: string, packageId: string): Promise<string> {
+    try {
+      const functions = getFunctions(app);
+      const getSignedUrl = httpsCallable<
+        { rfc: string; packageId: string },
+        { success: boolean; url?: string; message?: string }
+      >(functions, "getPackageSignedUrl");
+      
+      const result = await getSignedUrl({ rfc, packageId });
+      
+      if (!result.data.success || !result.data.url) {
+        throw new Error(result.data.message || "No se pudo obtener URL de descarga");
+      }
+      
+      console.log(`✅ Signed URL generada para paquete ${packageId}`);
+      return result.data.url;
+    } catch (error: any) {
+      console.error(`❌ Error obteniendo signed URL para paquete ${packageId}:`, error);
+      throw new Error(`No se pudo obtener URL de descarga: ${error.message}`);
+    }
+  }
+
+  /**
+   * Get download URL for a package ZIP file (legacy - may have CORS issues)
    */
   static async getPackageDownloadUrl(rfc: string, packageId: string): Promise<string> {
     try {

@@ -526,7 +526,7 @@ export default function UserManagement() {
                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
                 id="edit-clientId"
                 value={editUserData.clientId || ''}
-                onChange={(e) => setEditUserData({...editUserData, clientId: e.target.value || undefined})}
+                onChange={(e) => setEditUserData({...editUserData, clientId: e.target.value || null})}
               >
                 <option value="">Sin asignar</option>
                 {clients.map(client => {

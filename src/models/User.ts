@@ -47,7 +47,7 @@ export interface UpdateUserData {
   role?: UserRole;
   isActive?: boolean;
   assignedClients?: string[];
-  clientId?: string;
+  clientId?: string | null;
 }
 
 // Helper para verificar si un rol tiene acceso a otro nivel

@@ -9,6 +9,8 @@ import { Configuracion } from "./components/Configuracion";
 import UserManagement from "@/components/user-management";
 import Facturacion from "./components/Facturacion";
 import LegalDocuments from "./components/LegalDocuments";
+import SatLogs from "./components/SatLogs";
+import TicketsSection from "@/components/tickets-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { useAuth } from "@/contexts/AuthContext";
@@ -48,26 +50,27 @@ export default function DashboardPage() {
   const [isCreating, setIsCreating] = useState(false);
   const [activeTab, setActiveTab] = useState<string>("personaFisica");
 
-  useEffect(() => {
-    async function loadClients() {
-      setIsLoading(true);
-      try {
-        const firebaseClients = await clientService.getAllClients();
-        
-        const clientsWithTiers = firebaseClients.map((client, index) => {
-          const tiers = ["onboarding", "basico", "emprendedores", "pro", "perdidos"];
-          const tier = tiers[index % tiers.length];
-          return { ...client, tier };
-        });
-        
-        setClients(clientsWithTiers);
-      } catch (error) {
-        console.error("Error loading clients:", error);
-      } finally {
-        setIsLoading(false);
-      }
+  // Función para cargar/refrescar clientes
+  const loadClients = async () => {
+    setIsLoading(true);
+    try {
+      const firebaseClients = await clientService.getAllClients();
+      
+      const clientsWithTiers = firebaseClients.map((client, index) => {
+        const tiers = ["onboarding", "basico", "emprendedores", "pro", "perdidos"];
+        const tier = tiers[index % tiers.length];
+        return { ...client, tier };
+      });
+      
+      setClients(clientsWithTiers);
+    } catch (error) {
+      console.error("Error loading clients:", error);
+    } finally {
+      setIsLoading(false);
     }
+  };
 
+  useEffect(() => {
     loadClients();
   }, []);
 
@@ -134,6 +137,8 @@ export default function DashboardPage() {
                     <TabsTrigger size="default" value="usuarios">Usuarios</TabsTrigger>
                     <TabsTrigger size="default" value="configuracion">Categorías</TabsTrigger>
                     <TabsTrigger size="default" value="legal">Legal</TabsTrigger>
+                    <TabsTrigger size="default" value="satLogs">Logs SAT</TabsTrigger>
+                    <TabsTrigger size="default" value="tickets">Tickets</TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
@@ -193,6 +198,7 @@ export default function DashboardPage() {
                   setNewClient={setNewClient}
                   handleCreateClient={handleCreateClient}
                   isCreating={isCreating}
+                  onClientDeleted={loadClients}
                 />
               </div>
             </div>
@@ -212,6 +218,14 @@ export default function DashboardPage() {
           
           <TabsContent value="legal">
             <LegalDocuments />
+          </TabsContent>
+          
+          <TabsContent value="satLogs">
+            <SatLogs />
+          </TabsContent>
+
+          <TabsContent value="tickets">
+            <TicketsSection />
           </TabsContent>
         </Tabs>
       </main>

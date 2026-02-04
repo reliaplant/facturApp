@@ -36,12 +36,14 @@ export default function Hero() {
                 Con otros contadores nunca sabes qué pasa con tus impuestos. Con Kontia tienes acceso 24/7 a tu información: declaraciones, facturas, pagos.
               </h2>
               
-              {/* CTA Button */}
-              <ContactButton
-                buttonText="🚀 Quiero mi contabilidad con Kontia"
-                origin="hero-form"
-                modalTitle="Solicita información"
-              />
+              {/* CTA Button - hidden on mobile */}
+              <div className="hidden sm:block">
+                <ContactButton
+                  buttonText="🚀 Quiero mi contabilidad con Kontia"
+                  origin="hero-form"
+                  modalTitle="Solicita información"
+                />
+              </div>
             </div>
             
             {/* Right column: Mobile device - smaller on mobile */}

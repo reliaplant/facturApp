@@ -13,11 +13,21 @@ export interface SatRequest {
   completed?: boolean;
   downloadType?: "issued" | "received"; // Tipo de facturas: emitidas o recibidas
   
-  // New fields for tracking download and processing status
+  // Tracking de verificación
+  verifyError?: string;
+  verifyAttemptedAt?: string;
+  
+  // Tracking de descarga
   packagesDownloaded?: boolean;
   downloadedAt?: string;
+  downloadError?: string;
+  downloadAttemptedAt?: string;
+  
+  // Tracking de procesamiento
   packagesProcessed?: boolean;
+  processedWithErrors?: boolean; // True si se procesó pero hubo errores parciales
   processedAt?: string;
   processedCount?: number;
   existingCount?: number;
+  totalErrors?: number; // Cantidad de errores durante el procesamiento
 }

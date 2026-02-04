@@ -672,23 +672,21 @@ export function parseCFDIFromString(xmlContent: string, clientId: string, client
     }
     
     // Determinar tipo (ingreso o egreso) basándose en quién es el cliente
+    // Regla simple: 
+    // - Si el cliente es el EMISOR -> es INGRESO (factura emitida, nos pagan)
+    // - Si el cliente es el RECEPTOR -> es EGRESO (factura recibida, pagamos)
+    // - Si no es ninguno -> NO IMPORTAR (no es factura del cliente)
     const tipoComprobante = comprobante.TipoDeComprobante || 'I';
-    let tipo: 'ingreso' | 'egreso';
+    const esEgreso = rfcReceptor === clientRfcNormalizado;
+    const esIngreso = rfcEmisor === clientRfcNormalizado;
     
-    if (rfcEmisor === clientRfcNormalizado) {
-      // Cliente es el emisor
-      tipo = tipoComprobante === 'E' ? 'egreso' : 'ingreso';
-    } else if (rfcReceptor === clientRfcNormalizado) {
-      // Cliente es el receptor
-      tipo = tipoComprobante === 'E' ? 'ingreso' : 'egreso';
-    } else {
-      // Por defecto basado en tipoComprobante
-      tipo = tipoComprobante === 'E' ? 'egreso' : 'ingreso';
+    // Validar que la factura pertenece al cliente
+    if (!esIngreso && !esEgreso) {
+      console.warn(`⚠️ CFDI ${uuid} ignorado: RFC del cliente (${clientRfcNormalizado}) no coincide con emisor (${rfcEmisor}) ni receptor (${rfcReceptor})`);
+      return null;
     }
     
     // Construir el objeto CFDI
-    const esIngreso = tipo === 'ingreso';
-    const esEgreso = tipo === 'egreso';
     const now = new Date().toISOString();
     
     const cfdi: CFDI = {

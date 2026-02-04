@@ -105,8 +105,9 @@ export function AddClientDialog({ open, onOpenChange, onAddClient }: AddClientDi
             <Input 
               id="name" 
               value={name} 
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value.toUpperCase())}
               placeholder={tipoPersona === 'fisica' ? 'Nombre completo' : 'Razón social'}
+              className="uppercase"
             />
           </div>
           

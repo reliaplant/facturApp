@@ -1,17 +1,19 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { es } from "date-fns/locale";
 import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
-import { FilePlus, RefreshCw } from "lucide-react";
+import { FilePlus, RefreshCw, AlertTriangle } from "lucide-react";
 import { CFDI } from "@/models/CFDI";
 import { fiscalCalculator, AnnualFiscalSummary } from "@/services/fiscal-calculator";
 import { useToast } from "@/components/ui/use-toast";
-import { TaxBracketsService } from "@/services/tax-brackets-service";
+import { TaxBracketsService, REGIMEN_CODES, RegimenFiscalPF } from "@/services/tax-brackets-service";
 import { FixedAssetService } from "@/services/fixed-asset-service";
 import { facturasExtranjerasService } from "@/services/facturas-extranjeras-service";
 import { FacturaExtranjera } from "@/models/facturaManual";
 import DeclaracionModal from "@/components/declaracion-modal";
+import { saldoFavorService } from "@/services/saldo-favor-service";
+import { SaldoFavor } from "@/models/SaldoFavor";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -35,15 +37,24 @@ interface FiscalSummaryProps {
   year: number;
   clientId: string;
   cfdis: CFDI[]; // Ahora recibe los CFDIs directamente
+  regimenFiscal?: string; // Código de régimen fiscal (612=PFAE, 626=RESICO)
   onGenerateDeclaration?: (monthData: MonthlyFiscalData) => void;
 }
 
-export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
+export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSummaryProps) {
   const months = Array.from({ length: 12 }, (_, i) => i);
   // Reference date data
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
+  
+  // Determinar el tipo de régimen fiscal
+  const tipoRegimen: RegimenFiscalPF = useMemo(() => {
+    if (regimenFiscal === REGIMEN_CODES.RESICO) return 'RESICO';
+    return 'PFAE'; // Default a PFAE
+  }, [regimenFiscal]);
+  
+  const esResico = tipoRegimen === 'RESICO';
   
   // Calcular el resumen fiscal dinámicamente desde los CFDIs
   const fiscalSummary = useMemo(() => {
@@ -100,11 +111,67 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
   const [declaracionModalOpen, setDeclaracionModalOpen] = useState(false);
   const { toast } = useToast();
   
+  // Estado para saldos a favor
+  const [saldosFavor, setSaldosFavor] = useState<SaldoFavor[]>([]);
+  
+  // Calcular saldos a favor disponibles por mes
+  const saldosFavorPorMes = useMemo(() => {
+    const ivaByMonth: Record<number, number> = {};
+    const isrByMonth: Record<number, number> = {};
+    
+    for (let month = 1; month <= 12; month++) {
+      // Sumar saldos de IVA que aplican para este mes/año
+      ivaByMonth[month] = saldosFavor
+        .filter(s => {
+          if (s.tipo !== 'IVA' || !s.activo) return false;
+          const ejAplicacion = s.ejercicioAplicacion || s.ejercicio;
+          const mesAplicacion = s.mesAplicacion;
+          // El saldo aplica si: 
+          // - El año de aplicación es anterior al año actual, O
+          // - El año de aplicación es el actual Y el mes de aplicación <= mes actual
+          return ejAplicacion < year || (ejAplicacion === year && mesAplicacion <= month);
+        })
+        .reduce((sum, s) => sum + (s.monto - s.montoAplicado), 0);
+      
+      // Sumar saldos de ISR que aplican para este mes/año
+      isrByMonth[month] = saldosFavor
+        .filter(s => {
+          if (s.tipo !== 'ISR' || !s.activo) return false;
+          const ejAplicacion = s.ejercicioAplicacion || s.ejercicio;
+          const mesAplicacion = s.mesAplicacion;
+          // El saldo aplica si: 
+          // - El año de aplicación es anterior al año actual, O
+          // - El año de aplicación es el actual Y el mes de aplicación <= mes actual
+          return ejAplicacion < year || (ejAplicacion === year && mesAplicacion <= month);
+        })
+        .reduce((sum, s) => sum + (s.monto - s.montoAplicado), 0);
+    }
+    
+    return { iva: ivaByMonth, isr: isrByMonth };
+  }, [saldosFavor, year]);
+  
   // Add state for tracking refresh operation
   const [isRefreshing, setIsRefreshing] = useState(false);
   
   // Initialize the FixedAssetService
   const fixedAssetService = useMemo(() => new FixedAssetService(), []);
+  
+  // Cargar saldos a favor
+  useEffect(() => {
+    const fetchSaldosFavor = async () => {
+      try {
+        const saldos = await saldoFavorService.getSaldosFavor(clientId, year);
+        setSaldosFavor(saldos);
+      } catch (error) {
+        console.error("Error loading saldos a favor:", error);
+        setSaldosFavor([]);
+      }
+    };
+    
+    if (clientId && year) {
+      fetchSaldosFavor();
+    }
+  }, [clientId, year]);
 
   // Modify the depreciation data loading effect
   useEffect(() => {
@@ -291,6 +358,11 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
     }
   };
   
+  // ISR RESICO calculation - usa tasas fijas sobre ingresos (no sobre utilidad)
+  const calculateMonthISRResico = (ingresosMensuales: number) => {
+    return TaxBracketsService.calculateISRResico(ingresosMensuales);
+  };
+  
   const getMonthlyRetainedISR = (month: number) => {
     const monthData = fiscalSummary.months[month + 1];
     return monthData?.ingresos.isrRetenido || 0;
@@ -401,9 +473,26 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
       <div className="bg-white dark:bg-gray-800 border-b">
         {/* Header */}
         <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-medium whitespace-nowrap">
-            Cédula Fiscal {year}
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-sm font-medium whitespace-nowrap">
+              Cédula Fiscal {year}
+            </h2>
+            {/* Badge del régimen fiscal */}
+            <Badge 
+              variant={esResico ? "default" : "secondary"}
+              className={esResico 
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white text-xs" 
+                : "bg-blue-600 hover:bg-blue-700 text-white text-xs"
+              }
+            >
+              {esResico ? "RESICO (626)" : "PFAE (612)"}
+            </Badge>
+            {esResico && (
+              <span className="text-xs text-gray-500 hidden sm:inline">
+                ISR sobre ingresos cobrados
+              </span>
+            )}
+          </div>
           
           <div className="flex items-center gap-2">
             {/* Fixed button - using standard variant */}
@@ -473,9 +562,12 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                   })}
                 </tr>
                 
-                {/* DEDUCCIONES SECTION */}
+                {/* DEDUCCIONES SECTION - En RESICO solo aplican para IVA, no para ISR */}
                 <tr className="bg-gray-200 dark:bg-gray-700">
-                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">DEDUCCIONES</td>
+                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">
+                    DEDUCCIONES 
+                    {esResico && <span className="text-xs font-normal text-gray-500 ml-2">(Solo aplican para IVA, no para ISR en RESICO)</span>}
+                  </td>
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Deducciones del mes</td>
@@ -595,9 +687,12 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                   })}
                 </tr>
                 
-                {/* UTILIDAD SECTION */}
+                {/* UTILIDAD SECTION - En RESICO no se usa para calcular ISR */}
                 <tr className="bg-gray-200 dark:bg-gray-700">
-                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">UTILIDAD</td>
+                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">
+                    UTILIDAD
+                    {esResico && <span className="text-xs font-normal text-gray-500 ml-2">(Referencia - no se usa para ISR en RESICO)</span>}
+                  </td>
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Utilidad del mes</td>
@@ -695,7 +790,7 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                     return (
                       <td 
                         key={month} 
-                        className={`px-2 py-1 align-middle text-center font-medium ${value > 0 ? 'text-red-500' : ''} ${getCellStyle(month, value)}`}
+                        className={`px-2 py-1 align-middle text-center font-medium ${value > 0 ? 'text-orange-500' : ''} ${getCellStyle(month, value)}`}
                       >
                         {formatCurrency(value)}
                       </td>
@@ -703,7 +798,7 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                   })}
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA a Favor</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA a Favor (del mes)</td>
                   {months.map(month => {
                     // Consider IVA retenido in the calculation
                     const collected = monthlyData[month]?.ivaCollected || 0;
@@ -739,10 +834,174 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                   })}
                 </tr>
                 
-                {/* ISR SECTION */}
-                <tr className="bg-gray-200 dark:bg-gray-700">
-                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">ISR (IMPUESTO SOBRE LA RENTA)</td>
+                {/* Saldo a favor IVA (de periodos anteriores) */}
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-blue-50/50">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-blue-700">(-) Saldo a Favor IVA</td>
+                  {months.map(month => {
+                    const value = saldosFavorPorMes.iva[month + 1] || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${value > 0 ? 'text-blue-600 font-medium' : 'text-gray-400'} ${getCellStyle(month, value)}`}
+                      >
+                        {formatCurrency(value)}
+                      </td>
+                    );
+                  })}
                 </tr>
+                
+                {/* IVA NETO A PAGAR (considerando saldo a favor) */}
+                <tr className="border-t-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 bg-gray-100">
+                  <td className="pl-7 px-2 py-1.5 font-bold whitespace-nowrap">IVA NETO A PAGAR</td>
+                  {months.map(month => {
+                    const collected = monthlyData[month]?.ivaCollected || 0;
+                    const paid = monthlyData[month]?.ivaPaid || 0;
+                    const retenido = monthlyData[month]?.ivaRetenido || 0;
+                    const ivaPorPagar = Math.max(0, collected - paid - retenido);
+                    const saldoFavorIVA = saldosFavorPorMes.iva[month + 1] || 0;
+                    // IVA neto = IVA por pagar - saldo a favor (mínimo 0)
+                    const ivaNetoAPagar = Math.max(0, ivaPorPagar - saldoFavorIVA);
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1.5 align-middle text-center font-bold ${
+                          ivaNetoAPagar > 0 ? 'text-red-600' : 'text-gray-500'
+                        } ${getCellStyle(month, ivaNetoAPagar)}`}
+                      >
+                        {formatCurrency(ivaNetoAPagar)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                
+                {/* ISR SECTION - Diferente según RESICO o PFAE */}
+                <tr className="bg-gray-200 dark:bg-gray-700">
+                  <td colSpan={months.length + 1} className="pl-7 px-2 py-1.5 font-medium">
+                    ISR (IMPUESTO SOBRE LA RENTA) {esResico && <span className="text-emerald-700">- RESICO Art. 113-E</span>}
+                  </td>
+                </tr>
+                
+                {/* ===== RESICO: Cálculo simplificado sobre ingresos ===== */}
+                {esResico ? (
+                  <>
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Ingresos del mes (base)</td>
+                      {months.map(month => {
+                        const value = monthlyData[month]?.incomeAmount || 0;
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center ${getCellStyle(month, value)}`}
+                          >
+                            {formatCurrency(value)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Tasa aplicable (%)</td>
+                      {months.map(month => {
+                        const ingresos = monthlyData[month]?.incomeAmount || 0;
+                        const resicoCalc = calculateMonthISRResico(ingresos);
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center ${getCellStyle(month, resicoCalc.tasa)}`}
+                          >
+                            {resicoCalc.tasa.toFixed(2)}%
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">ISR Causado del mes</td>
+                      {months.map(month => {
+                        const ingresos = monthlyData[month]?.incomeAmount || 0;
+                        const resicoCalc = calculateMonthISRResico(ingresos);
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center font-medium ${getCellStyle(month, resicoCalc.isrCausado)}`}
+                          >
+                            {formatCurrency(resicoCalc.isrCausado)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Retenciones del mes</td>
+                      {months.map(month => {
+                        const retentions = getMonthlyRetainedISR(month);
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center ${getCellStyle(month, retentions)}`}
+                          >
+                            {formatCurrency(retentions)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">ISR a Pagar</td>
+                      {months.map(month => {
+                        const ingresos = monthlyData[month]?.incomeAmount || 0;
+                        const resicoCalc = calculateMonthISRResico(ingresos);
+                        const retentions = getMonthlyRetainedISR(month);
+                        const isrAPagar = Math.max(0, resicoCalc.isrCausado - retentions);
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center font-medium ${
+                              isrAPagar > 0 ? 'text-orange-500' : ''
+                            } ${getCellStyle(month, isrAPagar)}`}
+                          >
+                            {formatCurrency(isrAPagar)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* Saldo a favor ISR (de periodos anteriores) */}
+                    <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-purple-50/50">
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR</td>
+                      {months.map(month => {
+                        const value = saldosFavorPorMes.isr[month + 1] || 0;
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1 align-middle text-center ${value > 0 ? 'text-purple-600 font-medium' : 'text-gray-400'} ${getCellStyle(month, value)}`}
+                          >
+                            {formatCurrency(value)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* ISR NETO A PAGAR (considerando saldo a favor) */}
+                    <tr className="border-t-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 bg-gray-100">
+                      <td className="pl-7 px-2 py-1.5 font-bold whitespace-nowrap">ISR NETO A PAGAR</td>
+                      {months.map(month => {
+                        const ingresos = monthlyData[month]?.incomeAmount || 0;
+                        const resicoCalc = calculateMonthISRResico(ingresos);
+                        const retentions = getMonthlyRetainedISR(month);
+                        const isrAPagar = Math.max(0, resicoCalc.isrCausado - retentions);
+                        const saldoFavorISR = saldosFavorPorMes.isr[month + 1] || 0;
+                        const isrNetoAPagar = Math.max(0, isrAPagar - saldoFavorISR);
+                        return (
+                          <td 
+                            key={month} 
+                            className={`px-2 py-1.5 align-middle text-center font-bold ${
+                              isrNetoAPagar > 0 ? 'text-red-600' : 'text-gray-500'
+                            } ${getCellStyle(month, isrNetoAPagar)}`}
+                          >
+                            {formatCurrency(isrNetoAPagar)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </>
+                ) : (
+                  /* ===== PFAE: Cálculo tradicional con tablas progresivas ===== */
+                  <>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Base del Impuesto</td>
                   {months.map(month => {
@@ -977,7 +1236,7 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                       <td 
                         key={month} 
                         className={`px-2 py-1 align-middle text-center font-medium ${
-                          isrCharge > 0 ? 'text-red-500 font-bold' : ''
+                          isrCharge > 0 ? 'text-orange-500' : ''
                         } ${getCellStyle(month, isrCharge)}`}
                       >
                         {formatCurrency(isrCharge)}
@@ -985,6 +1244,57 @@ export function FiscalSummary({ year, clientId, cfdis }: FiscalSummaryProps) {
                     );
                   })}
                 </tr>
+                {/* Saldo a favor ISR (de periodos anteriores) */}
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-purple-50/50">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR</td>
+                  {months.map(month => {
+                    const value = saldosFavorPorMes.isr[month + 1] || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${value > 0 ? 'text-purple-600 font-medium' : 'text-gray-400'} ${getCellStyle(month, value)}`}
+                      >
+                        {formatCurrency(value)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                {/* ISR NETO A PAGAR (considerando saldo a favor) */}
+                <tr className="border-t-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 bg-gray-100">
+                  <td className="pl-7 px-2 py-1.5 font-bold whitespace-nowrap">ISR NETO A PAGAR</td>
+                  {months.map(month => {
+                    const income = monthlyData[month]?.periodProfit || 0;
+                    const isrCalc = calculateMonthISR(month, income);
+                    const accRetentions = getAccumulatedRetainedISR(month);
+                    
+                    let previousPayments = 0;
+                    for (let i = 0; i < month; i++) {
+                      const prevIncome = monthlyData[i]?.periodProfit || 0;
+                      const prevIsrCalc = calculateMonthISR(i, prevIncome);
+                      const prevRetentions = getAccumulatedRetainedISR(i);
+                      const prevIsrCharge = Math.max(0, prevIsrCalc.totalTax - prevRetentions - 
+                        (i > 0 ? previousPayments : 0));
+                      previousPayments += prevIsrCharge;
+                    }
+                    
+                    const isrCharge = Math.max(0, isrCalc.totalTax - accRetentions - previousPayments);
+                    const saldoFavorISR = saldosFavorPorMes.isr[month + 1] || 0;
+                    const isrNetoAPagar = Math.max(0, isrCharge - saldoFavorISR);
+                    
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1.5 align-middle text-center font-bold ${
+                          isrNetoAPagar > 0 ? 'text-red-600' : 'text-gray-500'
+                        } ${getCellStyle(month, isrNetoAPagar)}`}
+                      >
+                        {formatCurrency(isrNetoAPagar)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                  </>
+                )}
               </tbody>
             </table>
           </div>

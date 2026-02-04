@@ -173,8 +173,19 @@ export const userService = {
     try {
       const userRef = doc(db, 'users', uid);
       
+      // Preparar datos para Firestore - convertir undefined a null
+      const firestoreData: Record<string, any> = {};
+      for (const [key, value] of Object.entries(userData)) {
+        // Si el valor es undefined o cadena vacía para clientId, usar null
+        if (key === 'clientId' && (value === undefined || value === '')) {
+          firestoreData[key] = null;
+        } else if (value !== undefined) {
+          firestoreData[key] = value;
+        }
+      }
+      
       // Update in Firestore
-      await updateDoc(userRef, { ...userData });
+      await updateDoc(userRef, firestoreData);
       
       // Update display name in Auth if provided
       if (userData.displayName && auth.currentUser) {

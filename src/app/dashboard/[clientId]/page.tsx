@@ -25,6 +25,8 @@ import { cfdiService } from "@/services/cfdi-service";
 import SatRequests from "@/components/sat-requests";
 import Proveedores from "@/components/proveedores"; // Add this import
 import { FacturasExtranjerasTable } from "@/components/facturas-extranjeras-table"; // Add this import
+import TicketsSection from "@/components/tickets-section";
+import SaldosFavorSection from "@/components/saldos-favor-section";
 
 export default function ClientDashboard() {
   const params = useParams();
@@ -74,6 +76,25 @@ export default function ClientDashboard() {
 
   // Add a visible status message to make it clear when data is clean
   const [uploadStatus, setUploadStatus] = useState("");
+
+  // Verificar si el perfil está completo (todos los 9 campos obligatorios)
+  const perfilCompleto = !!(
+    client?.rfc?.trim() &&
+    (client?.nombres?.trim() || client?.name?.trim()) &&
+    client?.email?.trim() &&
+    client?.lastCSFUrl &&
+    client?.cerUrl &&
+    client?.keyCerUrl &&
+    client?.claveFielUrl &&
+    client?.cartaManifiestoUrl &&
+    client?.contratoUrl
+  );
+  
+  useEffect(() => {
+    if (client && !perfilCompleto && activeTab !== "info") {
+      setActiveTab("info");
+    }
+  }, [client, perfilCompleto, activeTab]);
 
   // Load client data and invoices on component mount
   useEffect(() => {
@@ -323,37 +344,6 @@ export default function ClientDashboard() {
               <h1 className="text-sm font-medium text-gray-900 dark:text-white">
                 {client.name} <span className="font-normal text-gray-500">({client.rfc})</span>
               </h1>
-              {client.regimenesFiscales && client.regimenesFiscales.length > 0 && (
-                <Badge variant="outline" className="ml-2 text-[10px] bg-purple-50 text-purple-700 border-purple-200">
-                  {client.regimenesFiscales.find(r => r.esPredeterminado)?.regimen || client.regimenesFiscales[0].regimen}
-                </Badge>
-              )}
-              
-              {/* CSF y OPF status indicators */}
-              <div className="flex items-center gap-2 ml-4 text-[10px]">
-                {(() => {
-                  const csfDays = client.lastCSFDate 
-                    ? Math.floor((Date.now() - new Date(client.lastCSFDate).getTime()) / (1000 * 60 * 60 * 24))
-                    : null;
-                  const isCSFOld = csfDays !== null && csfDays > 20;
-                  return (
-                    <span className={`px-1.5 py-0.5 rounded ${isCSFOld ? 'bg-red-100 text-red-700' : csfDays !== null ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
-                      CSF: {csfDays !== null ? `${csfDays}d` : 'Sin cargar'}
-                    </span>
-                  );
-                })()}
-                {(() => {
-                  const opfDays = client.lastOPFDate 
-                    ? Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))
-                    : null;
-                  const isOPFOld = opfDays !== null && opfDays > 20;
-                  return (
-                    <span className={`px-1.5 py-0.5 rounded ${isOPFOld ? 'bg-red-100 text-red-700' : opfDays !== null ? 'bg-gray-100 text-gray-600' : 'bg-yellow-100 text-yellow-700'}`}>
-                      OPF: {opfDays !== null ? `${opfDays}d` : 'Sin cargar'}
-                    </span>
-                  );
-                })()}
-              </div>
             </div>
 
             {/* Add user info with avatar */}
@@ -385,16 +375,18 @@ export default function ClientDashboard() {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               {/* Use simplified TabsList with bottom border-only styling */}
               <TabsList size="sm" className="overflow-x-auto bg-transparent">
-                <TabsTrigger size="sm" value="fiscal">Cédula Fiscal</TabsTrigger>
-                <TabsTrigger size="sm" value="incomes">Fact. Emitidas</TabsTrigger>
-                <TabsTrigger size="sm" value="expenses">Fact. Recibidas</TabsTrigger>
-                <TabsTrigger size="sm" value="extranjeras">Fact. Extranjeras</TabsTrigger>
-                <TabsTrigger size="sm" value="proveedores">Proveedores</TabsTrigger>
-                <TabsTrigger size="sm" value="declaraciones">Declaración</TabsTrigger>
-                <TabsTrigger size="sm" value="activos">Activos</TabsTrigger>
-                {/* <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger> */}
-                <TabsTrigger size="sm" value="sat">SAT Desc Mas.</TabsTrigger>
                 <TabsTrigger size="sm" value="info">Info</TabsTrigger>
+                <TabsTrigger size="sm" value="fiscal" disabled={!perfilCompleto}>Cédula Fiscal</TabsTrigger>
+                <TabsTrigger size="sm" value="incomes" disabled={!perfilCompleto}>Fact. Emitidas</TabsTrigger>
+                <TabsTrigger size="sm" value="expenses" disabled={!perfilCompleto}>Fact. Recibidas</TabsTrigger>
+                <TabsTrigger size="sm" value="extranjeras" disabled={!perfilCompleto}>Fact. Extranjeras</TabsTrigger>
+                <TabsTrigger size="sm" value="proveedores" disabled={!perfilCompleto}>Proveedores</TabsTrigger>
+                <TabsTrigger size="sm" value="declaraciones" disabled={!perfilCompleto}>Declaración</TabsTrigger>
+                <TabsTrigger size="sm" value="activos" disabled={!perfilCompleto}>Activos</TabsTrigger>
+                <TabsTrigger size="sm" value="saldos" disabled={!perfilCompleto}>Saldos a Favor</TabsTrigger>
+                {/* <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger> */}
+                <TabsTrigger size="sm" value="sat" disabled={!perfilCompleto}>SAT Desc Mas.</TabsTrigger>
+                <TabsTrigger size="sm" value="tickets">Tickets</TabsTrigger>
               </TabsList>
             </Tabs>
             <div className="flex items-center gap-1.5">
@@ -462,6 +454,7 @@ export default function ClientDashboard() {
               clientId={clientId}
               year={selectedYear}
               cfdis={invoices}
+              regimenFiscal={client?.regimenesFiscales?.find(r => !r.fechaFin)?.regimen}
             />
           </TabsContent>
 
@@ -500,7 +493,55 @@ export default function ClientDashboard() {
             </div>
           </TabsContent>
 
+          <TabsContent value="saldos">
+            <div className="bg-white dark:bg-gray-800">
+              <SaldosFavorSection clientId={clientId} ejercicio={selectedYear} />
+            </div>
+          </TabsContent>
+
           <TabsContent value="info">
+            {/* Alertas de CSF y OPF desactualizados */}
+            <div className="px-[5vw] pt-6 space-y-2">
+              {(() => {
+                const csfDays = client.lastCSFDate 
+                  ? Math.floor((Date.now() - new Date(client.lastCSFDate).getTime()) / (1000 * 60 * 60 * 24))
+                  : null;
+                const isCSFOld = csfDays === null || csfDays > 30;
+                if (isCSFOld) {
+                  return (
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+                      <svg className="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="text-sm font-medium">
+                        Constancia de Situación Fiscal (CSF) {csfDays === null ? 'sin cargar' : `desactualizada (${csfDays} días)`}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+              {(() => {
+                const opfDays = client.lastOPFDate 
+                  ? Math.floor((Date.now() - new Date(client.lastOPFDate).getTime()) / (1000 * 60 * 60 * 24))
+                  : null;
+                const isOPFOld = opfDays === null || opfDays > 30;
+                if (isOPFOld) {
+                  return (
+                    <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800">
+                      <svg className="w-5 h-5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                      </svg>
+                      <span className="text-sm font-medium">
+                        Opinión de Cumplimiento (OPF) {opfDays === null ? 'sin cargar' : `desactualizada (${opfDays} días)`}
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
+            </div>
+
             <InfoClientePF
               clientId={clientId}
             />
@@ -539,6 +580,11 @@ export default function ClientDashboard() {
               clientId={clientId}
               year={selectedYear}
             />
+          </TabsContent>
+
+          {/* Tickets section */}
+          <TabsContent value="tickets">
+            <TicketsSection />
           </TabsContent>
         </Tabs>
       </main>

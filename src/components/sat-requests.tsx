@@ -13,8 +13,12 @@ import {
   AlertCircle,
   Trash2,
   Download,
-  Play
+  Play,
+  HelpCircle,
+  FileText
 } from "lucide-react";
+import { SatLogsModal } from "@/components/sat-logs-modal";
+import { SatLogger } from "@/services/sat-log-service";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/components/ui/use-toast";
 import SatRequestService from "@/services/sat-request-service";
@@ -96,6 +100,8 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
   const [showPendingModal, setShowPendingModal] = useState(false);
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [showLogsModal, setShowLogsModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   
   // Auth context
@@ -171,6 +177,18 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           if (result.details?.issued?.requestId) tiposSolicitados.push('emitidas');
           if (result.details?.received?.requestId) tiposSolicitados.push('recibidas');
           
+          // Log successful request creation
+          try {
+            if (result.details?.issued?.requestId) {
+              await SatLogger.requestCreated(clientRfc, clientRfc, result.details.issued.requestId, { type: 'issued' });
+            }
+            if (result.details?.received?.requestId) {
+              await SatLogger.requestCreated(clientRfc, clientRfc, result.details.received.requestId, { type: 'received' });
+            }
+          } catch (logErr) {
+            console.error("Error logging request creation:", logErr);
+          }
+          
           toast({
             title: "Sincronización iniciada",
             description: `Se solicitaron facturas ${tiposSolicitados.join(' y ')} al SAT`,
@@ -186,13 +204,27 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
         fetchRequests();
         fetchSyncStatus();
       } else {
+        // Log error
+        try {
+          await SatLogger.requestCreationError(clientRfc, clientRfc, result?.message || "Error desconocido");
+        } catch (logErr) {
+          console.error("Error logging request creation error:", logErr);
+        }
+        
         toast({
           title: "Error",
-          description: result.message,
+          description: result?.message || "Error desconocido",
           variant: "destructive",
         });
       }
     } catch (error: any) {
+      // Log error
+      try {
+        await SatLogger.requestCreationError(clientRfc, clientRfc, error?.message || "Error desconocido");
+      } catch (logErr) {
+        console.error("Error logging request creation error:", logErr);
+      }
+      
       toast({
         title: "Error",
         description: error.message || "Error al sincronizar",
@@ -266,6 +298,13 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
 
       // Update the request status in Firebase
       if (downloadResult.success) {
+        // Log success
+        try {
+          await SatLogger.downloadSuccess(clientRfc, clientRfc, request.requestId || "unknown", downloadResult.savedPaths?.length || 0);
+        } catch (logErr) {
+          console.error("Error logging download success:", logErr);
+        }
+        
         // Mark request as downloaded in Firestore
         await SatRequestService.updateRequestStatus(
           clientRfc,
@@ -296,22 +335,65 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           });
         }
       } else {
+        // Log error
+        try {
+          await SatLogger.downloadError(clientRfc, clientRfc, request.requestId || "unknown", downloadResult?.message || "Error desconocido");
+        } catch (logErr) {
+          console.error("Error logging download error:", logErr);
+        }
+        
+        // Guardar error en Firestore
+        await SatRequestService.updateRequestStatus(
+          clientRfc,
+          request.id,
+          { 
+            downloadError: downloadResult.message || "Error al descargar paquetes",
+            downloadAttemptedAt: new Date().toISOString()
+          }
+        );
+        
         toast({
           title: "Error en la descarga",
           description: downloadResult.message || "No se pudieron descargar los paquetes",
           variant: "destructive",
         });
+        
+        fetchRequests();
       }
 
       // Refresh the list to show updated status
       fetchRequests();
     } catch (error: any) {
       console.error("Error downloading packages:", error);
+      
+      // Log error
+      try {
+        await SatLogger.downloadError(clientRfc, clientRfc, request.requestId || "unknown", error?.message || "Error inesperado");
+      } catch (logErr) {
+        console.error("Error logging download error:", logErr);
+      }
+      
+      // Guardar error en Firestore
+      try {
+        await SatRequestService.updateRequestStatus(
+          clientRfc,
+          request.id,
+          { 
+            downloadError: error.message || "Error inesperado al descargar",
+            downloadAttemptedAt: new Date().toISOString()
+          }
+        );
+      } catch (e) {
+        console.error("Error guardando estado de error:", e);
+      }
+      
       toast({
         title: "Error",
         description: error.message || "Error al descargar los paquetes",
         variant: "destructive",
       });
+      
+      fetchRequests();
     } finally {
       setDownloadingId(null);
     }
@@ -343,21 +425,26 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
         console.log(`📦 Procesando paquete: ${packageId}`);
         
         try {
-          // 1. Obtener URL del ZIP
-          console.log(`  ⬇️ Obteniendo URL del ZIP...`);
-          const zipUrl = await SatRequestService.getPackageDownloadUrl(clientRfc, packageId);
-          
-          // 2. Descargar el ZIP
-          console.log(`  ⬇️ Descargando ZIP...`);
-          const response = await fetch(zipUrl);
-          if (!response.ok) {
-            throw new Error(`Error descargando ZIP: ${response.status}`);
+          // 1. Descargar el ZIP usando Cloud Function (evita CORS)
+          console.log(`  ⬇️ Descargando ZIP via Cloud Function...`);
+          let zipBlob;
+          try {
+            zipBlob = await SatRequestService.downloadPackageAsBase64(clientRfc, packageId);
+            console.log(`  ✅ ZIP descargado: ${(zipBlob.size / 1024).toFixed(2)} KB`);
+          } catch (downloadError: any) {
+            console.error(`  ❌ Error descargando ZIP:`, downloadError);
+            throw new Error(`Error descargando ZIP: ${downloadError.message}`);
           }
-          const zipBlob = await response.blob();
           
-          // 3. Descomprimir con JSZip
+          // 2. Descomprimir con JSZip
           console.log(`  📂 Descomprimiendo ZIP...`);
-          const zip = await JSZip.loadAsync(zipBlob);
+          let zip;
+          try {
+            zip = await JSZip.loadAsync(zipBlob);
+          } catch (zipError: any) {
+            console.error(`  ❌ Error descomprimiendo ZIP:`, zipError);
+            throw new Error(`Error descomprimiendo ZIP: ${zipError.message}`);
+          }
           
           // 4. Procesar cada XML
           const cfdisToSave = [];
@@ -382,18 +469,28 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           // 5. Guardar en Firestore (con verificación de duplicados por UUID)
           if (cfdisToSave.length > 0) {
             console.log(`  💾 Guardando ${cfdisToSave.length} CFDIs en Firestore...`);
-            const saveResult = await cfdiService.saveInvoices(clientRfc, cfdisToSave);
-            
-            totalCfdisSaved += saveResult.savedIds?.length || 0;
-            totalCfdisExisting += saveResult.existingIds?.length || 0;
-            
-            console.log(`  ✅ Paquete ${packageId}: ${saveResult.savedIds?.length || 0} nuevos, ${saveResult.existingIds?.length || 0} existentes`);
+            try {
+              const saveResult = await cfdiService.saveInvoices(clientRfc, cfdisToSave);
+              
+              totalCfdisSaved += saveResult.savedIds?.length || 0;
+              totalCfdisExisting += saveResult.existingIds?.length || 0;
+              
+              console.log(`  ✅ Paquete ${packageId}: ${saveResult.savedIds?.length || 0} nuevos, ${saveResult.existingIds?.length || 0} existentes`);
+            } catch (saveError: any) {
+              console.error(`  ❌ Error guardando CFDIs:`, saveError);
+              throw new Error(`Error guardando CFDIs: ${saveError.message}`);
+            }
           } else {
             console.log(`  ⚠️ Paquete ${packageId}: No se encontraron CFDIs válidos`);
           }
           
-        } catch (packageError) {
+        } catch (packageError: any) {
           console.error(`❌ Error procesando paquete ${packageId}:`, packageError);
+          toast({
+            title: `Error en paquete`,
+            description: packageError.message || "Error desconocido",
+            variant: "destructive"
+          });
           totalErrors++;
         }
       }
@@ -405,13 +502,28 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
         clientRfc,
         request.id,
         { 
-          packagesProcessed: true,
+          packagesProcessed: allSuccess, // Solo true si no hubo errores
+          processedWithErrors: !allSuccess, // Nuevo campo para errores parciales
           processedAt: new Date().toISOString(),
           processedCount: totalCfdisSaved,
           existingCount: totalCfdisExisting,
+          totalErrors: totalErrors,
           ...(totalErrors > 0 && { error: `${totalErrors} errores durante el procesamiento` })
         }
       );
+      
+      // Log result
+      try {
+        if (allSuccess) {
+          await SatLogger.processingSuccess(clientRfc, clientRfc, request.requestId || "unknown", totalCfdisSaved);
+        } else if (totalCfdisSaved > 0) {
+          await SatLogger.processingPartial(clientRfc, clientRfc, request.requestId || "unknown", totalCfdisSaved, totalErrors);
+        } else {
+          await SatLogger.processingError(clientRfc, clientRfc, request.requestId || "unknown", `${totalErrors} errores, 0 importados`);
+        }
+      } catch (logErr) {
+        console.error("Error logging processing result:", logErr);
+      }
       
       // Actualizar última fecha de sync
       if (request.to && request.downloadType) {
@@ -448,10 +560,17 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
     } catch (error: any) {
       console.error("Error processing packages:", error);
       
+      // Log error
+      try {
+        await SatLogger.processingError(clientRfc, clientRfc, request.requestId || "unknown", error?.message || "Error inesperado");
+      } catch (logErr) {
+        console.error("Error logging processing error:", logErr);
+      }
+      
       await SatRequestService.updateRequestStatus(
         clientRfc,
         request.id,
-        { 
+        {
           packagesProcessed: false,
           error: error.message || "Error inesperado al procesar los paquetes"
         }
@@ -472,7 +591,18 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
   const handleVerifyRequest = async (request: SatRequest) => {
     setVerifyingId(request.id);
     try {
-      await SatRequestService.verifyRequest(clientRfc, request.requestId, request.id);
+      const result = await SatRequestService.verifyRequest(clientRfc, request.requestId, request.id);
+      
+      // Log success - only if we have packages or the request completed
+      const packagesCount = result?.packageIds?.length || 0;
+      if (packagesCount > 0 || result?.completed) {
+        try {
+          await SatLogger.verificationSuccess(clientRfc, clientRfc, request.requestId, packagesCount);
+        } catch (logErr) {
+          console.error("Error logging verification success:", logErr);
+        }
+      }
+      
       toast({
         title: "Verificación realizada",
         description: "Se ha verificado el estado de la solicitud"
@@ -481,11 +611,34 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
       // Refresh the list to show updated status
       fetchRequests();
     } catch (error: any) {
+      // Log error
+      try {
+        await SatLogger.verificationError(clientRfc, clientRfc, request.requestId || "unknown", error?.message || "Error desconocido");
+      } catch (logErr) {
+        console.error("Error logging verification error:", logErr);
+      }
+      
+      // Guardar error en Firestore
+      try {
+        await SatRequestService.updateRequestStatus(
+          clientRfc,
+          request.id,
+          { 
+            verifyError: error.message || "Error al verificar",
+            verifyAttemptedAt: new Date().toISOString()
+          }
+        );
+      } catch (e) {
+        console.error("Error guardando estado de error:", e);
+      }
+      
       toast({
         title: "Error",
         description: error.message || "Error al verificar la solicitud",
         variant: "destructive",
       });
+      
+      fetchRequests();
     } finally {
       setVerifyingId(null);
     }
@@ -581,21 +734,23 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           </h2>
           
           <div className="flex items-center gap-2">
-            {/* Smart Sync Button */}
+            {/* Smart Sync Button - Solo SuperAdmin */}
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button 
                     variant="outline" 
                     size="xs" 
-                    disabled={isSyncing}
+                    disabled={isSyncing || !isSuperAdmin}
                     onClick={handleSmartSync}
                     className={`flex items-center whitespace-nowrap ${
-                      syncStatus?.needsSync 
-                        ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100' 
-                        : syncStatus?.hasPendingRequests
-                          ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
-                          : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
+                      !isSuperAdmin
+                        ? 'bg-gray-100 border-gray-300 text-gray-400 cursor-not-allowed'
+                        : syncStatus?.needsSync 
+                          ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100' 
+                          : syncStatus?.hasPendingRequests
+                            ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                            : 'bg-green-50 border-green-300 text-green-700 hover:bg-green-100'
                     }`}
                   >
                     {isSyncing ? (
@@ -612,7 +767,9 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
-                  {syncStatus?.isFirstSync ? (
+                  {!isSuperAdmin ? (
+                    <p className="text-xs text-gray-500">Solo disponible para Super Administradores</p>
+                  ) : syncStatus?.isFirstSync ? (
                     <div className="text-xs space-y-1">
                       <p className="font-medium">Primera sincronización</p>
                       <p className="text-gray-400">Se descargará desde el 1 de enero de {new Date().getFullYear()}</p>
@@ -652,6 +809,28 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
+
+            {/* Logs Button */}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setShowLogsModal(true)}
+              className="h-7 w-7 p-0 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              title="Ver logs"
+            >
+              <FileText className="h-4 w-4" />
+            </Button>
+
+            {/* Info Button */}
+            <Button
+              variant="ghost"
+              size="xs"
+              onClick={() => setShowInfoModal(true)}
+              className="h-7 w-7 p-0 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+              title="¿Cómo funciona?"
+            >
+              <HelpCircle className="h-4 w-4" />
+            </Button>
           </div>
         </div>
 
@@ -754,48 +933,129 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                       <td className="px-2 py-1 align-middle h-[56px]">
                         <div className="flex flex-col">
                           <span className="text-xs font-medium">{request.downloadType === "issued" ? "Emitida" : "Recibida"}</span>
-                          {request.packageIds && request.packageIds.length > 0 && (
+                          {request.packageIds && request.packageIds.length > 0 ? (
                             <span className="text-purple-500 text-[10px]">
                               {request.packageIds.length} paquete{request.packageIds.length > 1 ? 's' : ''}
                             </span>
-                          )}
+                          ) : request.completed && request.packageIds?.length === 0 ? (
+                            <span className="text-gray-400 text-[10px]">
+                              Sin facturas
+                            </span>
+                          ) : null}
                           {request.packagesDownloaded && renderPackageDownloadButtons(request)}
                         </div>
                       </td>
                       <td className="px-2 py-1 align-middle h-[56px]">
-                        {/* Estado mejorado */}
-                        {request.packagesProcessed ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-blue-500"></span>
-                            <span className="text-xs text-blue-700 font-medium">Procesado</span>
-                          </div>
-                        ) : request.packagesDownloaded ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-indigo-500"></span>
-                            <span className="text-xs text-indigo-700 font-medium">Descargado</span>
-                          </div>
-                        ) : (request.completed || request.status === "3" || 
-                             request.status === "Finished" || request.status === "finished") ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
-                            <span className="text-xs text-green-700 font-medium">Listo</span>
-                          </div>
-                        ) : request.error ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-red-500"></span>
-                            <span className="text-xs text-red-700 font-medium">Error</span>
-                          </div>
-                        ) : request.status === 'in_progress' || request.status === '1' ? (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
-                            <span className="text-xs text-amber-700 font-medium">En proceso</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <span className="flex h-2 w-2 rounded-full bg-gray-400 animate-pulse"></span>
-                            <span className="text-xs text-gray-600 font-medium">Solicitado</span>
-                          </div>
-                        )}
+                        {/* Estado mejorado con tooltip para errores */}
+                        {(() => {
+                          // Verificar si hay algún error para mostrar tooltip
+                          const hasAnyError = request.error || request.verifyError || request.downloadError || request.processedWithErrors;
+                          
+                          const statusContent = request.packagesProcessed && !request.error ? (
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex h-2 w-2 rounded-full bg-blue-500"></span>
+                                <span className="text-xs text-blue-700 font-medium">Procesado</span>
+                              </div>
+                              {(request.processedCount !== undefined || request.existingCount !== undefined) && (
+                                <span className="text-[10px] text-gray-500 ml-3.5">
+                                  {request.processedCount || 0} nuevos, {request.existingCount || 0} existentes
+                                </span>
+                              )}
+                            </div>
+                          ) : (request.processedWithErrors || (request.packagesProcessed && request.error)) ? (
+                            <div className="flex flex-col cursor-help">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex h-2 w-2 rounded-full bg-orange-500"></span>
+                                <span className="text-xs text-orange-700 font-medium">Procesado con errores</span>
+                              </div>
+                              <span className="text-[10px] text-orange-600 ml-3.5">
+                                {request.totalErrors || '?'} error(es) - ver detalles
+                              </span>
+                            </div>
+                          ) : request.downloadError ? (
+                            <div className="flex flex-col cursor-help">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex h-2 w-2 rounded-full bg-red-500"></span>
+                                <span className="text-xs text-red-700 font-medium">Error descarga</span>
+                              </div>
+                              <span className="text-[10px] text-red-500 ml-3.5">
+                                ver detalles
+                              </span>
+                            </div>
+                          ) : request.packagesDownloaded ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-indigo-500"></span>
+                              <span className="text-xs text-indigo-700 font-medium">Descargado</span>
+                            </div>
+                          ) : request.completed && request.packageIds?.length === 0 ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-gray-400"></span>
+                              <span className="text-xs text-gray-500 font-medium">Sin facturas</span>
+                            </div>
+                          ) : (request.completed || request.status === "3" || 
+                               request.status === "Finished" || request.status === "finished") ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-green-500"></span>
+                              <span className="text-xs text-green-700 font-medium">Listo</span>
+                            </div>
+                          ) : request.error || request.verifyError ? (
+                            <div className="flex flex-col cursor-help">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex h-2 w-2 rounded-full bg-red-500"></span>
+                                <span className="text-xs text-red-700 font-medium">Error</span>
+                              </div>
+                              <span className="text-[10px] text-red-500 ml-3.5">
+                                ver detalles
+                              </span>
+                            </div>
+                          ) : request.status === 'in_progress' || request.status === '1' ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-amber-500 animate-pulse"></span>
+                              <span className="text-xs text-amber-700 font-medium">En proceso</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-2 w-2 rounded-full bg-gray-400 animate-pulse"></span>
+                              <span className="text-xs text-gray-600 font-medium">Solicitado</span>
+                            </div>
+                          );
+                          
+                          // Si hay errores, envolver en tooltip
+                          if (hasAnyError) {
+                            return (
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <div>{statusContent}</div>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="left" className="max-w-sm">
+                                    <div className="text-xs space-y-1">
+                                      <p className="font-semibold text-red-600">Detalles de errores:</p>
+                                      {request.verifyError && (
+                                        <p><span className="font-medium">Verificación:</span> {request.verifyError}</p>
+                                      )}
+                                      {request.downloadError && (
+                                        <p><span className="font-medium">Descarga:</span> {request.downloadError}</p>
+                                      )}
+                                      {request.error && (
+                                        <p><span className="font-medium">Procesamiento:</span> {request.error}</p>
+                                      )}
+                                      {request.totalErrors && (
+                                        <p><span className="font-medium">Total errores:</span> {request.totalErrors}</p>
+                                      )}
+                                      {request.processedCount !== undefined && (
+                                        <p className="text-green-600"><span className="font-medium">Importados OK:</span> {request.processedCount}</p>
+                                      )}
+                                    </div>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            );
+                          }
+                          
+                          return statusContent;
+                        })()}
                       </td>
                       <td className="pr-7 px-2 py-1 align-middle h-[56px]">
                         <div className="flex justify-center space-x-2">
@@ -861,8 +1121,32 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
                               </TooltipProvider>
                             </div>
                           )}
-                          {(request.packagesDownloaded || request.packagesProcessed) && (
-                            <span className="text-xs text-gray-400 italic">Completado</span>
+                          {/* Botón de reprocesar cuando hay errores */}
+                          {/* Botón de reprocesar - visible si hay errores O si ya está procesado (para re-importar) */}
+                          {(request.processedWithErrors || request.downloadError || request.packagesProcessed) && request.packageIds && request.packageIds.length > 0 && (
+                            <Button 
+                              variant="outline"
+                              size="xs"
+                              className={`text-xs h-7 px-2 ${
+                                request.processedWithErrors || request.downloadError
+                                  ? 'bg-orange-50 border-orange-200 text-orange-700 hover:bg-orange-100'
+                                  : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'
+                              }`}
+                              onClick={() => handleProcessPackages(request)}
+                              disabled={processingId === request.id}
+                            >
+                              {processingId === request.id ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                  Reprocesando...
+                                </>
+                              ) : (
+                                <>
+                                  <RefreshCw className="h-3 w-3 mr-1" />
+                                  Reprocesar
+                                </>
+                              )}
+                            </Button>
                           )}
                         </div>
                       </td>
@@ -926,6 +1210,122 @@ const SatRequests: React.FC<SatRequestsProps> = ({ clientRfc }) => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de información - Cómo funciona */}
+      <Dialog open={showInfoModal} onOpenChange={setShowInfoModal}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <HelpCircle className="h-5 w-5 text-blue-500" />
+              ¿Cómo funciona la Descarga Masiva del SAT?
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-6 text-sm">
+            {/* Introducción */}
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <p className="text-blue-800">
+                La <strong>Descarga Masiva</strong> es un servicio del SAT que permite obtener todos tus CFDIs 
+                (facturas emitidas y recibidas) de forma automática usando tu FIEL.
+              </p>
+            </div>
+
+            {/* Proceso */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-2">📋 Proceso paso a paso</h3>
+              <ol className="list-decimal pl-5 space-y-2 text-gray-600">
+                <li><strong>Solicitar:</strong> Se envía una petición al SAT indicando el rango de fechas y tipo (emitidas/recibidas)</li>
+                <li><strong>Verificar:</strong> El SAT procesa la solicitud (puede tardar de segundos a minutos)</li>
+                <li><strong>Descargar:</strong> Cuando está lista, se descargan los paquetes ZIP con los XMLs</li>
+                <li><strong>Procesar:</strong> Se extraen los XMLs y se guardan en tu sistema</li>
+              </ol>
+            </div>
+
+            {/* Estados */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-2">🚦 Estados de una solicitud</h3>
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-gray-400"></span>
+                  <span><strong>Solicitado:</strong> Esperando que el SAT la procese</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+                  <span><strong>En proceso:</strong> El SAT la está procesando</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-green-500"></span>
+                  <span><strong>Listo:</strong> Paquetes listos para descargar</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-indigo-500"></span>
+                  <span><strong>Descargado:</strong> ZIPs descargados, pendiente procesar XMLs</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-blue-500"></span>
+                  <span><strong>Procesado:</strong> ✅ Facturas importadas correctamente</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-gray-400"></span>
+                  <span><strong>Sin facturas:</strong> El rango no tiene CFDIs</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                  <span><strong>Error:</strong> Algo falló, intenta de nuevo</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Reglas importantes */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-2">⚠️ Reglas importantes del SAT</h3>
+              <ul className="list-disc pl-5 space-y-2 text-gray-600">
+                <li><strong>Máximo 2 solicitudes simultáneas</strong> por tipo (emitidas/recibidas). Si excedes este límite, el SAT te bloquea temporalmente.</li>
+                <li><strong>Bloqueo temporal:</strong> Si te bloquean, debes esperar <strong>24-72 horas</strong> para poder hacer nuevas solicitudes.</li>
+                <li><strong>Tiempo de procesamiento:</strong> El SAT puede tardar desde segundos hasta varios minutos en preparar los paquetes.</li>
+                <li><strong>Verifica antes de crear nuevas:</strong> Siempre procesa las solicitudes pendientes antes de crear nuevas.</li>
+              </ul>
+            </div>
+
+            {/* Botón Sincronizar */}
+            <div>
+              <h3 className="font-semibold text-gray-800 mb-2">⚡ Botón Sincronizar</h3>
+              <p className="text-gray-600 mb-2">
+                El botón de sincronizar detecta automáticamente qué fechas faltan y crea las solicitudes necesarias:
+              </p>
+              <ul className="list-disc pl-5 space-y-1 text-gray-600">
+                <li><span className="text-amber-600 font-medium">Amarillo:</span> Hay fechas pendientes de sincronizar</li>
+                <li><span className="text-blue-600 font-medium">Azul:</span> Hay solicitudes en proceso</li>
+                <li><span className="text-green-600 font-medium">Verde:</span> Todo está al día</li>
+              </ul>
+            </div>
+
+            {/* Tips */}
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+              <h3 className="font-semibold text-gray-800 mb-2">💡 Tips</h3>
+              <ul className="list-disc pl-5 space-y-1 text-gray-600">
+                <li>Si una solicitud está mucho tiempo en "En proceso", espera 1-2 minutos y dale "Verificar"</li>
+                <li>Si ves "Solicitado" después de verificar, el SAT aún no la procesa. Intenta más tarde.</li>
+                <li>Puedes descargar los paquetes ZIP originales haciendo clic en los enlaces después de descargar</li>
+              </ul>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button onClick={() => setShowInfoModal(false)}>
+              Entendido
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Logs Modal */}
+      <SatLogsModal
+        isOpen={showLogsModal}
+        onClose={() => setShowLogsModal(false)}
+        clientId={clientRfc}
+        clientName={clientRfc}
+      />
     </div>
   );
 };

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { clientService } from '@/services/client-service';
 import { Client } from '@/models/Client';
+import { useAuth } from '@/contexts/AuthContext';
 import {
     Loader2,
     Edit,
@@ -11,8 +12,14 @@ import {
     Trash2,
     Upload,
     X,
-    CheckCircle2
+    CheckCircle2,
+    Eye,
+    EyeOff,
+    RefreshCw
 } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '@/services/firebase';
 
 
 interface FielProps {
@@ -20,7 +27,7 @@ interface FielProps {
     onClientUpdated: (updatedClient: Client) => void;
 }
 
-type DocumentType = 'cer' | 'acuseCer' | 'keyCer' | 'renCer' | 'claveFiel' | 'cartaManifiesto';
+type DocumentType = 'cer' | 'acuseCer' | 'keyCer' | 'renCer' | 'claveFiel' | 'cartaManifiesto' | 'contrato';
 type ActionType = 'download' | 'delete' | 'upload';
 
 interface DocumentInfo {
@@ -30,6 +37,7 @@ interface DocumentInfo {
     date?: string;
     isPrivate: boolean;
     accept: string;
+    isPasswordField?: boolean;
 }
 
 const formatDate = (dateString: string) => {
@@ -41,6 +49,9 @@ const formatDate = (dateString: string) => {
 const MASTER_PASSWORD = "Nenito";
 
 export default function FielDocumentsSection({ client, onClientUpdated }: FielProps) {
+    const { isAdmin, isSuperAdmin } = useAuth();
+    const canManagePassword = isAdmin || isSuperAdmin;
+    
     const [isUploading, setIsUploading] = useState<DocumentType | null>(null);
     const [localClient, setLocalClient] = useState<Client>(client);
     const [passwordModalOpen, setPasswordModalOpen] = useState(false);
@@ -48,6 +59,17 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
     const [password, setPassword] = useState('');
     const [passwordError, setPasswordError] = useState('');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    
+    // Estado para el input de contraseña FIEL
+    const [fielPasswordInput, setFielPasswordInput] = useState('');
+    const [isSavingFielPassword, setIsSavingFielPassword] = useState(false);
+    const [isEditingPassword, setIsEditingPassword] = useState(false);
+    const [visiblePassword, setVisiblePassword] = useState<string | null>(null);
+    const [isLoadingPassword, setIsLoadingPassword] = useState(false);
+    
+    // Estado para autoSync
+    const [autoSync, setAutoSync] = useState(localClient.autoSync ?? false);
+    const [isSavingAutoSync, setIsSavingAutoSync] = useState(false);
 
     // Define document types
     const documents: DocumentInfo[] = [
@@ -68,12 +90,13 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             accept: '.key'
         },
         { 
-            label: 'Contraseña de clave privada (.txt):', 
+            label: 'Contraseña de clave privada:', 
             type: 'claveFiel', 
             url: localClient.claveFielUrl, 
             date: localClient.claveFielDate, 
             isPrivate: true,
-            accept: '.txt'
+            accept: '', // No necesita archivo, se ingresa como texto
+            isPasswordField: true // Marcador para renderizar diferente
         },
         { 
             label: 'Renovación (.ren)', 
@@ -99,11 +122,91 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             isPrivate: false,
             accept: '.pdf'
         },
+        { 
+            label: 'Contrato (PDF)', 
+            type: 'contrato', 
+            url: localClient.contratoUrl, 
+            date: localClient.contratoDate, 
+            isPrivate: false,
+            accept: '.pdf'
+        },
     ];
 
     useEffect(() => {
         setLocalClient(client);
+        setAutoSync(client.autoSync ?? false);
     }, [client]);
+
+    // Función para cambiar el estado de autoSync
+    const handleAutoSyncChange = async (checked: boolean) => {
+        setIsSavingAutoSync(true);
+        try {
+            const clientRef = doc(db, 'clients', client.id);
+            await updateDoc(clientRef, { autoSync: checked });
+            
+            setAutoSync(checked);
+            const updated = { ...localClient, autoSync: checked };
+            setLocalClient(updated);
+            onClientUpdated(updated);
+            
+            console.log(`✅ AutoSync ${checked ? 'activado' : 'desactivado'} para ${client.rfc}`);
+        } catch (error) {
+            console.error('Error actualizando autoSync:', error);
+            // Revertir el estado en caso de error
+            setAutoSync(!checked);
+        } finally {
+            setIsSavingAutoSync(false);
+        }
+    };
+
+    // Función para ver la contraseña temporalmente (5 segundos)
+    const handleViewPassword = async () => {
+        setIsLoadingPassword(true);
+        try {
+            const password = await clientService.getFielPassword(client.id);
+            
+            if (password) {
+                setVisiblePassword(password);
+                
+                // Ocultar después de 5 segundos
+                setTimeout(() => {
+                    setVisiblePassword(null);
+                }, 5000);
+            } else {
+                setVisiblePassword('Sin datos');
+                setTimeout(() => setVisiblePassword(null), 2000);
+            }
+        } catch (error) {
+            console.error('Error al obtener contraseña:', error);
+            setVisiblePassword('Error');
+            setTimeout(() => setVisiblePassword(null), 2000);
+        } finally {
+            setIsLoadingPassword(false);
+        }
+    };
+
+    // Función para guardar la contraseña de la FIEL
+    const handleSaveFielPassword = async () => {
+        if (!fielPasswordInput.trim()) return;
+        
+        setIsSavingFielPassword(true);
+        try {
+            const result = await clientService.saveFielPassword(client.id, fielPasswordInput.trim());
+            
+            const updated = { ...localClient };
+            updated.claveFielUrl = result.url;
+            updated.claveFielDate = result.date;
+            setLocalClient(updated);
+            onClientUpdated(updated);
+            
+            setFielPasswordInput('');
+            console.log('✅ Contraseña FIEL guardada');
+        } catch (error) {
+            console.error('Error guardando contraseña FIEL:', error);
+        } finally {
+            setIsSavingFielPassword(false);
+        }
+    };
 
     const initiateAction = (action: ActionType, docType: DocumentType, file?: File) => {
         if (action === 'upload' && file) {
@@ -174,6 +277,9 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                 } else if (type === 'claveFiel') {
                     updated.claveFielUrl = result.url;
                     updated.claveFielDate = result.date;
+                } else if (type === 'contrato') {
+                    updated.contratoUrl = result.url;
+                    updated.contratoDate = result.date;
                 }
                 return updated;
             });
@@ -205,7 +311,13 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                 } else if (type === 'claveFiel') {
                     mergedClient.claveFielUrl = result.url;
                     mergedClient.claveFielDate = result.date;
+                } else if (type === 'contrato') {
+                    mergedClient.contratoUrl = result.url;
+                    mergedClient.contratoDate = result.date;
                 }
+
+                // Calcular si la FIEL está completa (cer, key y clave)
+                mergedClient.tieneFielValida = !!(mergedClient.cerUrl && mergedClient.keyCerUrl && mergedClient.claveFielUrl);
 
                 // Notify parent component with complete client data
                 onClientUpdated(mergedClient);
@@ -258,6 +370,10 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                     updateData.cartaManifiestoUrl = null;
                     updateData.cartaManifiestoDate = null;
                     break;
+                case 'contrato':
+                    updateData.contratoUrl = null;
+                    updateData.contratoDate = null;
+                    break;
             }
             
             // Get the URL to delete from storage
@@ -296,7 +412,13 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             } else if (type === 'cartaManifiesto') {
                 updatedLocalClient.cartaManifiestoUrl = undefined;
                 updatedLocalClient.cartaManifiestoDate = undefined;
+            } else if (type === 'contrato') {
+                updatedLocalClient.contratoUrl = undefined;
+                updatedLocalClient.contratoDate = undefined;
             }
+            
+            // Recalcular si la FIEL está completa
+            updatedLocalClient.tieneFielValida = !!(updatedLocalClient.cerUrl && updatedLocalClient.keyCerUrl && updatedLocalClient.claveFielUrl);
             
             setLocalClient(updatedLocalClient);
 
@@ -314,8 +436,25 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
             {/* Main Card */}
             <div className="w-full bg-white rounded-lg overflow-hidden">
                 {/* Card Header */}
-                <div className="bg-gray-100 px-4 py-2 border-b border-gray-300">
+                <div className="bg-gray-100 px-4 py-2 border-b border-gray-300 flex justify-between items-center">
                     <h3 className="text-sm font-medium text-gray-700">Documentos FIEL</h3>
+                    
+                    {/* AutoSync Toggle */}
+                    <div className="flex items-center gap-2">
+                        {isSavingAutoSync && (
+                            <Loader2 className="h-3 w-3 animate-spin text-gray-400" />
+                        )}
+                        <label htmlFor="autoSync" className="text-xs text-gray-600 cursor-pointer flex items-center gap-1.5">
+                            <RefreshCw className="h-3 w-3" />
+                            Sync automático
+                        </label>
+                        <Switch
+                            id="autoSync"
+                            checked={autoSync}
+                            onCheckedChange={handleAutoSyncChange}
+                            disabled={isSavingAutoSync || !localClient.cerUrl || !localClient.keyCerUrl || !localClient.claveFielUrl}
+                        />
+                    </div>
                 </div>
 
                 {/* Card Content */}
@@ -342,6 +481,132 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                             <tbody>
                                 {documents.map((doc) => {
                                     const hasFile = !!doc.url;
+                                    
+                                    // Renderizado especial para el campo de contraseña
+                                    if (doc.isPasswordField) {
+                                        return (
+                                            <tr key={doc.type} className="border-b hover:bg-gray-50">
+                                                <td className="py-2 px-4">
+                                                    <div className='flex flex-row gap-3 items-center'>
+                                                        <div>
+                                                            {hasFile ? (
+                                                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                                            ) : (
+                                                                <CheckCircle2 className="h-4 w-4 text-gray-300" />
+                                                            )}
+                                                        </div>
+                                                        <span className="font-medium">
+                                                            {doc.label}
+                                                        </span>
+                                                    </div>
+                                                </td>
+                                                <td className="py-2 px-4 text-gray-500">
+                                                    {doc.date ? (
+                                                        <>
+                                                            {formatDate(doc.date)}
+                                                            {' ('}
+                                                            {Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24)) === 0
+                                                                ? 'hoy'
+                                                                : `${Math.floor((new Date().getTime() - new Date(doc.date).getTime()) / (1000 * 60 * 60 * 24))} días`}
+                                                            {')'}
+                                                        </>
+                                                    ) : <span className="text-gray-400">—</span>}
+                                                </td>
+                                                <td className="py-2 px-4 text-right">
+                                                    <div className="flex justify-end gap-1 items-center">
+                                                        {!canManagePassword ? (
+                                                            hasFile ? <span className="text-xs text-gray-400">••••••</span> : null
+                                                        ) : isSavingFielPassword ? (
+                                                            <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                                                        ) : isEditingPassword ? (
+                                                            <>
+                                                                <input
+                                                                    type="password"
+                                                                    placeholder="Contraseña"
+                                                                    value={fielPasswordInput}
+                                                                    onChange={(e) => setFielPasswordInput(e.target.value)}
+                                                                    className="h-7 w-28 px-2 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                                                    autoFocus
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            handleSaveFielPassword();
+                                                                            setIsEditingPassword(false);
+                                                                        } else if (e.key === 'Escape') {
+                                                                            setIsEditingPassword(false);
+                                                                            setFielPasswordInput('');
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        handleSaveFielPassword();
+                                                                        setIsEditingPassword(false);
+                                                                    }}
+                                                                    disabled={!fielPasswordInput.trim()}
+                                                                    className="h-7 w-7 rounded-full flex items-center justify-center text-green-600 hover:bg-green-50 disabled:text-gray-300"
+                                                                    title="Guardar"
+                                                                >
+                                                                    <CheckCircle2 className="h-4 w-4" />
+                                                                </button>
+                                                                <button
+                                                                    onClick={() => {
+                                                                        setIsEditingPassword(false);
+                                                                        setFielPasswordInput('');
+                                                                    }}
+                                                                    className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
+                                                                    title="Cancelar"
+                                                                >
+                                                                    <X className="h-4 w-4" />
+                                                                </button>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                {hasFile && (
+                                                                    visiblePassword ? (
+                                                                        <span className="text-xs text-green-600 font-mono mr-2 bg-green-50 px-2 py-1 rounded">{visiblePassword}</span>
+                                                                    ) : (
+                                                                        <span className="text-xs text-gray-400 mr-2">••••••</span>
+                                                                    )
+                                                                )}
+                                                                {hasFile && (
+                                                                    <button
+                                                                        onClick={visiblePassword ? () => setVisiblePassword(null) : handleViewPassword}
+                                                                        disabled={isLoadingPassword}
+                                                                        className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+                                                                        title={visiblePassword ? "Ocultar contraseña" : "Ver contraseña (5 seg)"}
+                                                                    >
+                                                                        {isLoadingPassword ? (
+                                                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                                        ) : visiblePassword ? (
+                                                                            <EyeOff className="h-3.5 w-3.5" />
+                                                                        ) : (
+                                                                            <Eye className="h-3.5 w-3.5" />
+                                                                        )}
+                                                                    </button>
+                                                                )}
+                                                                <button
+                                                                    onClick={() => setIsEditingPassword(true)}
+                                                                    className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
+                                                                    title={hasFile ? "Cambiar contraseña" : "Agregar contraseña"}
+                                                                >
+                                                                    <Edit className="h-3.5 w-3.5" />
+                                                                </button>
+                                                                {hasFile && (
+                                                                    <button
+                                                                        className="h-7 w-7 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50"
+                                                                        title="Eliminar contraseña"
+                                                                        onClick={() => initiateAction('delete', doc.type)}
+                                                                    >
+                                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                )}
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    }
 
                                     return (
                                         <tr key={doc.type} className="border-b hover:bg-gray-50">
@@ -378,11 +643,32 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                             {/* Actions Cell */}
                                             <td className="py-2 px-4 text-right">
                                                 <div className="flex justify-end gap-1">
-                                                    {isUploading === doc.type ? (
+                                                    {!canManagePassword ? (
+                                                        // Usuarios sin permisos no ven acciones
+                                                        hasFile ? <span className="text-xs text-gray-400">✓</span> : null
+                                                    ) : isUploading === doc.type ? (
                                                         <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
-                                                    ) : (
+                                                    ) : hasFile ? (
+                                                        // Si ya existe el archivo: solo descargar y borrar
                                                         <>
-                                                            {/* Upload button for all document types */}
+                                                            <button
+                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
+                                                                title="Descargar archivo"
+                                                                onClick={() => initiateAction('download', doc.type)}
+                                                            >
+                                                                <Download className="h-4 w-4" />
+                                                            </button>
+                                                            <button
+                                                                className="h-8 w-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50"
+                                                                title="Eliminar archivo"
+                                                                onClick={() => initiateAction('delete', doc.type)}
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        // Si no existe: solo subir
+                                                        <>
                                                             <label
                                                                 htmlFor={`file-${doc.type}`}
                                                                 className="h-7 w-7 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100 cursor-pointer"
@@ -390,7 +676,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                                             >
                                                                 <Upload className="h-3.5 w-3.5" />
                                                             </label>
-
                                                             <input
                                                                 id={`file-${doc.type}`}
                                                                 type="file"
@@ -403,26 +688,6 @@ export default function FielDocumentsSection({ client, onClientUpdated }: FielPr
                                                                 disabled={isUploading !== null}
                                                                 accept={doc.accept}
                                                             />
-
-                                                            {hasFile && (
-                                                                <>
-                                                                    {/* Download button for all document types */}
-                                                                    <button
-                                                                        className="h-8 w-8 rounded-full flex items-center justify-center text-gray-500 hover:bg-gray-100"
-                                                                        title="Descargar archivo"
-                                                                        onClick={() => initiateAction('download', doc.type)}
-                                                                    >
-                                                                        <Download className="h-4 w-4" />
-                                                                    </button>
-                                                                    <button
-                                                                        className="h-8 w-8 rounded-full flex items-center justify-center text-red-500 hover:bg-red-50"
-                                                                        title="Eliminar archivo"
-                                                                        onClick={() => initiateAction('delete', doc.type)}
-                                                                    >
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                    </button>
-                                                                </>
-                                                            )}
                                                         </>
                                                     )}
                                                 </div>

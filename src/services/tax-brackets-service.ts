@@ -10,6 +10,29 @@ export interface TaxBracket {
 }
 
 /**
+ * Interfaz para las tasas de RESICO (Régimen Simplificado de Confianza)
+ * Art. 113-E LISR - Tasa sobre ingresos COBRADOS (sin deducciones)
+ */
+export interface ResicoTaxRate {
+  lowerLimit: number;     // Límite inferior mensual
+  upperLimit: number;     // Límite superior mensual
+  rate: number;           // Tasa aplicable (en decimal, ej: 0.01 = 1%)
+}
+
+/**
+ * Tipo de régimen fiscal para personas físicas
+ */
+export type RegimenFiscalPF = 'PFAE' | 'RESICO';
+
+/**
+ * Códigos de régimen fiscal del SAT
+ */
+export const REGIMEN_CODES = {
+  PFAE: '612',   // Personas Físicas con Actividades Empresariales y Profesionales
+  RESICO: '626', // Régimen Simplificado de Confianza
+} as const;
+
+/**
  * Servicio para obtener las tarifas de ISR por mes y año
  */
 export class TaxBracketsService {
@@ -303,5 +326,92 @@ export class TaxBracketsService {
     
     const isr = bracket.fixedFee + (amount - bracket.lowerLimit) * bracket.percentage;
     return parseFloat(isr.toFixed(2));
+  }
+
+  // ==========================================
+  // RESICO - Régimen Simplificado de Confianza
+  // ==========================================
+
+  /**
+   * Tasas mensuales de ISR para RESICO (Art. 113-E LISR)
+   * Aplica sobre INGRESOS COBRADOS (no sobre utilidad)
+   * Límite anual: 3.5 millones de pesos
+   * 
+   * IMPORTANTE: En RESICO no hay deducciones, el ISR se calcula
+   * directamente sobre los ingresos cobrados del mes.
+   */
+  private static getResicoTaxRates(): ResicoTaxRate[] {
+    return [
+      { lowerLimit: 0.01, upperLimit: 25000.00, rate: 0.0100 },       // 1.00%
+      { lowerLimit: 25000.01, upperLimit: 50000.00, rate: 0.0110 },   // 1.10%
+      { lowerLimit: 50000.01, upperLimit: 83333.33, rate: 0.0150 },   // 1.50%
+      { lowerLimit: 83333.34, upperLimit: 208333.33, rate: 0.0200 },  // 2.00%
+      { lowerLimit: 208333.34, upperLimit: 3500000.00, rate: 0.0250 }, // 2.50%
+    ];
+  }
+
+  /**
+   * Calcula el ISR para RESICO
+   * @param ingresosMensuales Ingresos COBRADOS del mes (no facturados)
+   * @returns ISR a pagar y detalles del cálculo
+   */
+  static calculateISRResico(ingresosMensuales: number): {
+    ingresos: number;
+    tasa: number;
+    isrCausado: number;
+  } {
+    if (ingresosMensuales <= 0) {
+      return { ingresos: 0, tasa: 0, isrCausado: 0 };
+    }
+
+    const rates = this.getResicoTaxRates();
+    const rate = rates.find(r => 
+      ingresosMensuales >= r.lowerLimit && ingresosMensuales <= r.upperLimit
+    );
+
+    // Si excede el límite máximo, usar la tasa más alta (2.50%)
+    const tasaAplicable = rate?.rate || 0.025;
+    const isrCausado = ingresosMensuales * tasaAplicable;
+
+    return {
+      ingresos: ingresosMensuales,
+      tasa: tasaAplicable * 100, // Devolver como porcentaje
+      isrCausado: parseFloat(isrCausado.toFixed(2))
+    };
+  }
+
+  /**
+   * Obtiene la tasa de RESICO aplicable según el monto de ingresos
+   */
+  static getResicoRate(ingresosMensuales: number): number {
+    const rates = this.getResicoTaxRates();
+    const rate = rates.find(r => 
+      ingresosMensuales >= r.lowerLimit && ingresosMensuales <= r.upperLimit
+    );
+    return rate?.rate || 0.025;
+  }
+
+  /**
+   * Devuelve todas las tasas de RESICO (para mostrar tabla en UI)
+   */
+  static getAllResicoRates(): ResicoTaxRate[] {
+    return this.getResicoTaxRates();
+  }
+
+  /**
+   * Verifica si un RFC/cliente puede estar en RESICO
+   * Límite: 3.5 millones de ingresos anuales
+   */
+  static canBeResico(ingresosAnuales: number): boolean {
+    return ingresosAnuales <= 3500000;
+  }
+
+  /**
+   * Detecta el tipo de régimen basado en el código del SAT
+   */
+  static getRegimenType(codigoRegimen: string): RegimenFiscalPF | null {
+    if (codigoRegimen === REGIMEN_CODES.PFAE) return 'PFAE';
+    if (codigoRegimen === REGIMEN_CODES.RESICO) return 'RESICO';
+    return null;
   }
 }
