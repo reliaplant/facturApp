@@ -153,29 +153,25 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
     const isrByMonth: Record<number, number> = {};
     
     for (let month = 1; month <= 12; month++) {
-      // Sumar saldos de IVA que aplican para este mes/año
+      // Sumar saldos de IVA que aplican exactamente en este mes/año
       ivaByMonth[month] = saldosFavor
         .filter(s => {
           if (s.tipo !== 'IVA' || !s.activo) return false;
           const ejAplicacion = s.ejercicioAplicacion || s.ejercicio;
           const mesAplicacion = s.mesAplicacion;
-          // El saldo aplica si: 
-          // - El año de aplicación es anterior al año actual, O
-          // - El año de aplicación es el actual Y el mes de aplicación <= mes actual
-          return ejAplicacion < year || (ejAplicacion === year && mesAplicacion <= month);
+          // El saldo aplica solo en el mes exacto de aplicación
+          return ejAplicacion === year && mesAplicacion === month;
         })
         .reduce((sum, s) => sum + (s.monto - s.montoAplicado), 0);
       
-      // Sumar saldos de ISR que aplican para este mes/año
+      // Sumar saldos de ISR que aplican exactamente en este mes/año
       isrByMonth[month] = saldosFavor
         .filter(s => {
           if (s.tipo !== 'ISR' || !s.activo) return false;
           const ejAplicacion = s.ejercicioAplicacion || s.ejercicio;
           const mesAplicacion = s.mesAplicacion;
-          // El saldo aplica si: 
-          // - El año de aplicación es anterior al año actual, O
-          // - El año de aplicación es el actual Y el mes de aplicación <= mes actual
-          return ejAplicacion < year || (ejAplicacion === year && mesAplicacion <= month);
+          // El saldo aplica solo en el mes exacto de aplicación
+          return ejAplicacion === year && mesAplicacion === month;
         })
         .reduce((sum, s) => sum + (s.monto - s.montoAplicado), 0);
     }
@@ -325,6 +321,48 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
       };
     });
   }, [fiscalSummary, months, monthlyDepreciations]);
+
+  // Cálculo secuencial del flujo de IVA con arrastre de saldo a favor
+  const ivaFlow = useMemo(() => {
+    const result: Record<number, {
+      ivaPorPagar: number;
+      ivaFavorMes: number;
+      ivaFavorAcumulado: number; // saldo a favor restante al final del mes
+      ivaNetoAPagar: number;
+    }> = {};
+    
+    let acumulado = 0; // saldo a favor acumulado que se arrastra
+    
+    for (let m = 0; m < 12; m++) {
+      const collected = monthlyData[m]?.ivaCollected || 0;
+      const paid = monthlyData[m]?.ivaPaid || 0;
+      const retenido = monthlyData[m]?.ivaRetenido || 0;
+      const ivaDiff = collected - paid - retenido;
+      
+      const ivaFavorMes = Math.max(0, -ivaDiff);
+      const ivaPorPagar = Math.max(0, ivaDiff);
+      
+      // Agregar saldo a favor externo (de ejercicios anteriores) y el favor del mes
+      const saldoExterno = saldosFavorPorMes.iva[m + 1] || 0;
+      const totalDisponible = acumulado + ivaFavorMes + saldoExterno;
+      
+      // Aplicar crédito disponible contra IVA por pagar
+      const creditoUsado = Math.min(ivaPorPagar, totalDisponible);
+      const ivaNetoAPagar = ivaPorPagar - creditoUsado;
+      
+      // Saldo restante que se arrastra al siguiente mes
+      acumulado = totalDisponible - creditoUsado;
+      
+      result[m] = {
+        ivaPorPagar,
+        ivaFavorMes,
+        ivaFavorAcumulado: acumulado,
+        ivaNetoAPagar
+      };
+    }
+    
+    return result;
+  }, [monthlyData, saldosFavorPorMes]);
 
   // ISR calculation functions - usando datos calculados dinámicamente
   const calculateMonthISR = (month: number, amount: number) => {
@@ -842,12 +880,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA por Pagar</td>
                   {months.map(month => {
-                    // Consider IVA retenido in the calculation
-                    const collected = monthlyData[month]?.ivaCollected || 0;
-                    const paid = monthlyData[month]?.ivaPaid || 0;
-                    const retenido = monthlyData[month]?.ivaRetenido || 0;
-                    // IVA por pagar = IVA Collected - IVA Paid - IVA Retenido (if positive)
-                    const value = Math.max(0, collected - paid - retenido);
+                    const value = ivaFlow[month]?.ivaPorPagar || 0;
                     return (
                       <td 
                         key={month} 
@@ -861,14 +894,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA a Favor (del mes)</td>
                   {months.map(month => {
-                    // Consider IVA retenido in the calculation
-                    const collected = monthlyData[month]?.ivaCollected || 0;
-                    const paid = monthlyData[month]?.ivaPaid || 0;
-                    const retenido = monthlyData[month]?.ivaRetenido || 0;
-                    // IVA Diff = IVA Collected - IVA Paid - IVA Retenido
-                    const ivaDiff = collected - paid - retenido;
-                    // If negative, it's IVA a favor (absolute value)
-                    const value = ivaDiff < 0 ? Math.abs(ivaDiff) : 0;
+                    const value = ivaFlow[month]?.ivaFavorMes || 0;
                     return (
                       <td 
                         key={month} 
@@ -911,7 +937,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 
                 {/* Saldo a favor IVA (de periodos anteriores) */}
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-blue-50/50">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-blue-700">(-) Saldo a Favor IVA</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-blue-700">(-) Saldo a Favor IVA <span className="text-xs font-normal text-gray-400">(manual)</span></td>
                   {months.map(month => {
                     const value = saldosFavorPorMes.iva[month + 1] || 0;
                     return (
@@ -924,18 +950,28 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                     );
                   })}
                 </tr>
+
+                {/* IVA a Favor Acumulado (se arrastra de meses anteriores) */}
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-green-50/50">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-green-700">IVA a Favor Acumulado</td>
+                  {months.map(month => {
+                    const value = ivaFlow[month]?.ivaFavorAcumulado || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${value > 0 ? 'text-green-700 font-medium' : 'text-gray-400'} ${getCellStyle(month, value)}`}
+                      >
+                        {formatCurrency(value)}
+                      </td>
+                    );
+                  })}
+                </tr>
                 
-                {/* IVA NETO A PAGAR (considerando saldo a favor) */}
+                {/* IVA NETO A PAGAR (considerando saldo a favor acumulado) */}
                 <tr className="border-t-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 bg-gray-100">
                   <td className="pl-7 px-2 py-1.5 font-bold whitespace-nowrap">IVA NETO A PAGAR</td>
                   {months.map(month => {
-                    const collected = monthlyData[month]?.ivaCollected || 0;
-                    const paid = monthlyData[month]?.ivaPaid || 0;
-                    const retenido = monthlyData[month]?.ivaRetenido || 0;
-                    const ivaPorPagar = Math.max(0, collected - paid - retenido);
-                    const saldoFavorIVA = saldosFavorPorMes.iva[month + 1] || 0;
-                    // IVA neto = IVA por pagar - saldo a favor (mínimo 0)
-                    const ivaNetoAPagar = Math.max(0, ivaPorPagar - saldoFavorIVA);
+                    const ivaNetoAPagar = ivaFlow[month]?.ivaNetoAPagar || 0;
                     return (
                       <td 
                         key={month} 
@@ -1038,7 +1074,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                     </tr>
                     {/* Saldo a favor ISR (de periodos anteriores) */}
                     <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-purple-50/50">
-                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR</td>
+                      <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR <span className="text-xs font-normal text-gray-400">(manual)</span></td>
                       {months.map(month => {
                         const value = saldosFavorPorMes.isr[month + 1] || 0;
                         return (
@@ -1321,7 +1357,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 </tr>
                 {/* Saldo a favor ISR (de periodos anteriores) */}
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 bg-purple-50/50">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-700">(-) Saldo a Favor ISR <span className="text-xs font-normal text-gray-400">(manual)</span></td>
                   {months.map(month => {
                     const value = saldosFavorPorMes.isr[month + 1] || 0;
                     return (

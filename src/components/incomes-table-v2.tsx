@@ -59,6 +59,7 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
     handleLockAll
   } = useCFDITable({ type: 'ingresos', year, clientId, invoices, onInvoiceUpdate });
 
+  const [mesDeduccionFilter, setMesDeduccionFilter] = useState<string>('all');
   const [lockModalState, setLockModalState] = useState<'idle' | 'choosing' | 'processing' | 'done'>('idle');
 
   const handleLockAllClick = () => setLockModalState('choosing');
@@ -85,9 +86,25 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
   }, [allFilteredInvoices, helpers]);
 
   // Apply RFC filter
-  const filteredInvoices = rfcFilter === 'all'
+  let filteredInvoices = rfcFilter === 'all'
     ? allFilteredInvoices
     : allFilteredInvoices.filter(inv => inv.rfcReceptor === rfcFilter);
+
+  // Apply mes de cobro filter
+  if (mesDeduccionFilter !== 'all') {
+    if (mesDeduccionFilter === '13-0') {
+      filteredInvoices = filteredInvoices.filter(invoice =>
+        invoice.mesDeduccion === 13 || invoice.anual === true || invoice.usoCFDI?.startsWith('D')
+      );
+    } else {
+      const [mesFilter, anioFilter] = mesDeduccionFilter.split('-').map(Number);
+      filteredInvoices = filteredInvoices.filter(invoice => {
+        if (!invoice.mesDeduccion) return false;
+        const invoiceYear = invoice.anioDeduccion || parseLocalDate(invoice.fecha).getFullYear();
+        return invoice.mesDeduccion === mesFilter && invoiceYear === anioFilter;
+      });
+    }
+  }
 
   // Recalculate invoices by month after filter
   const invoicesByMonth: Record<number, CFDI[]> = {};
@@ -278,23 +295,49 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
               <span className="inline-block h-4 w-16 rounded animate-skeleton-purple mx-auto" />
             ) : (
               <Select
-                value={invoice.mesDeduccion?.toString() || "none"}
+                value={invoice.mesDeduccion ? (invoice.anioDeduccion ? `${invoice.mesDeduccion}-${invoice.anioDeduccion}` : invoice.mesDeduccion.toString()) : "none"}
                 onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
                 disabled={invoice.locked}
               >
-                <SelectTrigger className={`h-7 w-20 text-xs mx-auto ${needsComplement ? 'text-red-500' : ''}`}>
-                  <SelectValue placeholder="-" />
+                <SelectTrigger className={`h-7 w-[100px] text-xs mx-auto ${needsComplement ? 'text-red-500' : ''}`}>
+                  <span className="truncate">
+                    {invoice.mesDeduccion 
+                      ? `${dateUtils.getMonthAbbreviation(invoice.mesDeduccion)} ${invoice.anioDeduccion || year}`
+                      : '-'
+                    }
+                  </span>
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-</SelectItem>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="none" className="justify-center">-</SelectItem>
+                  {/* Previous year months */}
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem 
+                      key={`prev-${i+1}`} 
+                      value={`${i+1}-${year-1}`}
+                      className="text-gray-400"
+                    >
+                      {dateUtils.getMonthAbbreviation(i+1)} {year-1}
+                    </SelectItem>
+                  ))}
+                  {/* Current year months */}
                   {Array.from({ length: 12 }, (_, i) => (
                     <SelectItem 
                       key={i+1} 
-                      value={(i+1).toString()}
-                      className={needsComplement ? 'text-red-500' : ''}
+                      value={`${i+1}-${year}`}
+                      className={needsComplement ? 'text-red-500' : 'font-medium'}
                     >
-                      {dateUtils.getMonthAbbreviation(i+1)}
+                      {dateUtils.getMonthAbbreviation(i+1)} {year}
                       {needsComplement ? " (Sin CP)" : ""}
+                    </SelectItem>
+                  ))}
+                  {/* Next year months */}
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem 
+                      key={`next-${i+1}`} 
+                      value={`${i+1}-${year+1}`}
+                      className="text-gray-500"
+                    >
+                      {dateUtils.getMonthAbbreviation(i+1)} {year+1}
                     </SelectItem>
                   ))}
                   <SelectItem value="13">ANUAL</SelectItem>
@@ -406,6 +449,22 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
                     {rfc} - {nombre.length > 20 ? nombre.substring(0, 20) + '...' : nombre}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            {/* Mes Cobro Filter */}
+            <Select value={mesDeduccionFilter} onValueChange={setMesDeduccionFilter}>
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue placeholder="Mes cobro" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                <SelectItem value="all">Todos los meses</SelectItem>
+                {Array.from({ length: 12 }, (_, i) => (
+                  <SelectItem key={`${i+1}-${year}`} value={`${i+1}-${year}`}>
+                    {dateUtils.getMonthAbbreviation(i+1)} {year}
+                  </SelectItem>
+                ))}
+                <SelectItem value="13-0">ANUAL</SelectItem>
               </SelectContent>
             </Select>
 
