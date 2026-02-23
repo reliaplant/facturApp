@@ -24,14 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 
 export default function TicketsSection() {
   const { user, isSuperAdmin } = useAuth();
@@ -218,124 +210,136 @@ export default function TicketsSection() {
   };
 
   return (
-    <div className="p-6 bg-white min-h-screen">
-      <div className="max-w-6xl mx-auto">
+    <div className="space-y-2">
+      <div className="bg-white dark:bg-gray-800 border-b">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Tickets</h1>
-            <p className="text-sm text-gray-500">Reporta errores o sugiere mejoras</p>
+        <div className="bg-gray-100 px-7 py-2 border-b border-gray-300 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium whitespace-nowrap">
+            Tickets
+          </h2>
+          
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={openNewTicketModal}
+              variant="black"
+              size="xs"
+              className="flex items-center whitespace-nowrap"
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Nuevo Ticket
+            </Button>
           </div>
-          <Button
-            onClick={openNewTicketModal}
-            className="bg-purple-600 hover:bg-purple-700"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Nuevo Ticket
-          </Button>
         </div>
 
-        {/* Tabla de tickets */}
-        {loading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
-          </div>
-        ) : tickets.length === 0 ? (
-          <div className="text-center py-12 text-gray-500 border rounded-lg">
-            <Bug className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-            <p>No hay tickets registrados</p>
-          </div>
-        ) : (
-          <div className="border rounded-lg overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="w-[80px]">Tipo</TableHead>
-                  <TableHead>Descripción</TableHead>
-                  <TableHead className="w-[100px]">Estatus</TableHead>
-                  <TableHead className="w-[120px]">Creado por</TableHead>
-                  <TableHead className="w-[140px]">Fecha</TableHead>
-                  <TableHead className="w-[60px]">Img</TableHead>
-                  {isSuperAdmin && <TableHead className="w-[80px]">Acciones</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {tickets.map((ticket) => (
-                  <TableRow 
-                    key={ticket.id} 
-                    className={`hover:bg-gray-50 ${isSuperAdmin ? 'cursor-pointer' : ''}`}
-                    onClick={() => isSuperAdmin && openEditTicketModal(ticket)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {getTipoIcon(ticket.tipo)}
-                        <span className="text-xs capitalize">{ticket.tipo}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <p className="text-sm line-clamp-2">{ticket.descripcion}</p>
-                      {ticket.notas && (
-                        <p className="text-xs text-blue-600 mt-1">Nota: {ticket.notas}</p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(ticket.estatus)}`}>
-                        {getStatusLabel(ticket.estatus)}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-gray-600">{ticket.creadoPorNombre}</span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-xs text-gray-500">
-                        {format(new Date(ticket.createdAt), "d MMM yy, HH:mm", { locale: es })}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      {ticket.imagenUrl && (
-                        <a 
-                          href={ticket.imagenUrl} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-purple-600 hover:text-purple-800"
-                        >
-                          <ExternalLink className="w-4 h-4" />
-                        </a>
-                      )}
-                    </TableCell>
-                    {isSuperAdmin && (
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEditTicketModal(ticket);
-                            }}
-                            className="p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
-                            title="Editar"
-                          >
-                            <Pencil className="w-4 h-4" />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDelete(ticket.id);
-                            }}
-                            className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+        {/* Table */}
+        <div className="relative">
+          <div className="max-h-[calc(100vh-140px)] overflow-y-auto">
+            {loading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="text-center py-12 text-gray-500 text-xs">
+                No hay tickets registrados
+              </div>
+            ) : (
+              <table className="w-full text-xs relative">
+                <thead className="sticky top-0 z-20">
+                  <tr className="after:absolute after:content-[''] after:h-[4px] after:left-0 after:right-0 after:bottom-0 after:shadow-[0_4px_8px_rgba(0,0,0,0.15)]">
+                    <th className="pl-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left w-[70px]">Tipo</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Descripción</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-[90px]">Estatus</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left w-[120px]">Autor</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left w-[120px]">Creado por</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-[130px]">Fecha</th>
+                    <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-[40px]">Img</th>
+                    {isSuperAdmin && <th className="pr-7 px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-center w-[70px]">Acciones</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {tickets.map((ticket) => (
+                    <tr 
+                      key={ticket.id}
+                      className={`border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 ${isSuperAdmin ? 'cursor-pointer' : ''}`}
+                      onClick={() => isSuperAdmin && openEditTicketModal(ticket)}
+                    >
+                      <td className="pl-7 px-2 py-1.5 align-middle">
+                        <div className="flex items-center gap-1.5">
+                          {getTipoIcon(ticket.tipo)}
+                          <span className="capitalize">{ticket.tipo}</span>
                         </div>
-                      </TableCell>
-                    )}
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        <p className="line-clamp-2">{ticket.descripcion}</p>
+                        {ticket.notas && (
+                          <p className="text-[10px] text-blue-600 mt-0.5">Nota: {ticket.notas}</p>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 align-middle text-center">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${getStatusColor(ticket.estatus)}`}>
+                          {getStatusLabel(ticket.estatus)}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        <span className="text-gray-600">
+                          {ticket.creadoPorNombre?.split(' ')[0] || '-'}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 align-middle">
+                        <span className="text-gray-500">{ticket.creadoPorNombre}</span>
+                      </td>
+                      <td className="px-2 py-1.5 align-middle text-center">
+                        <span className="text-gray-500">
+                          {format(new Date(ticket.createdAt), "d MMM yy, HH:mm", { locale: es })}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 align-middle text-center">
+                        {ticket.imagenUrl && (
+                          <a 
+                            href={ticket.imagenUrl} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-purple-600 hover:text-purple-800"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5 mx-auto" />
+                          </a>
+                        )}
+                      </td>
+                      {isSuperAdmin && (
+                        <td className="pr-7 px-2 py-1.5 align-middle text-center">
+                          <div className="flex items-center justify-center gap-0.5">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openEditTicketModal(ticket);
+                              }}
+                              className="p-1 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded"
+                              title="Editar"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(ticket.id);
+                              }}
+                              className="p-1 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
-        )}
+        </div>
+      </div>
 
         {/* Modal para crear/editar ticket */}
         <Dialog open={modalOpen} onOpenChange={setModalOpen}>
@@ -525,7 +529,6 @@ export default function TicketsSection() {
             </form>
           </DialogContent>
         </Dialog>
-      </div>
     </div>
   );
 }

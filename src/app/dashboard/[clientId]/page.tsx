@@ -9,7 +9,7 @@ import { FiscalSummary } from "@/components/fiscal-summary";
 import { YearSelector } from "@/components/year-selector";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
-import { ChevronLeft, RefreshCw, FileUp } from "lucide-react";
+import { ChevronLeft, RefreshCw, FileUp, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CFDI } from "@/models/CFDI";
 import { processCFDIFiles } from "@/services/cfdi-parser";
@@ -344,6 +344,16 @@ export default function ClientDashboard() {
               <h1 className="text-sm font-medium text-gray-900 dark:text-white">
                 {client.name} <span className="font-normal text-gray-500">({client.rfc})</span>
               </h1>
+              <Link href={`/mi-contabilidad/${clientId}`} target="_blank">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-0 ml-1 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+                  title="Ver vista del cliente"
+                >
+                  <Eye className="h-4 w-4" />
+                </Button>
+              </Link>
             </div>
 
             {/* Add user info with avatar */}
@@ -383,7 +393,7 @@ export default function ClientDashboard() {
                 <TabsTrigger size="sm" value="proveedores" disabled={!perfilCompleto}>Proveedores</TabsTrigger>
                 <TabsTrigger size="sm" value="declaraciones" disabled={!perfilCompleto}>Declaración</TabsTrigger>
                 <TabsTrigger size="sm" value="activos" disabled={!perfilCompleto}>Activos</TabsTrigger>
-                <TabsTrigger size="sm" value="saldos" disabled={!perfilCompleto}>Saldos a Favor</TabsTrigger>
+                <TabsTrigger size="sm" value="saldos" disabled={!perfilCompleto}>Saldos (Manual)</TabsTrigger>
                 {/* <TabsTrigger size="sm" value="checklist">Checklist</TabsTrigger> */}
                 <TabsTrigger size="sm" value="sat" disabled={!perfilCompleto}>SAT Desc Mas.</TabsTrigger>
                 <TabsTrigger size="sm" value="tickets">Tickets</TabsTrigger>
