@@ -63,6 +63,7 @@ export interface UseCFDITableReturn {
   handleEvaluate: () => Promise<void>;
   handleBulkVerify: () => Promise<void>;
   handleCloseVerificationModal: () => void;
+  handleLockAll: (lock: boolean) => Promise<void>;
 }
 
 export interface CFDIHelpers {
@@ -362,6 +363,45 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
       await handleUpdateInvoice({ ...invoice, locked: newLockedStatus });
     } catch {}
   }, [clientId, handleUpdateInvoice]);
+
+  const handleLockAll = useCallback(async (lock: boolean) => {
+    try {
+      // Get all non-complement invoices that need to change
+      const invoicesToUpdate = filteredInvoices.filter(inv => 
+        inv.tipoDeComprobante !== 'P' && inv.locked !== lock
+      );
+      
+      if (invoicesToUpdate.length === 0) return;
+      
+      // Update all in parallel (batches of 10 to avoid overwhelming)
+      const batchSize = 10;
+      for (let i = 0; i < invoicesToUpdate.length; i += batchSize) {
+        const batch = invoicesToUpdate.slice(i, i + batchSize);
+        await Promise.all(
+          batch.map(inv => 
+            cfdiService.updateInvoice(clientId, inv.uuid, { locked: lock })
+          )
+        );
+      }
+      
+      // Update local state for all affected invoices
+      for (const inv of invoicesToUpdate) {
+        await handleUpdateInvoice({ ...inv, locked: lock });
+      }
+      
+      toast({
+        title: lock ? "Facturas bloqueadas" : "Facturas desbloqueadas",
+        description: `${invoicesToUpdate.length} facturas ${lock ? 'bloqueadas' : 'desbloqueadas'} correctamente.`,
+      });
+    } catch (error) {
+      console.error('Error al bloquear/desbloquear facturas:', error);
+      toast({
+        title: "Error",
+        description: "No se pudieron actualizar todas las facturas.",
+        variant: "destructive"
+      });
+    }
+  }, [clientId, filteredInvoices, handleUpdateInvoice, toast]);
 
   const handleMonthSelect = useCallback(async (invoiceUuid: string, monthValue: string) => {
     const invoice = filteredInvoices.find(inv => inv.uuid === invoiceUuid);
@@ -677,6 +717,7 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
     handleEvaluate,
     handleBulkVerify,
     handleCloseVerificationModal,
-    highlightedEvaluated
+    highlightedEvaluated,
+    handleLockAll
   };
 }

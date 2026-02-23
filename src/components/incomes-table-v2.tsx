@@ -11,6 +11,7 @@ import { CFDIPreviewModal } from "@/components/cfdi-preview-modal-v2";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CFDIDeductibilityEditor } from "@/components/cfdi-deductibility-editor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCFDITable } from "@/hooks/useCFDITable";
 import { VerificationProgressModal } from "@/components/verification-progress-modal";
 import { parseLocalDate } from "@/lib/utils";
@@ -54,8 +55,22 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
     handleEvaluate,
     handleBulkVerify,
     verificationModalState,
-    handleCloseVerificationModal
+    handleCloseVerificationModal,
+    handleLockAll
   } = useCFDITable({ type: 'ingresos', year, clientId, invoices, onInvoiceUpdate });
+
+  const [lockModalState, setLockModalState] = useState<'idle' | 'choosing' | 'processing' | 'done'>('idle');
+
+  const handleLockAllClick = () => setLockModalState('choosing');
+
+  const handleLockAction = async (lock: boolean) => {
+    setLockModalState('processing');
+    try {
+      await handleLockAll(lock);
+    } finally {
+      setLockModalState('done');
+    }
+  };
 
   // Get unique receptors for filter dropdown
   const uniqueReceptors = useMemo(() => {
@@ -419,6 +434,18 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
               <Calculator className={`h-3 w-3 mr-1 ${isEvaluating ? "animate-spin" : ""}`} />
               {isEvaluating ? "Evaluando..." : "Evaluar Ingresos"}
             </Button>
+
+            {/* Lock/Unlock All button */}
+            <Button
+              variant="ghost"
+              size="xs"
+              className="h-7 w-7 p-0"
+              onClick={handleLockAllClick}
+              disabled={lockModalState !== 'idle'}
+              title="Bloquear / Desbloquear todo"
+            >
+              <Lock className="h-4 w-4 text-gray-500" />
+            </Button>
           </div>
         </div>
 
@@ -504,6 +531,40 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
         canceledInvoices={verificationModalState.canceledInvoices}
         onClose={handleCloseVerificationModal}
       />
+
+      {/* Lock All Modal */}
+      <Dialog open={lockModalState !== 'idle'} onOpenChange={() => lockModalState !== 'processing' && setLockModalState('idle')}>
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle className="text-center">
+              {lockModalState === 'choosing' && '¿Qué deseas hacer?'}
+              {lockModalState === 'processing' && 'Procesando...'}
+              {lockModalState === 'done' && '¡Listo!'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-3 py-2">
+            {lockModalState === 'choosing' && (
+              <div className="flex gap-2">
+                <Button onClick={() => handleLockAction(true)} className="gap-1.5">
+                  <Lock className="h-4 w-4" /> Bloquear Todo
+                </Button>
+                <Button variant="outline" onClick={() => handleLockAction(false)} className="gap-1.5">
+                  <Unlock className="h-4 w-4" /> Desbloquear Todo
+                </Button>
+              </div>
+            )}
+            {lockModalState === 'processing' && (
+              <RefreshCw className="h-6 w-6 animate-spin text-gray-500" />
+            )}
+            {lockModalState === 'done' && (
+              <>
+                <Check className="h-6 w-6 text-green-500" />
+                <Button size="sm" variant="outline" onClick={() => setLockModalState('idle')}>Cerrar</Button>
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
