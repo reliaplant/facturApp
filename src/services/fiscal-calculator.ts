@@ -70,9 +70,9 @@ function calculateMonthlyIncomeTotals(cfdis: CFDI[]): Record<number, MonthlyInco
     };
   }
   
-  // Filtrar solo CFDIs de ingreso
+  // Filtrar solo CFDIs de ingreso (tipo I y E para notas de crédito)
   const incomeCfdis = cfdis.filter(cfdi => 
-    cfdi.tipoDeComprobante === 'I' && // Ingreso
+    (cfdi.tipoDeComprobante === 'I' || cfdi.tipoDeComprobante === 'E') && // Ingreso y Notas de Crédito
     !cfdi.estaCancelado &&
     cfdi.esDeducible &&
     cfdi.mesDeduccion && 
@@ -84,11 +84,27 @@ function calculateMonthlyIncomeTotals(cfdis: CFDI[]): Record<number, MonthlyInco
   incomeCfdis.forEach(cfdi => {
     const month = cfdi.mesDeduccion!;
     
-    monthlyTotals[month].isrGravado += cfdi.gravadoISR || 0;
-    monthlyTotals[month].isrRetenido += cfdi.isrRetenido || 0;
-    monthlyTotals[month].ivaTrasladado += cfdi.gravadoIVA || 0;
-    monthlyTotals[month].ivaRetenido += cfdi.ivaRetenido || 0;
-    monthlyTotals[month].totalIngresos += cfdi.total || 0;
+    // Factor de conversión para moneda extranjera (solo para valores no modificados)
+    const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+    
+    // Multiplicador: -1 para notas de crédito (tipo E), 1 para el resto
+    const multiplier = cfdi.tipoDeComprobante === 'E' ? -1 : 1;
+    
+    // Para ingresos: usar subTotal si no está modificado manualmente, de lo contrario usar gravadoISR
+    // Si gravadoModificado = true, los valores ya están en MXN (no multiplicar)
+    const isrGravado = cfdi.gravadoModificado 
+      ? (cfdi.gravadoISR || 0) * multiplier // Ya en MXN
+      : (cfdi.subTotal || 0) * tipoCambio * multiplier; // Convertir a MXN
+    
+    const ivaGravado = cfdi.gravadoModificado 
+      ? (cfdi.gravadoIVA || 0) * multiplier // Ya en MXN
+      : (cfdi.impuestoTrasladado || 0) * tipoCambio * multiplier; // Convertir a MXN
+    
+    monthlyTotals[month].isrGravado += isrGravado;
+    monthlyTotals[month].isrRetenido += (cfdi.isrRetenido || 0) * tipoCambio * multiplier;
+    monthlyTotals[month].ivaTrasladado += ivaGravado;
+    monthlyTotals[month].ivaRetenido += (cfdi.ivaRetenido || 0) * tipoCambio * multiplier;
+    monthlyTotals[month].totalIngresos += (cfdi.total || 0) * tipoCambio * multiplier;
     monthlyTotals[month].countCfdis += 1;
   });
   
@@ -126,9 +142,25 @@ function calculateMonthlyExpenseTotals(cfdis: CFDI[]): Record<number, MonthlyExp
   expenseCfdis.forEach(cfdi => {
     const month = cfdi.mesDeduccion!;
     
-    monthlyTotals[month].isrDeducible += cfdi.gravadoISR || 0;
-    monthlyTotals[month].ivaAcreditable += cfdi.gravadoIVA || 0;
-    monthlyTotals[month].totalGastos += cfdi.total || 0;
+    // Factor de conversión para moneda extranjera (solo para valores no modificados)
+    const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+    
+    // Multiplicador: -1 para notas de crédito (tipo E), 1 para el resto
+    // Una nota de crédito recibida reduce nuestros gastos deducibles
+    const multiplier = cfdi.tipoDeComprobante === 'E' ? -1 : 1;
+    
+    // Si gravadoModificado = true, los valores ya están en MXN (no multiplicar)
+    const isrDeducible = cfdi.gravadoModificado 
+      ? (cfdi.gravadoISR || 0) * multiplier // Ya en MXN
+      : (cfdi.gravadoISR || 0) * tipoCambio * multiplier; // Convertir a MXN
+    
+    const ivaAcreditable = cfdi.gravadoModificado 
+      ? (cfdi.gravadoIVA || 0) * multiplier // Ya en MXN
+      : (cfdi.gravadoIVA || 0) * tipoCambio * multiplier; // Convertir a MXN
+    
+    monthlyTotals[month].isrDeducible += isrDeducible;
+    monthlyTotals[month].ivaAcreditable += ivaAcreditable;
+    monthlyTotals[month].totalGastos += (cfdi.total || 0) * tipoCambio * multiplier;
     monthlyTotals[month].countCfdis += 1;
   });
   
@@ -137,18 +169,25 @@ function calculateMonthlyExpenseTotals(cfdis: CFDI[]): Record<number, MonthlyExp
 
 /**
  * Calcula el resumen fiscal completo para un año
+ * Ahora considera anioDeduccion para facturas PPD que cruzan años fiscales
  */
 export function calculateAnnualFiscalSummary(
   cfdis: CFDI[], 
   year: number, 
   clientId: string
 ): AnnualFiscalSummary {
-  // Filtrar CFDIs por año fiscal
-  const yearCfdis = cfdis.filter(cfdi => cfdi.ejercicioFiscal === year);
+  // Para ingresos: usar ejercicioFiscal (los ingresos se reconocen cuando se emite la factura)
+  const incomeCfdis = cfdis.filter(cfdi => 
+    cfdi.esIngreso === true && 
+    cfdi.ejercicioFiscal === year
+  );
   
-  // Separar ingresos y egresos
-  const incomeCfdis = yearCfdis.filter(cfdi => cfdi.esIngreso === true);
-  const expenseCfdis = yearCfdis.filter(cfdi => cfdi.esEgreso === true);
+  // Para egresos: usar anioDeduccion si existe, sino ejercicioFiscal
+  // Esto permite que facturas de un año se deduzcan en otro (ej: PPD pagada en año siguiente)
+  const expenseCfdis = cfdis.filter(cfdi => 
+    cfdi.esEgreso === true &&
+    (cfdi.anioDeduccion ? cfdi.anioDeduccion === year : cfdi.ejercicioFiscal === year)
+  );
   
   // Calcular totales mensuales
   const incomesByMonth = calculateMonthlyIncomeTotals(incomeCfdis);

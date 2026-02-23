@@ -107,6 +107,12 @@ const regimenFiscalCatalogo: Record<string, string> = {
 };
 
 export function CFDIPreviewModal({ cfdi, isOpen, onClose, onUpdate }: CFDIPreviewModalProps) {
+  // Log CFDI data when modal opens
+  if (cfdi && isOpen) {
+    console.log('📋 CFDI Data:', JSON.stringify(cfdi, null, 2));
+    console.log('📋 CFDI Object:', cfdi);
+  }
+  
   if (!cfdi) return null;
 
   const formatCurrency = (amount: number | undefined) => {

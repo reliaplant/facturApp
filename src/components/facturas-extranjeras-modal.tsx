@@ -516,7 +516,6 @@ export function FacturasExtranjerasModal({
                   size="sm"
                   onClick={() => {
                     onDelete(factura.id);
-                    onClose();
                   }} 
                   disabled={loading || factura.locked}
                   className="text-red-500 hover:text-red-700 hover:bg-red-50"

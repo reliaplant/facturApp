@@ -13,6 +13,7 @@ import { CFDIDeductibilityEditor } from "@/components/cfdi-deductibility-editor"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCFDITable } from "@/hooks/useCFDITable";
 import { VerificationProgressModal } from "@/components/verification-progress-modal";
+import { parseLocalDate } from "@/lib/utils";
 
 interface ExpensesTableProps {
   year: number;
@@ -25,6 +26,8 @@ interface ExpensesTableProps {
 export function ExpensesTableV2({ year, invoices = [], disableExport = false, clientId, onInvoiceUpdate }: ExpensesTableProps) {
   // RFC filter is specific to expenses table
   const [rfcFilter, setRfcFilter] = useState<string>('all');
+  // Mes de deducción filter
+  const [mesDeduccionFilter, setMesDeduccionFilter] = useState<string>('all');
 
   const {
     modalState,
@@ -70,9 +73,26 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
   }, [allFilteredInvoices, helpers]);
 
   // Apply RFC filter on top of hook filtering
-  const filteredInvoices = rfcFilter === 'all'
+  let filteredInvoices = rfcFilter === 'all'
     ? allFilteredInvoices 
     : allFilteredInvoices.filter(invoice => invoice.rfcEmisor === rfcFilter);
+
+  // Apply mes de deducción filter
+  if (mesDeduccionFilter !== 'all') {
+    if (mesDeduccionFilter === '13-0') {
+      // Filtrar solo anuales (mes 13 o usoCFDI tipo D o anual=true)
+      filteredInvoices = filteredInvoices.filter(invoice => 
+        invoice.mesDeduccion === 13 || invoice.anual === true || invoice.usoCFDI?.startsWith('D')
+      );
+    } else {
+      const [mesFilter, anioFilter] = mesDeduccionFilter.split('-').map(Number);
+      filteredInvoices = filteredInvoices.filter(invoice => {
+        if (!invoice.mesDeduccion) return false;
+        const invoiceYear = invoice.anioDeduccion || parseLocalDate(invoice.fecha).getFullYear();
+        return invoice.mesDeduccion === mesFilter && invoiceYear === anioFilter;
+      });
+    }
+  }
 
   // Recalculate invoices by month after RFC filter
   const invoicesByMonth: Record<number, CFDI[]> = {};
@@ -97,7 +117,7 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
     
     // Row classes
     const rowClasses = `
-      border-t border-gray-200 dark:border-gray-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer
+      border-t border-gray-200 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20
       ${invoice.locked ? 'opacity-80' : ''}
       ${isHighlighted ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}
       ${isEvaluatedHighlight ? 'animate-skeleton-purple' : ''}
@@ -112,7 +132,6 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
         key={invoice.uuid}
         id={isComplement ? `payment-complement-${invoice.uuid}` : undefined}
         className={rowClasses}
-        onClick={() => handleOpenPreview(invoice)}
       >
         {/* Lock Button */}
         <td className="pl-7 px-2 py-1 align-middle text-center h-[64px]">
@@ -136,13 +155,14 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
         {/* Invoice Info */}
         <td className="px-2 py-1 align-middle">
           <div className="flex flex-col">
-            <span className="text-xs">{format(new Date(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
+            <span className="text-xs">{format(parseLocalDate(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
             <span 
-              className={`text-[10px] text-left ${
+              className={`text-[10px] text-left cursor-pointer hover:underline ${
                 invoice.estaCancelado 
                   ? 'text-red-500 line-through' 
-                  : 'text-purple-500'
+                  : 'text-purple-500 hover:text-purple-700'
               }`}
+              onClick={(e) => { e.stopPropagation(); handleOpenPreview(invoice); }}
             >
               {invoice.uuid.substring(0, 8)}
             </span>
@@ -166,6 +186,11 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
           <div className="flex flex-col">
             <span className={`text-xs ${isS01 ? "text-gray-400" : "font-medium"}`}>
               {invoice.usoCFDI}
+              {invoice.tipoDeComprobante && (
+                <span className={`ml-1 ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : 'text-gray-400'}`}>
+                  ({invoice.tipoDeComprobante})
+                </span>
+              )}
             </span>
             {showForS01 && (
               <span className={`text-[10px] ${
@@ -270,9 +295,16 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
         {/* Total */}
         <td className="px-2 py-1 align-middle text-right font-medium">
           {showCells && (
-            <span className={`text-xs ${isS01 ? "text-gray-400" : ""}`}>
-              ${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-            </span>
+            <div className="flex flex-col">
+              <span className={`text-xs ${isS01 ? "text-gray-400" : ""}`}>
+                ${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </span>
+              {invoice.moneda && invoice.moneda !== 'MXN' && (
+                <span className="text-[9px] text-blue-600 dark:text-blue-400">
+                  {invoice.moneda} (TC: {invoice.tipoCambio?.toFixed(2)})
+                </span>
+              )}
+            </div>
           )}
         </td>
         
@@ -283,23 +315,49 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
               <span className="inline-block h-4 w-16 rounded animate-skeleton-purple mx-auto" />
             ) : (
               <Select
-                value={invoice.mesDeduccion?.toString() || "none"}
+                value={invoice.mesDeduccion ? (invoice.anioDeduccion ? `${invoice.mesDeduccion}-${invoice.anioDeduccion}` : invoice.mesDeduccion.toString()) : "none"}
                 onValueChange={(value) => handleMonthSelect(invoice.uuid, value)}
                 disabled={invoice.locked}
               >
-                <SelectTrigger className={`h-7 w-20 text-xs mx-auto ${needsComplement ? 'text-red-500' : ''}`}>
-                  <SelectValue placeholder="-" />
+                <SelectTrigger className={`h-7 w-[100px] text-xs px-2 ${needsComplement ? 'text-red-500' : ''}`}>
+                  <span className="truncate">
+                    {invoice.mesDeduccion 
+                      ? `${dateUtils.getMonthAbbreviation(invoice.mesDeduccion)} ${invoice.anioDeduccion || year}`
+                      : '-'
+                    }
+                  </span>
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">-</SelectItem>
+                <SelectContent className="max-h-[300px]">
+                  <SelectItem value="none" className="justify-center">-</SelectItem>
+                  {/* Previous year months */}
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem 
+                      key={`prev-${i+1}`} 
+                      value={`${i+1}-${year-1}`}
+                      className="text-gray-400"
+                    >
+                      {dateUtils.getMonthAbbreviation(i+1)} {year-1}
+                    </SelectItem>
+                  ))}
+                  {/* Current year months */}
                   {Array.from({ length: 12 }, (_, i) => (
                     <SelectItem 
                       key={i+1} 
-                      value={(i+1).toString()}
-                      className={needsComplement ? 'text-red-500' : ''}
+                      value={`${i+1}-${year}`}
+                      className={needsComplement ? 'text-red-500' : 'font-medium'}
                     >
-                      {dateUtils.getMonthAbbreviation(i+1)}
+                      {dateUtils.getMonthAbbreviation(i+1)} {year}
                       {needsComplement ? " (Sin CP)" : ""}
+                    </SelectItem>
+                  ))}
+                  {/* Next year months */}
+                  {Array.from({ length: 12 }, (_, i) => (
+                    <SelectItem 
+                      key={`next-${i+1}`} 
+                      value={`${i+1}-${year+1}`}
+                      className="text-gray-500"
+                    >
+                      {dateUtils.getMonthAbbreviation(i+1)} {year+1}
                     </SelectItem>
                   ))}
                   <SelectItem value="13">ANUAL</SelectItem>
@@ -343,8 +401,8 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
             ) : (isAnnualDeduction && invoice.esDeducible) ? (
               <span className="text-gray-400 text-xs">$0.00 (Anual)</span>
             ) : (
-              <span className="text-xs">
-                ${invoice.esDeducible && invoice.mesDeduccion 
+              <span className={`text-xs ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : ''}`}>
+                {invoice.tipoDeComprobante === 'E' ? '-' : ''}${invoice.esDeducible && invoice.mesDeduccion 
                   ? (invoice.gravadoISR || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })
                   : '0.00'}
                 {invoice.gravadoModificado && <span className="text-purple-500 ml-1">(Mod)</span>}
@@ -364,8 +422,8 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
             ) : (isAnnualDeduction && invoice.esDeducible) ? (
               <span className="text-gray-400 text-xs">$0.00 (Anual)</span>
             ) : (
-              <span className="text-xs">
-                ${invoice.esDeducible && invoice.mesDeduccion
+              <span className={`text-xs ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : ''}`}>
+                {invoice.tipoDeComprobante === 'E' ? '-' : ''}${invoice.esDeducible && invoice.mesDeduccion
                   ? (invoice.gravadoIVA || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })
                   : '0.00'}
                 {invoice.gravadoModificado && <span className="text-purple-500 ml-1">(Mod)</span>}
@@ -380,8 +438,8 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
             highlightedEvaluated.includes(invoice.uuid || '') ? (
               <span className="inline-block h-4 w-14 rounded animate-skeleton-purple" />
             ) : (
-              <span className="text-xs">
-                ${invoice.esDeducible && invoice.mesDeduccion
+              <span className={`text-xs ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : ''}`}>
+                {invoice.tipoDeComprobante === 'E' ? '-' : ''}${invoice.esDeducible && invoice.mesDeduccion
                   ? Math.max(0, (invoice.total || 0) - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0)).toLocaleString('es-MX', { minimumFractionDigits: 2 })
                   : '0.00'}
               </span>
@@ -414,6 +472,22 @@ export function ExpensesTableV2({ year, invoices = [], disableExport = false, cl
                     {rfc} - {nombre.length > 20 ? nombre.substring(0, 20) + '...' : nombre}
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            {/* Mes Deducción Filter */}
+            <Select value={mesDeduccionFilter} onValueChange={setMesDeduccionFilter}>
+              <SelectTrigger className="h-7 w-[130px] text-xs">
+                <SelectValue placeholder="Mes deducción" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                <SelectItem value="all">Todos los meses</SelectItem>
+                {Array.from({ length: 12 }, (_, i) => (
+                  <SelectItem key={`${i+1}-${year}`} value={`${i+1}-${year}`}>
+                    {dateUtils.getMonthAbbreviation(i+1)} {year}
+                  </SelectItem>
+                ))}
+                <SelectItem value="13-0">ANUAL</SelectItem>
               </SelectContent>
             </Select>
 

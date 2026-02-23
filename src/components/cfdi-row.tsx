@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Category } from "@/models/Category";
 import { CFDIHelpers, DateUtils } from "@/hooks/useCFDITable";
+import { parseLocalDate } from "@/lib/utils";
 
 interface CFDIRowProps {
   invoice: CFDI;
@@ -94,7 +95,7 @@ export const CFDIRow = React.memo(function CFDIRow({
       {/* Invoice Info */}
       <td className="px-2 py-1 align-middle">
         <div className="flex flex-col">
-          <span>{format(new Date(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
+          <span>{format(parseLocalDate(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
           <button 
             className="text-blue-500 hover:text-blue-700 text-xs text-left"
             onClick={() => onOpenPreview(invoice)}
@@ -127,6 +128,11 @@ export const CFDIRow = React.memo(function CFDIRow({
         <div className="flex flex-col">
           <span className={`${isS01 ? "text-gray-400" : "font-medium"}`}>
             {invoice.usoCFDI}
+            {invoice.tipoDeComprobante && (
+              <span className={`ml-1 ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : 'text-gray-400'}`}>
+                ({invoice.tipoDeComprobante})
+              </span>
+            )}
           </span>
           {showForS01 && (
             <span className={`text-xs ${

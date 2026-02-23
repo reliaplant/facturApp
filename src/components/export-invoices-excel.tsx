@@ -7,6 +7,7 @@ import { CFDI } from "@/models/CFDI";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from 'xlsx';
+import { parseLocalDate } from "@/lib/utils";
 
 interface ExportInvoicesExcelProps {
   invoices?: CFDI[];
@@ -35,10 +36,10 @@ export function ExportInvoicesExcel({
   // Extract invoice processing logic to separate functions for cleaner code
   const processInvoices = useMemo(() => {
     const sortInvoices = (invoicesToSort: CFDI[]) => 
-      [...invoicesToSort].sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+      [...invoicesToSort].sort((a, b) => parseLocalDate(a.fecha).getTime() - parseLocalDate(b.fecha).getTime());
       
     const createEmittedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
-      "Fecha": format(new Date(invoice.fecha), 'dd/MM/yyyy'),
+      "Fecha": format(parseLocalDate(invoice.fecha), 'dd/MM/yyyy'),
       "Tipo Comprobante": invoice.tipoDeComprobante || "",
       "RFC Receptor": invoice.rfcReceptor,
       "Nombre Receptor": invoice.nombreReceptor,
@@ -83,7 +84,7 @@ export function ExportInvoicesExcel({
     }));
     
     const createReceivedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
-      "Fecha": format(new Date(invoice.fecha), 'dd/MM/yyyy'),
+      "Fecha": format(parseLocalDate(invoice.fecha), 'dd/MM/yyyy'),
       "RFC Emisor": invoice.rfcEmisor,
       "Nombre Emisor": invoice.nombreEmisor,
       "RFC Receptor": invoice.rfcReceptor, 

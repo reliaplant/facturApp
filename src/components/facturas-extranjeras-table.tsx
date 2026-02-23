@@ -9,6 +9,7 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { categoryService } from "@/services/category-service";
 import { Category } from "@/models/Category";
+import { parseLocalDate } from "@/lib/utils";
 import { 
   AlertDialog,
   AlertDialogAction,
@@ -85,13 +86,13 @@ export function FacturasExtranjerasTable({ clientId, year }: FacturasExtranjeras
     
     // Sort facturas by date
     const sortedFacturas = [...facturas].sort(
-      (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+      (a, b) => parseLocalDate(a.fecha).getTime() - parseLocalDate(b.fecha).getTime()
     );
     
     // Group by month
     sortedFacturas.forEach(factura => {
       try {
-        const month = new Date(factura.fecha).getMonth() + 1;
+        const month = parseLocalDate(factura.fecha).getMonth() + 1;
         if (!byMonth[month]) {
           byMonth[month] = [];
           monthTotals[month] = 0;
@@ -129,7 +130,10 @@ export function FacturasExtranjerasTable({ clientId, year }: FacturasExtranjeras
     
     try {
       await facturasExtranjerasService.deleteFacturaExtranjera(clientId, facturaToDelete);
-      loadFacturas(); // This will also trigger fiscal data update
+      // Reset all modal states
+      setCurrentFactura(undefined);
+      setModalOpen(false);
+      await loadFacturas(); // This will also trigger fiscal data update
     } catch (error) {
       console.error('Error deleting invoice:', error);
     } finally {
@@ -171,7 +175,7 @@ export function FacturasExtranjerasTable({ clientId, year }: FacturasExtranjeras
   // Formatear la fecha
   const formatDate = (dateString: string) => {
     try {
-      return format(new Date(dateString), 'dd MMM yyyy', { locale: es });
+      return format(parseLocalDate(dateString), 'dd MMM yyyy', { locale: es });
     } catch (error) {
       return 'Fecha inválida';
     }
@@ -353,18 +357,32 @@ export function FacturasExtranjerasTable({ clientId, year }: FacturasExtranjeras
       {/* Modal for adding/editing invoices */}
       <FacturasExtranjerasModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={() => {
+          setModalOpen(false);
+          setCurrentFactura(undefined);
+        }}
         onSuccess={loadFacturas}
         onDelete={(id) => {
-          setFacturaToDelete(id);
-          setDeleteDialogOpen(true);
+          // First close the edit modal, then show delete confirmation
+          setModalOpen(false);
+          setCurrentFactura(undefined);
+          // Use setTimeout to ensure modal is closed before opening dialog
+          setTimeout(() => {
+            setFacturaToDelete(id);
+            setDeleteDialogOpen(true);
+          }, 100);
         }}
         clientId={clientId}
         factura={currentFactura}
       />
       
       {/* Confirmation dialog for deletion */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+        setDeleteDialogOpen(open);
+        if (!open) {
+          setFacturaToDelete(null);
+        }
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
@@ -373,7 +391,10 @@ export function FacturasExtranjerasTable({ clientId, year }: FacturasExtranjeras
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => {
+              setDeleteDialogOpen(false);
+              setFacturaToDelete(null);
+            }}>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={handleDelete} className="bg-red-500 text-white hover:bg-red-600">
               Eliminar
             </AlertDialogAction>

@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { CFDI } from '@/models/CFDI';
 import app from '@/services/firebase';
+import { parseLocalDate } from '@/lib/utils';
 
 // Simple supplier interface
 interface Supplier {
@@ -305,19 +306,50 @@ export const cfdiService = {
   
   /**
    * Helper: Build payment complement map for checking PPD invoices
+   * Uses the actual payment date (fechaPago) from the pagos array, not the complement issue date
    */
   async _buildPaymentComplementMap(clientId: string): Promise<Map<string, Date[]>> {
     const paymentMap = new Map<string, Date[]>();
     const paymentComplements = await this.getInvoices(clientId);
     
-    paymentComplements
-      .filter(inv => inv.tipoDeComprobante === 'P')
-      .forEach(pc => {
-        if (!pc.docsRelacionadoComplementoPago) return;
-        
+    const complements = paymentComplements.filter(inv => inv.tipoDeComprobante === 'P');
+    console.log(`🔍 Found ${complements.length} payment complements`);
+    
+    complements.forEach(pc => {
+      console.log(`\n📄 Processing complement: ${pc.uuid}`);
+      console.log(`   pc.fecha (emisión): ${pc.fecha}`);
+      console.log(`   Has pagos array: ${!!pc.pagos}, length: ${pc.pagos?.length || 0}`);
+      
+      // Use the actual payment date from pagos array
+      if (pc.pagos && pc.pagos.length > 0) {
+        pc.pagos.forEach((pago, idx) => {
+          console.log(`   Pago ${idx}: fechaPago = ${pago.fechaPago}`);
+          // Use fechaPago (actual payment date) instead of pc.fecha (complement issue date)
+          const paymentDate = parseLocalDate(pago.fechaPago);
+          console.log(`   Parsed payment date: ${paymentDate.toISOString()}, month: ${paymentDate.getMonth() + 1}`);
+          
+          if (pago.doctoRelacionados && pago.doctoRelacionados.length > 0) {
+            pago.doctoRelacionados.forEach(doc => {
+              const key = doc.idDocumento.toUpperCase();
+              console.log(`   ➡️ Mapping UUID ${key} to payment month ${paymentDate.getMonth() + 1}`);
+              if (!paymentMap.has(key)) {
+                paymentMap.set(key, [paymentDate]);
+              } else {
+                paymentMap.get(key)?.push(paymentDate);
+              }
+            });
+          } else {
+            console.log(`   ⚠️ No doctoRelacionados in this pago`);
+          }
+        });
+      }
+      // Fallback to old method if pagos array is not available
+      else if (pc.docsRelacionadoComplementoPago) {
+        console.log(`   ⚠️ FALLBACK: Using docsRelacionadoComplementoPago with pc.fecha`);
         pc.docsRelacionadoComplementoPago.forEach(uuid => {
           const key = uuid.toUpperCase();
-          const paymentDate = new Date(pc.fecha);
+          const paymentDate = parseLocalDate(pc.fecha); // Fallback to complement date
+          console.log(`   ➡️ FALLBACK Mapping UUID ${key} to month ${paymentDate.getMonth() + 1}`);
           
           if (!paymentMap.has(key)) {
             paymentMap.set(key, [paymentDate]);
@@ -325,8 +357,12 @@ export const cfdiService = {
             paymentMap.get(key)?.push(paymentDate);
           }
         });
-      });
+      } else {
+        console.log(`   ❌ No pagos and no docsRelacionadoComplementoPago`);
+      }
+    });
     
+    console.log(`\n✅ Payment map has ${paymentMap.size} entries`);
     return paymentMap;
   },
   
@@ -349,12 +385,23 @@ export const cfdiService = {
     // Check if invoice has payment complement
     const hasPayment = this._hasPaymentComplement(invoice, paymentMap);
     
+    // DEBUG: Log payment map lookup for PPD invoices
+    if (invoice.metodoPago === 'PPD') {
+      const uuidKey = invoice.uuid.toUpperCase();
+      const paymentDates = paymentMap.get(uuidKey);
+      console.log(`🔎 PPD Invoice ${invoice.uuid}:`);
+      console.log(`   - UUID key: ${uuidKey}`);
+      console.log(`   - Has payment in map: ${paymentMap.has(uuidKey)}`);
+      console.log(`   - Payment dates from map:`, paymentDates?.map(d => `${d.toISOString()} (month ${d.getMonth() + 1})`));
+      console.log(`   - pagadoConComplementos:`, invoice.pagadoConComplementos);
+    }
+    
     // Donation invoices (D prefix)
     if (invoice.usoCFDI?.startsWith('D')) {
       if (invoice.metodoPago === 'PUE') {
         return {
           shouldBeDeductible: true, 
-          deductionMonth: new Date(invoice.fecha).getMonth() + 1
+          deductionMonth: parseLocalDate(invoice.fecha).getMonth() + 1
         };
       } else if (invoice.metodoPago === 'PPD' && hasPayment) {
         const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
@@ -370,13 +417,13 @@ export const cfdiService = {
     if (invoice.metodoPago === 'PUE') {
       return {
         shouldBeDeductible: supplierIsDeductible,
-        deductionMonth: supplierIsDeductible ? new Date(invoice.fecha).getMonth() + 1 : undefined
+        deductionMonth: supplierIsDeductible ? parseLocalDate(invoice.fecha).getMonth() + 1 : undefined
       };
     } else if (invoice.metodoPago === 'PPD' && hasPayment) {
       const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
       const month = paymentDates && paymentDates.length > 0
         ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-        : new Date(invoice.fecha).getMonth() + 1;
+        : parseLocalDate(invoice.fecha).getMonth() + 1;
       return { 
         shouldBeDeductible: supplierIsDeductible, 
         deductionMonth: supplierIsDeductible ? month : undefined 
@@ -402,7 +449,7 @@ export const cfdiService = {
     
     // PUE invoices are recognized immediately
     if (invoice.metodoPago === 'PUE') {
-      const month = new Date(invoice.fecha).getMonth() + 1;
+      const month = parseLocalDate(invoice.fecha).getMonth() + 1;
       return { shouldBeRecognized: true, recognitionMonth: month };
     } 
     // PPD invoices are recognized when payment is received
@@ -411,7 +458,7 @@ export const cfdiService = {
       // Use the month of the earliest payment
       const month = paymentDates && paymentDates.length > 0
         ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-        : new Date(invoice.fecha).getMonth() + 1;
+        : parseLocalDate(invoice.fecha).getMonth() + 1;
       return { shouldBeRecognized: true, recognitionMonth: month };
     }
     
@@ -685,24 +732,45 @@ export const cfdiService = {
         return { processed: 0, updated: 0, unchanged: 0, skipped: skippedCount };
       }
       
-      // 2. STEP TWO: Get payment complement information
+      // 2. STEP TWO: Get payment complement information - USE fechaPago, not pc.fecha
       console.log("Step 2: Mapping payment complements");
       const paymentMap = new Map<string, Date[]>();
       invoices
         .filter(inv => inv.tipoDeComprobante === 'P')
         .forEach(pc => {
-          if (!pc.docsRelacionadoComplementoPago) return;
-          
-          pc.docsRelacionadoComplementoPago.forEach(uuid => {
-            const key = uuid.toUpperCase();
-            const paymentDate = new Date(pc.fecha);
-            
-            if (!paymentMap.has(key)) {
-              paymentMap.set(key, [paymentDate]);
-            } else {
-              paymentMap.get(key)?.push(paymentDate);
-            }
-          });
+          // Use pagos array with fechaPago (actual payment date)
+          if (pc.pagos && pc.pagos.length > 0) {
+            pc.pagos.forEach(pago => {
+              const paymentDate = parseLocalDate(pago.fechaPago); // ← CORRECTO: fecha real del pago
+              console.log(`💰 Complement ${pc.uuid.slice(0,8)}: fechaPago=${pago.fechaPago} → month ${paymentDate.getMonth() + 1}`);
+              
+              if (pago.doctoRelacionados && pago.doctoRelacionados.length > 0) {
+                pago.doctoRelacionados.forEach(doc => {
+                  const key = doc.idDocumento.toUpperCase();
+                  console.log(`   ➡️ Invoice ${key.slice(0,8)} mapped to month ${paymentDate.getMonth() + 1}`);
+                  if (!paymentMap.has(key)) {
+                    paymentMap.set(key, [paymentDate]);
+                  } else {
+                    paymentMap.get(key)?.push(paymentDate);
+                  }
+                });
+              }
+            });
+          }
+          // Fallback for older data without pagos array
+          else if (pc.docsRelacionadoComplementoPago) {
+            console.log(`⚠️ Complement ${pc.uuid.slice(0,8)}: Using FALLBACK with pc.fecha=${pc.fecha}`);
+            pc.docsRelacionadoComplementoPago.forEach(uuid => {
+              const key = uuid.toUpperCase();
+              const paymentDate = parseLocalDate(pc.fecha); // Fallback to complement date
+              
+              if (!paymentMap.has(key)) {
+                paymentMap.set(key, [paymentDate]);
+              } else {
+                paymentMap.get(key)?.push(paymentDate);
+              }
+            });
+          }
         });
       
       // 3. STEP THREE: Get ALL suppliers in a direct API call
@@ -763,9 +831,10 @@ export const cfdiService = {
         // Get current status
         const currentStatus = {
           isDeductible: invoice.esDeducible === true,
-          month: invoice.mesDeduccion
+          month: invoice.mesDeduccion,
+          year: invoice.anioDeduccion
         };
-        console.log(`Current status: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}`);
+        console.log(`Current status: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}, Year=${currentStatus.year}`);
         
         // Supplier check - DIRECT LOOKUP with explicit console logging
         const supplierRfcKey = invoice.rfcEmisor.toUpperCase();
@@ -775,84 +844,108 @@ export const cfdiService = {
         
         console.log(`Supplier "${invoice.rfcEmisor}": ${hasSupplierInfo ? `Found, deductible=${supplierIsDeductible}, category=${supplierDefaultCategory || 'none'}` : "Not found (defaulting to deductible)"}`);
         
-        // Initialize new status
+        // Initialize new status - now includes year
         let newStatus = {
           isDeductible: false, 
-          month: undefined as number | undefined
+          month: undefined as number | undefined,
+          year: undefined as number | undefined
         };
         
         // Evaluate with explicit rule logic
         if (invoice.usoCFDI === 'S01') {
           // Rule: S01 invoices are NEVER deductible
           console.log("Rule: S01 invoice = NOT deductible");
-          newStatus = { isDeductible: false, month: undefined };
+          newStatus = { isDeductible: false, month: undefined, year: undefined };
         }
         else if (invoice.usoCFDI?.startsWith('D')) {
           // Rules for donations
           if (invoice.metodoPago === 'PUE') {
             // Rule: D + PUE = Always deductible (month of issue)
-            const month = new Date(invoice.fecha).getMonth() + 1;
-            console.log(`Rule: D + PUE = Deductible, month ${month}`);
-            newStatus = { isDeductible: true, month };
+            const invoiceDate = parseLocalDate(invoice.fecha);
+            const month = invoiceDate.getMonth() + 1;
+            const year = invoiceDate.getFullYear();
+            console.log(`Rule: D + PUE = Deductible, month ${month}/${year}`);
+            newStatus = { isDeductible: true, month, year };
           } 
           else if (invoice.metodoPago === 'PPD' && hasPaymentComplement(invoice)) {
             // Rule: D + PPD with payment = Deductible (month of payment)
             const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
-            const month = paymentDates && paymentDates.length > 0
-              ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-              : 13;
-            console.log(`Rule: D + PPD with payment = Deductible, month ${month}`);
-            newStatus = { isDeductible: true, month };
+            if (paymentDates && paymentDates.length > 0) {
+              // Find earliest payment date
+              const earliestPayment = paymentDates.reduce((min, d) => d < min ? d : min, paymentDates[0]);
+              const month = earliestPayment.getMonth() + 1;
+              const year = earliestPayment.getFullYear();
+              console.log(`Rule: D + PPD with payment = Deductible, month ${month}/${year}`);
+              newStatus = { isDeductible: true, month, year };
+            } else {
+              console.log(`Rule: D + PPD with payment = Deductible, month 13 (anual)`);
+              newStatus = { isDeductible: true, month: 13, year: invoice.ejercicioFiscal };
+            }
           } 
           else {
             // Rule: D + PPD without payment = Not deductible yet
             console.log("Rule: D + PPD without payment = Not deductible");
-            newStatus = { isDeductible: false, month: undefined };
+            newStatus = { isDeductible: false, month: undefined, year: undefined };
           }
         } 
         else {
           // Regular invoices - follow supplier status
           if (invoice.metodoPago === 'PUE') {
             // PUE invoices use month of issue
-            const month = new Date(invoice.fecha).getMonth() + 1;
+            const invoiceDate = parseLocalDate(invoice.fecha);
+            const month = invoiceDate.getMonth() + 1;
+            const year = invoiceDate.getFullYear();
             
             // CRITICAL: Use the supplier status for deductibility
             console.log(`Rule: PUE (G-type) = ${supplierIsDeductible ? "Deductible" : "NOT Deductible"} based on supplier status`);
             newStatus = { 
               isDeductible: supplierIsDeductible === true, 
-              month: supplierIsDeductible === true ? month : undefined 
+              month: supplierIsDeductible === true ? month : undefined,
+              year: supplierIsDeductible === true ? year : undefined
             };
           } 
           else if (invoice.metodoPago === 'PPD' && hasPaymentComplement(invoice)) {
-            // PPD with payment - use month of payment
+            // PPD with payment - use month AND YEAR of payment
             const paymentDates = paymentMap.get(invoice.uuid.toUpperCase());
-            const month = paymentDates && paymentDates.length > 0
-              ? Math.min(...paymentDates.map(d => d.getMonth() + 1))
-              : new Date(invoice.fecha).getMonth() + 1;
+            let month: number;
+            let year: number;
+            
+            if (paymentDates && paymentDates.length > 0) {
+              // Find earliest payment date
+              const earliestPayment = paymentDates.reduce((min, d) => d < min ? d : min, paymentDates[0]);
+              month = earliestPayment.getMonth() + 1;
+              year = earliestPayment.getFullYear();
+            } else {
+              const invoiceDate = parseLocalDate(invoice.fecha);
+              month = invoiceDate.getMonth() + 1;
+              year = invoiceDate.getFullYear();
+            }
               
             // CRITICAL: Use the supplier status for deductibility
-            console.log(`Rule: PPD with payment = ${supplierIsDeductible ? "Deductible" : "NOT Deductible"} based on supplier status`);
+            console.log(`Rule: PPD with payment = ${supplierIsDeductible ? "Deductible" : "NOT Deductible"} based on supplier status, month ${month}/${year}`);
             newStatus = { 
               isDeductible: supplierIsDeductible === true, 
-              month: supplierIsDeductible === true ? month : undefined
+              month: supplierIsDeductible === true ? month : undefined,
+              year: supplierIsDeductible === true ? year : undefined
             };
           } 
           else {
             // PPD without payment = Not deductible yet
             console.log("Rule: PPD without payment = Not deductible");
-            newStatus = { isDeductible: false, month: undefined };
+            newStatus = { isDeductible: false, month: undefined, year: undefined };
           }
         }
         
         // Check if update is needed for deductibility OR if category needs to be assigned
         const needsCategoryUpdate = !invoice.categoria && supplierDefaultCategory;
         const needsDeductibilityUpdate = currentStatus.isDeductible !== newStatus.isDeductible || 
-                           currentStatus.month !== newStatus.month;
+                           currentStatus.month !== newStatus.month ||
+                           currentStatus.year !== newStatus.year; // Also check year
         const needsUpdate = needsDeductibilityUpdate || needsCategoryUpdate;
         
         console.log(`Result: ${needsUpdate ? "NEEDS UPDATE" : "No change needed"} (deductibility: ${needsDeductibilityUpdate}, category: ${needsCategoryUpdate})`);
-        console.log(`- From: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}, Category=${invoice.categoria || 'none'}`);
-        console.log(`- To:   Deductible=${newStatus.isDeductible}, Month=${newStatus.month}, Category=${needsCategoryUpdate ? supplierDefaultCategory : (invoice.categoria || 'none')}`);
+        console.log(`- From: Deductible=${currentStatus.isDeductible}, Month=${currentStatus.month}/${currentStatus.year}, Category=${invoice.categoria || 'none'}`);
+        console.log(`- To:   Deductible=${newStatus.isDeductible}, Month=${newStatus.month}/${newStatus.year}, Category=${needsCategoryUpdate ? supplierDefaultCategory : (invoice.categoria || 'none')}`);
         
         if (needsUpdate) {
           const invoiceRef = doc(db, 'clients', clientId, 'cfdi', invoice.uuid);
@@ -862,6 +955,7 @@ export const cfdiService = {
           if (needsDeductibilityUpdate) {
             updateData.esDeducible = newStatus.isDeductible;
             updateData.mesDeduccion = newStatus.month;
+            updateData.anioDeduccion = newStatus.year; // Also save the year
           }
           
           // Type D invoices should always have anual=true
@@ -1044,13 +1138,13 @@ export const cfdiService = {
           // Set gravado values based on recognition - BUT ONLY IF INCOME STATUS CHANGED
           if (needsIncomeUpdate) {
             if (shouldBeRecognized) {
-              // For issued invoices, gravadoISR is the net income (subtract retentions)
+              // For issued invoices, gravadoISR is the FULL subtotal (base gravable)
+              // ISR retenido is tracked separately and doesn't reduce the taxable base
               const baseAmount = invoice.subTotal || 0;
-              const isrWithheld = invoice.isrRetenido || 0;
               
               // Calculate "gravado" values - these represent taxable amounts for income invoices
-              updateData.gravadoISR = Math.round((baseAmount - isrWithheld) * 100) / 100;
-              updateData.gravadoIVA = Math.round(baseAmount * 0.16 * 100) / 100; // Estimate IVA at 16%
+              updateData.gravadoISR = Math.round(baseAmount * 100) / 100;
+              updateData.gravadoIVA = invoice.impuestoTrasladado || Math.round(baseAmount * 0.16 * 100) / 100;
               updateData.gravadoModificado = false;
             } else {
               updateData.gravadoISR = 0;

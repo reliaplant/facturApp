@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { parseLocalDate } from '../lib/utils';
 import { 
   FixedAsset, 
   CreateFixedAssetData, 
@@ -42,6 +43,7 @@ export class FixedAssetService {
   
   /**
    * Calcula la depreciación acumulada y el valor actual hasta una fecha específica
+   * Usa depreciationStartDate si existe, sino usa purchaseDate
    */
   calculateCurrentDepreciation(
     asset: FixedAsset,
@@ -54,20 +56,23 @@ export class FixedAssetService {
       };
     }
     
-    const purchaseDate = new Date(asset.purchaseDate);
+    // Usar depreciationStartDate si existe, sino purchaseDate
+    const depreciationStartDate = asset.depreciationStartDate 
+      ? parseLocalDate(asset.depreciationStartDate) 
+      : parseLocalDate(asset.purchaseDate);
     
-    // Si la fecha de corte es anterior a la compra, no hay depreciación
-    if (cutoffDate < purchaseDate) {
+    // Si la fecha de corte es anterior al inicio de depreciación, no hay depreciación
+    if (cutoffDate < depreciationStartDate) {
       return {
         accumulatedDepreciation: 0,
         currentValue: asset.cost
       };
     }
     
-    // Calcular meses completos transcurridos
+    // Calcular meses completos transcurridos desde inicio de depreciación
     const monthsDiff = 
-      (cutoffDate.getFullYear() - purchaseDate.getFullYear()) * 12 + 
-      (cutoffDate.getMonth() - purchaseDate.getMonth());
+      (cutoffDate.getFullYear() - depreciationStartDate.getFullYear()) * 12 + 
+      (cutoffDate.getMonth() - depreciationStartDate.getMonth());
     
     // Limitar a los meses de vida útil
     const effectiveMonths = Math.min(monthsDiff, asset.usefulLifeMonths);
@@ -123,7 +128,8 @@ export class FixedAssetService {
       hasInvoiceFile: false,        // Por defecto, no hay archivo de factura
       notes: assetData.notes,
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      depreciationStartDate: assetData.depreciationStartDate // Fecha de inicio de depreciación
     };
     
     // Calcular y agregar la depreciación mensual
@@ -241,6 +247,7 @@ export class FixedAssetService {
   
   /**
    * Obtiene la depreciación mensual total para un cliente en un mes específico
+   * Considera fecha de inicio de depreciación y período de vida útil
    */
   async getTotalMonthlyDepreciation(
     clientId: string,
@@ -254,18 +261,30 @@ export class FixedAssetService {
       // Calcular la depreciación mensual total sumando las depreciaciones individuales
       let totalMonthlyDepreciation = 0;
       
+      const periodStartDate = parseLocalDate(startDate);
+      const periodEndDate = parseLocalDate(endDate);
+      
       for (const asset of assets) {
-        // Verificar si el activo estaba activo durante el período
-        const assetPurchaseDate = new Date(asset.purchaseDate);
-        const periodStartDate = new Date(startDate);
-        const periodEndDate = new Date(endDate);
+        // Usar depreciationStartDate si existe, sino purchaseDate
+        const depreciationStartDate = asset.depreciationStartDate 
+          ? parseLocalDate(asset.depreciationStartDate) 
+          : parseLocalDate(asset.purchaseDate);
         
-        // Si el activo se compró después del período, no aplica
-        if (assetPurchaseDate > periodEndDate) {
+        // Si la depreciación aún no ha comenzado para este período, no aplica
+        if (depreciationStartDate > periodEndDate) {
           continue;
         }
         
-        // Si el activo se compró durante el período o antes
+        // Calcular fecha de fin de depreciación (inicio + meses de vida útil)
+        const depreciationEndDate = new Date(depreciationStartDate);
+        depreciationEndDate.setMonth(depreciationEndDate.getMonth() + asset.usefulLifeMonths);
+        
+        // Si la depreciación ya terminó antes de este período, no aplica
+        if (depreciationEndDate < periodStartDate) {
+          continue;
+        }
+        
+        // El activo está dentro del período de depreciación
         const monthlyDepreciation = asset.monthlyDepreciation || this.calculateMonthlyDepreciation(asset);
         totalMonthlyDepreciation += monthlyDepreciation;
       }
@@ -360,6 +379,7 @@ export class FixedAssetService {
 
   /**
    * Genera un historial simulado de depreciación para un activo fijo
+   * Usa depreciationStartDate si existe, sino usa purchaseDate
    */
   generateDepreciationHistory(asset: FixedAsset): DepreciationHistoryItem[] {
     if (!asset) return [];
@@ -367,8 +387,10 @@ export class FixedAssetService {
     const result: DepreciationHistoryItem[] = [];
     const monthlyDepreciation = this.calculateMonthlyDepreciation(asset);
     
-    // Fecha de inicio (fecha de compra)
-    const startDate = new Date(asset.purchaseDate);
+    // Fecha de inicio: usar depreciationStartDate si existe, sino purchaseDate
+    const startDate = asset.depreciationStartDate 
+      ? parseLocalDate(asset.depreciationStartDate) 
+      : parseLocalDate(asset.purchaseDate);
     const startYear = startDate.getFullYear();
     const startMonth = startDate.getMonth() + 1; // getMonth() retorna 0-11
     

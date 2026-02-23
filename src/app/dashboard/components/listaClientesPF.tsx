@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, Search, User, CheckCircle, XCircle, AlertCircle, FileText, Trash2, Loader2 } from "lucide-react";
+import { Plus, Search, User, CheckCircle, XCircle, AlertCircle, FileText, Trash2, Loader2, Eye } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Client } from "@/models/Client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -297,18 +297,21 @@ export const ListaClientesPF = ({
                   </div>
                   <div className="grid grid-cols-4 items-center gap-4">
                     <Label htmlFor="usuario" className="text-right">
-                      Usuario*
+                      Usuario
                     </Label>
                     <Select 
                       value={newClient.selectedUserId} 
-                      onValueChange={(value) => setNewClient({ ...newClient, selectedUserId: value })}
+                      onValueChange={(value) => setNewClient({ ...newClient, selectedUserId: value === "_none" ? "" : value })}
                     >
                       <SelectTrigger id="usuario" className="col-span-3">
-                        <SelectValue placeholder="Selecciona un usuario" />
+                        <SelectValue placeholder="Sin asignar (opcional)" />
                       </SelectTrigger>
                       <SelectContent>
+                        <SelectItem value="_none">
+                          Sin asignar
+                        </SelectItem>
                         {usuariosDisponibles.length === 0 ? (
-                          <SelectItem value="_none" disabled>
+                          <SelectItem value="_no_users" disabled>
                             No hay usuarios disponibles
                           </SelectItem>
                         ) : (
@@ -331,17 +334,12 @@ export const ListaClientesPF = ({
                       </span>
                     </div>
                   )}
-                  {usuariosDisponibles.length === 0 && (
-                    <p className="text-xs text-amber-600 text-center">
-                      Todos los usuarios ya tienen un cliente asignado
-                    </p>
-                  )}
                 </div>
                 <DialogFooter>
                   <Button
                     type="submit"
                     onClick={handleCreateClient}
-                    disabled={isCreating || !newClient.name || !newClient.rfc || !newClient.selectedUserId}
+                    disabled={isCreating || !newClient.name || !newClient.rfc}
                   >
                     {isCreating ? "Creando..." : "Crear cliente"}
                   </Button>
@@ -403,15 +401,13 @@ export const ListaClientesPF = ({
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Usuario Asignado</th>
                   <th className="px-4 py-3 text-center font-medium text-gray-500">Estado</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-500">Última Declaración</th>
-                  {isSuperAdmin && (
-                    <th className="px-4 py-3 text-center font-medium text-gray-500">Acciones</th>
-                  )}
+                  <th className="px-4 py-3 text-center font-medium text-gray-500">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredClients.length === 0 ? (
                   <tr>
-                    <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       No hay clientes
                     </td>
                   </tr>
@@ -472,23 +468,37 @@ export const ListaClientesPF = ({
                               <span className="text-gray-400 text-xs">Sin declaraciones</span>
                             )}
                           </td>
-                          {isSuperAdmin && (
-                            <td className="px-4 py-3 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  setClientToDelete(client);
-                                  setDeleteDialogOpen(true);
-                                }}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </td>
-                          )}
+                          <td className="px-4 py-3 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              <Link href={`/mi-contabilidad/${client.id}`} target="_blank">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+                                  title="Ver contabilidad del cliente"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                </Button>
+                              </Link>
+                              {isSuperAdmin && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  title="Eliminar cliente"
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    setClientToDelete(client);
+                                    setDeleteDialogOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -496,7 +506,7 @@ export const ListaClientesPF = ({
                     {/* Separador si hay inactivos */}
                     {clientesInactivos.length > 0 && (
                       <tr className="bg-red-50 border-y-2 border-red-200">
-                        <td colSpan={isSuperAdmin ? 6 : 5} className="px-4 py-2">
+                        <td colSpan={6} className="px-4 py-2">
                           <div className="flex items-center gap-2 text-red-700 font-medium text-xs">
                             <XCircle className="h-4 w-4" />
                             Clientes Inactivos ({clientesInactivos.length})
@@ -538,23 +548,37 @@ export const ListaClientesPF = ({
                           </span>
                         </td>
                         <td className="px-4 py-3 text-center text-gray-400 text-xs">—</td>
-                        {isSuperAdmin && (
-                          <td className="px-4 py-3 text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setClientToDelete(client);
-                                setDeleteDialogOpen(true);
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </td>
-                        )}
+                        <td className="px-4 py-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <Link href={`/mi-contabilidad/${client.id}`} target="_blank">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-violet-600 hover:text-violet-700 hover:bg-violet-50"
+                                title="Ver contabilidad del cliente"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                            </Link>
+                            {isSuperAdmin && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50"
+                                title="Eliminar cliente"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setClientToDelete(client);
+                                  setDeleteDialogOpen(true);
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </>

@@ -14,6 +14,7 @@ import {
 import { FacturaExtranjera } from '@/models/facturaManual';
 import app from '@/services/firebase';
 import { v4 as uuidv4 } from 'uuid';
+import { parseLocalDate } from '@/lib/utils';
 
 const db = getFirestore(app);
 
@@ -68,8 +69,8 @@ export const facturasExtranjerasService = {
       
       // Sort the invoices by date in descending order
       facturas.sort((a, b) => {
-        const dateA = new Date(a.fecha);
-        const dateB = new Date(b.fecha);
+        const dateA = parseLocalDate(a.fecha);
+        const dateB = parseLocalDate(b.fecha);
         return dateB.getTime() - dateA.getTime();
       });
       
@@ -105,7 +106,7 @@ export const facturasExtranjerasService = {
       
       // If date is updated, update fiscal year as well
       if (factura.fecha) {
-        factura.ejercicioFiscal = new Date(factura.fecha).getFullYear();
+        factura.ejercicioFiscal = parseLocalDate(factura.fecha).getFullYear();
       }
       
       await updateDoc(facturaRef, factura);

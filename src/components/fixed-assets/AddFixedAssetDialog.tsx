@@ -21,10 +21,11 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
     purchaseDate: new Date().toISOString().split('T')[0], // Fecha actual en formato YYYY-MM-DD
     cost: 0,
     depreciationMethod: 'straightLine', // Siempre línea recta
-    usefulLifeMonths: 60, // 5 años por defecto (en meses)
+    usefulLifeMonths: 120, // 10% anual = 10 años por defecto (en meses)
     residualValue: 0, // Siempre 0
     invoiceNumber: '',
     notes: '',
+    depreciationStartDate: '', // Fecha de inicio de depreciación
     // Asegurar que tenemos todos los campos necesarios que podrían requerirse en el backend
 
   });
@@ -38,9 +39,12 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
   };
 
   const handleSelectChange = (name: string, value: string) => {
-    if (name === 'depreciationYears') {
-      // Convertir años a meses para el campo usefulLifeMonths
-      const months = parseInt(value) * 12;
+    if (name === 'depreciationPercent') {
+      // Convertir porcentaje anual a meses de vida útil
+      // Ejemplo: 10% = 10 años = 120 meses, 25% = 4 años = 48 meses
+      const percent = parseFloat(value);
+      const years = 100 / percent;
+      const months = Math.round(years * 12);
       setFormData({
         ...formData,
         usefulLifeMonths: months
@@ -76,7 +80,9 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
         cost: Number(formData.cost),
         usefulLifeMonths: Number(formData.usefulLifeMonths),
         residualValue: 0,
-        depreciationMethod: 'straightLine'
+        depreciationMethod: 'straightLine',
+        // Solo incluir depreciationStartDate si tiene valor
+        ...(formData.depreciationStartDate ? { depreciationStartDate: formData.depreciationStartDate } : {})
       } as CreateFixedAssetData;
 
       console.log("Creando activo con datos:", assetData);
@@ -98,10 +104,11 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
         purchaseDate: new Date().toISOString().split('T')[0],
         cost: 0,
         depreciationMethod: 'straightLine',
-        usefulLifeMonths: 60,
+        usefulLifeMonths: 120, // 10% anual por defecto
         residualValue: 0,
         invoiceNumber: '',
         notes: '',
+        depreciationStartDate: '',
       });
       onAssetAdded();
     } catch (error) {
@@ -122,8 +129,10 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
     }
   };
 
-  // Calculate current depreciation years for display
-  const currentDepreciationYears = Math.round((formData.usefulLifeMonths || 60) / 12);
+  // Calculate current depreciation percent for display
+  const usefulLifeMonths = formData.usefulLifeMonths || 60;
+  const usefulLifeYears = usefulLifeMonths / 12;
+  const currentDepreciationPercent = Math.round(100 / usefulLifeYears);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -187,6 +196,18 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="depreciationStartDate" className="text-right">Inicio Depreciación</Label>
+              <Input
+                id="depreciationStartDate"
+                name="depreciationStartDate"
+                type="date"
+                className="col-span-3"
+                value={formData.depreciationStartDate || ''}
+                onChange={handleInputChange}
+              />
+            </div>
+
+            <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="cost" className="text-right">Valor *</Label>
               <Input
                 id="cost"
@@ -202,21 +223,23 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="depreciationYears" className="text-right">Años de Depreciación *</Label>
+              <Label htmlFor="depreciationPercent" className="text-right">% Depreciación Anual *</Label>
               <Select 
-                name="depreciationYears"
-                value={currentDepreciationYears.toString()}
-                onValueChange={(value) => handleSelectChange('depreciationYears', value)}
+                name="depreciationPercent"
+                value={currentDepreciationPercent.toString()}
+                onValueChange={(value) => handleSelectChange('depreciationPercent', value)}
               >
                 <SelectTrigger className="col-span-3">
-                  <SelectValue placeholder="Años de depreciación" />
+                  <SelectValue placeholder="% de depreciación anual" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">1 año</SelectItem>
-                  <SelectItem value="2">2 años</SelectItem>
-                  <SelectItem value="3">3 años</SelectItem>
-                  <SelectItem value="4">4 años</SelectItem>
-                  <SelectItem value="5">5 años</SelectItem>
+                  <SelectItem value="5">5% (Edificios - 20 años)</SelectItem>
+                  <SelectItem value="10">10% (Mobiliario - 10 años)</SelectItem>
+                  <SelectItem value="25">25% (Vehículos - 4 años)</SelectItem>
+                  <SelectItem value="30">30% (Computación - 3.3 años)</SelectItem>
+                  <SelectItem value="33">33% (3 años)</SelectItem>
+                  <SelectItem value="50">50% (2 años)</SelectItem>
+                  <SelectItem value="100">100% (1 año)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

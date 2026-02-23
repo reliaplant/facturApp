@@ -1,6 +1,7 @@
 import { CFDI, CFDIConcepto, ConceptoImpuesto, CfdiRelacionado, PagoComplemento, DoctoRelacionadoPago } from '@/models/CFDI';
 import { v4 as uuidv4 } from 'uuid';
 import { XMLParser } from 'fast-xml-parser';
+import { parseLocalDate } from '@/lib/utils';
 
 /**
  * Procesa archivos CFDI (XML) y los convierte en objetos CFDI
@@ -49,7 +50,7 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       
       // Obtener información básica de la factura
       const fecha = (comprobante.Fecha || '').split('T')[0];
-      const ejercicioFiscal = fecha ? new Date(fecha).getFullYear() : new Date().getFullYear();
+      const ejercicioFiscal = fecha ? parseLocalDate(fecha).getFullYear() : new Date().getFullYear();
       
       // Normalizar RFCs para comparación
       const rfcEmisor = (emisor.Rfc || '').trim().toUpperCase();
@@ -369,7 +370,7 @@ export async function processCFDIFiles(files: File[], clientId: string, clientRf
       const usoCFDI = receptor.UsoCFDI || 'G03';
       
       // Calcular mes fiscal
-      const mesFiscal = fecha ? new Date(fecha).getMonth() + 1 : undefined;
+      const mesFiscal = fecha ? parseLocalDate(fecha).getMonth() + 1 : undefined;
       
       // Calcular tipo de cambio numérico y total en MXN
       const tipoCambioNum = parseFloat(comprobante.TipoCambio) || 1;
@@ -545,7 +546,7 @@ export function parseCFDIFromString(xmlContent: string, clientId: string, client
     
     // Obtener información básica de la factura
     const fecha = (comprobante.Fecha || '').split('T')[0];
-    const ejercicioFiscal = fecha ? new Date(fecha).getFullYear() : new Date().getFullYear();
+    const ejercicioFiscal = fecha ? parseLocalDate(fecha).getFullYear() : new Date().getFullYear();
     
     // Normalizar RFCs para comparación
     const rfcEmisor = (emisor.Rfc || '').trim().toUpperCase();
@@ -702,7 +703,7 @@ export function parseCFDIFromString(xmlContent: string, clientId: string, client
       fechaCreacion: now,
       fechaActualizacion: now,
       ejercicioFiscal,
-      mesFiscal: fecha ? new Date(fecha).getMonth() + 1 : undefined,
+      mesFiscal: fecha ? parseLocalDate(fecha).getMonth() + 1 : undefined,
       subTotal,
       descuento,
       total,

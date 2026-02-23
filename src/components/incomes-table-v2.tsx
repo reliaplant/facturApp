@@ -13,6 +13,7 @@ import { CFDIDeductibilityEditor } from "@/components/cfdi-deductibility-editor"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCFDITable } from "@/hooks/useCFDITable";
 import { VerificationProgressModal } from "@/components/verification-progress-modal";
+import { parseLocalDate } from "@/lib/utils";
 
 interface IncomesTableProps {
   year: number;
@@ -96,11 +97,10 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
       <tr
         key={invoice.uuid}
         id={isComplement ? `payment-complement-${invoice.uuid}` : undefined}
-        className={`border-t border-gray-200 dark:border-gray-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 cursor-pointer
+        className={`border-t border-gray-200 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-900/20
                   ${invoice.locked ? 'opacity-80' : ''}
                   ${isHighlighted ? '!bg-yellow-100 dark:!bg-yellow-900' : ''}
                   ${isEvaluatedHighlight ? 'animate-skeleton-purple' : ''}`}
-        onClick={() => handleOpenPreview(invoice)}
       >
         {/* Lock Button */}
         <td className="pl-7 px-2 py-1 align-middle text-center h-[64px]">
@@ -124,13 +124,14 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
         {/* Invoice Info */}
         <td className="px-2 py-1 align-middle">
           <div className="flex flex-col">
-            <span className="text-xs">{format(new Date(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
+            <span className="text-xs">{format(parseLocalDate(invoice.fecha), 'dd MMM yyyy', { locale: es })}</span>
             <span 
-              className={`text-[10px] text-left ${
+              className={`text-[10px] text-left cursor-pointer hover:underline ${
                 invoice.estaCancelado 
                   ? 'text-red-500 line-through' 
-                  : 'text-purple-500'
+                  : 'text-purple-500 hover:text-purple-700'
               }`}
+              onClick={(e) => { e.stopPropagation(); handleOpenPreview(invoice); }}
             >
               {invoice.uuid.substring(0, 8)}
             </span>
@@ -150,7 +151,14 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
         {/* Payment Type */}
         <td className="px-2 py-1 align-middle">
           <div className="flex flex-col">
-            <span className="font-medium text-xs">{invoice.usoCFDI}</span>
+            <span className="font-medium text-xs">
+              {invoice.usoCFDI}
+              {invoice.tipoDeComprobante && (
+                <span className={`ml-1 ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : 'text-gray-400'}`}>
+                  ({invoice.tipoDeComprobante})
+                </span>
+              )}
+            </span>
             {!isComplement && (
               <span className={`text-[10px] ${
                 needsComplement ? 'text-red-500 font-medium' : 
@@ -218,19 +226,34 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
 
         {/* Amount Cells */}
         <td className="px-2 py-1 align-middle text-right">
-          {!isComplement && <span className="text-xs">${invoice.subTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>}
+          {!isComplement && (
+            <span className={`text-xs ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : ''}`}>
+              {invoice.tipoDeComprobante === 'E' ? '-' : ''}${invoice.subTotal.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+            </span>
+          )}
         </td>
         <td className="px-2 py-1 align-middle">
           {!isComplement && (
-            <div className="flex flex-col text-[10px] text-right text-gray-500">
-              <span>+IVA: ${(invoice.impuestoTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
-              <span>-IVA: ${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
-              <span>-ISR: ${(invoice.isrRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+            <div className={`flex flex-col text-[10px] text-right ${invoice.tipoDeComprobante === 'E' ? 'text-red-400' : 'text-gray-500'}`}>
+              <span>+IVA: {invoice.tipoDeComprobante === 'E' ? '-' : ''}${(invoice.impuestoTrasladado || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              <span>-IVA: {invoice.tipoDeComprobante === 'E' ? '-' : ''}${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+              <span>-ISR: {invoice.tipoDeComprobante === 'E' ? '-' : ''}${(invoice.isrRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
             </div>
           )}
         </td>
         <td className="px-2 py-1 align-middle text-right font-medium">
-          {!isComplement && <span className="text-xs">${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>}
+          {!isComplement && (
+            <div className="flex flex-col">
+              <span className={`text-xs ${invoice.tipoDeComprobante === 'E' ? 'text-red-500' : ''}`}>
+                {invoice.tipoDeComprobante === 'E' ? '-' : ''}${invoice.total.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+              </span>
+              {invoice.moneda && invoice.moneda !== 'MXN' && (
+                <span className="text-[9px] text-blue-600 dark:text-blue-400">
+                  {invoice.moneda} (TC: {invoice.tipoCambio?.toFixed(2)})
+                </span>
+              )}
+            </div>
+          )}
         </td>
         
         {/* Collection Month */}
@@ -298,7 +321,10 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
             ) : (
               <span className="text-xs">
                 ${invoice.mesDeduccion && invoice.esDeducible 
-                  ? (invoice.gravadoModificado ? (invoice.gravadoISR || 0) : invoice.subTotal).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
+                  ? (invoice.gravadoModificado 
+                      ? (invoice.gravadoISR || 0) // Ya está en MXN
+                      : (invoice.subTotal * (invoice.moneda !== 'MXN' ? (invoice.tipoCambio || 1) : 1)) // Convertir a MXN
+                    ).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
                   : '0.00'}
                 {invoice.gravadoModificado && <span className="text-purple-500 ml-1">(Mod)</span>}
               </span>
@@ -315,7 +341,10 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
             ) : (
               <span className="text-xs">
                 ${invoice.mesDeduccion && invoice.esDeducible 
-                  ? (invoice.gravadoModificado ? (invoice.gravadoIVA || 0) : (invoice.impuestoTrasladado || 0)).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
+                  ? (invoice.gravadoModificado 
+                      ? (invoice.gravadoIVA || 0) // Ya está en MXN
+                      : ((invoice.impuestoTrasladado || 0) * (invoice.moneda !== 'MXN' ? (invoice.tipoCambio || 1) : 1)) // Convertir a MXN
+                    ).toLocaleString('es-MX', { minimumFractionDigits: 2 }) 
                   : '0.00'}
                 {invoice.gravadoModificado && <span className="text-purple-500 ml-1">(Mod)</span>}
               </span>
@@ -329,7 +358,9 @@ export function IncomesTableV2({ year, invoices = [], disableExport = false, cli
               <span className="inline-block h-4 w-14 rounded animate-skeleton-purple" />
             ) : (
               <span className="text-xs">
-                ${(invoice.ivaRetenido || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                ${invoice.mesDeduccion && invoice.esDeducible 
+                  ? ((invoice.ivaRetenido || 0) * (invoice.moneda !== 'MXN' ? (invoice.tipoCambio || 1) : 1)).toLocaleString('es-MX', { minimumFractionDigits: 2 })
+                  : '0.00'}
               </span>
             )
           )}

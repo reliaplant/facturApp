@@ -263,6 +263,7 @@ export interface CFDI {
   // ============================================
   esDeducible?: boolean; // Si es deducible/gravable
   mesDeduccion?: number; // Mes de deducción (1-12, 13=anual)
+  anioDeduccion?: number; // Año de deducción (ej: 2025, 2026) - para complementos de pago que cruzan años
   gravadoISR?: number; // Monto gravado ISR (base para deducción)
   gravadoIVA?: number; // Monto gravado IVA (base para acreditamiento)
   gravadoModificado?: boolean; // Si fue editado manualmente

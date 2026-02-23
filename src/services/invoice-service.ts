@@ -304,6 +304,7 @@ export const invoiceService = {
   
   /**
    * Helper: Build payment complement map for checking PPD invoices
+   * Uses the actual payment date (fechaPago) from the pagos array, not the complement issue date
    */
   async _buildPaymentComplementMap(clientId: string): Promise<Map<string, Date[]>> {
     const paymentMap = new Map<string, Date[]>();
@@ -312,18 +313,37 @@ export const invoiceService = {
     paymentComplements
       .filter(inv => inv.tipoDeComprobante === 'P')
       .forEach(pc => {
-        if (!pc.docsRelacionadoComplementoPago) return;
-        
-        pc.docsRelacionadoComplementoPago.forEach((uuid: string) => {
-          const key = uuid.toUpperCase();
-          const paymentDate = new Date(pc.fecha);
-          
-          if (!paymentMap.has(key)) {
-            paymentMap.set(key, [paymentDate]);
-          } else {
-            paymentMap.get(key)?.push(paymentDate);
-          }
-        });
+        // Use the actual payment date from pagos array
+        if (pc.pagos && pc.pagos.length > 0) {
+          pc.pagos.forEach(pago => {
+            // Use fechaPago (actual payment date) instead of pc.fecha (complement issue date)
+            const paymentDate = new Date(pago.fechaPago);
+            
+            if (pago.doctoRelacionados && pago.doctoRelacionados.length > 0) {
+              pago.doctoRelacionados.forEach(doc => {
+                const key = doc.idDocumento.toUpperCase();
+                if (!paymentMap.has(key)) {
+                  paymentMap.set(key, [paymentDate]);
+                } else {
+                  paymentMap.get(key)?.push(paymentDate);
+                }
+              });
+            }
+          });
+        }
+        // Fallback to old method if pagos array is not available
+        else if (pc.docsRelacionadoComplementoPago) {
+          pc.docsRelacionadoComplementoPago.forEach((uuid: string) => {
+            const key = uuid.toUpperCase();
+            const paymentDate = new Date(pc.fecha); // Fallback to complement date
+            
+            if (!paymentMap.has(key)) {
+              paymentMap.set(key, [paymentDate]);
+            } else {
+              paymentMap.get(key)?.push(paymentDate);
+            }
+          });
+        }
       });
     
     return paymentMap;
@@ -960,14 +980,13 @@ export const invoiceService = {
           
           // Set gravado values based on recognition - for income, this represents taxable income
           if (shouldBeRecognized) {
-            // For issued invoices, gravadoISR is the net income (subtract retentions)
+            // For issued invoices, gravadoISR is the FULL subtotal (base gravable)
+            // ISR retenido is tracked separately and doesn't reduce the taxable base
             const baseAmount = invoice.subTotal || 0;
-            const isrWithheld = invoice.isrRetenido || 0;
-            const ivaWithheld = invoice.ivaRetenido || 0;
             
             // Calculate "gravado" values - these represent taxable amounts for income invoices
-            updateData.gravadoISR = Math.round((baseAmount - isrWithheld) * 100) / 100;
-            updateData.gravadoIVA = Math.round(baseAmount * 0.16 * 100) / 100; // Estimate IVA at 16%
+            updateData.gravadoISR = Math.round(baseAmount * 100) / 100;
+            updateData.gravadoIVA = invoice.impuestoTrasladado || Math.round(baseAmount * 0.16 * 100) / 100;
             updateData.gravadoModificado = false;
           } else {
             updateData.gravadoISR = 0;

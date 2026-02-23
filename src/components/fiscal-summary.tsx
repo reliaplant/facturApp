@@ -14,6 +14,7 @@ import { FacturaExtranjera } from "@/models/facturaManual";
 import DeclaracionModal from "@/components/declaracion-modal";
 import { saldoFavorService } from "@/services/saldo-favor-service";
 import { SaldoFavor } from "@/models/SaldoFavor";
+import { parseLocalDate } from "@/lib/utils";
 
 // Simplified interface for fiscal data - focusing only on key metrics
 export interface MonthlyFiscalData {
@@ -62,24 +63,56 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
   }, [cfdis, year, clientId]);
   
   // Calcular montos exentos por mes (de gastos con IVA exento)
-  const monthlyExento = useMemo(() => {
-    const exento: Record<number, number> = {};
+  // Calcular montos exentos por mes (separando mensuales de anuales)
+  // Ahora consideramos anioDeduccion para facturas PPD que cruzan años
+  const { monthlyExento, monthlyExentoAnual } = useMemo(() => {
+    const exentoMensual: Record<number, number> = {};
+    const exentoAnual: Record<number, number> = {};
     for (let month = 1; month <= 12; month++) {
-      exento[month] = 0;
+      exentoMensual[month] = 0;
+      exentoAnual[month] = 0;
     }
     
-    cfdis
-      .filter(cfdi => cfdi.esEgreso && cfdi.esDeducible && !cfdi.estaCancelado && cfdi.mesDeduccion)
-      .forEach(cfdi => {
+    const egresosDeducibles = cfdis
+      .filter(cfdi => 
+        cfdi.esEgreso && 
+        cfdi.esDeducible && 
+        !cfdi.estaCancelado && 
+        cfdi.mesDeduccion &&
+        // Usar anioDeduccion si existe, sino ejercicioFiscal
+        (cfdi.anioDeduccion ? cfdi.anioDeduccion === year : cfdi.ejercicioFiscal === year)
+      );
+    
+    egresosDeducibles.forEach(cfdi => {
         const month = cfdi.mesDeduccion!;
-        if (month >= 1 && month <= 12) {
-          // Sumar el monto exento del CFDI
-          exento[month] += cfdi.exento || 0;
+        
+        // Factor de conversión para moneda extranjera (solo si no está modificado manualmente)
+        const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+        
+        // Calcular exento: total - gravadoIVA - gravadoISR
+        const exentoCalculado = Math.max(0, (cfdi.total || 0) - (cfdi.gravadoIVA || 0) - (cfdi.gravadoISR || 0));
+        
+        // Aplicar tipo de cambio si es moneda extranjera y no fue modificado manualmente
+        const exentoValue = cfdi.gravadoModificado 
+          ? exentoCalculado 
+          : exentoCalculado * tipoCambio;
+        
+        // Separar anuales (mes 13 o usoCFDI tipo D) de mensuales
+        const esAnual = month === 13 || cfdi.anual === true || cfdi.usoCFDI?.startsWith('D');
+        
+        if (esAnual) {
+          // Para anuales, sumar al mes de la fecha de la factura para visualización
+          const mesFecha = parseLocalDate(cfdi.fecha).getMonth() + 1;
+          if (mesFecha >= 1 && mesFecha <= 12) {
+            exentoAnual[mesFecha] += exentoValue;
+          }
+        } else if (month >= 1 && month <= 12) {
+          exentoMensual[month] += exentoValue;
         }
       });
     
-    return exento;
-  }, [cfdis]);
+    return { monthlyExento: exentoMensual, monthlyExentoAnual: exentoAnual };
+  }, [cfdis, year]);
   
   // Estado para facturas extranjeras cargadas desde Firebase
   const [facturasExtranjeras, setFacturasExtranjeras] = useState<FacturaExtranjera[]>([]);
@@ -95,7 +128,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
     facturasExtranjeras
       .filter(f => f.esDeducible !== false) // Solo incluir las deducibles
       .forEach(factura => {
-        const fechaFactura = new Date(factura.fecha);
+        const fechaFactura = parseLocalDate(factura.fecha);
         const month = fechaFactura.getMonth() + 1; // getMonth() es 0-indexed
         if (month >= 1 && month <= 12) {
           extranjero[month] += factura.totalMXN || 0;
@@ -358,6 +391,20 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
     }
   };
   
+  // Función helper para calcular la base gravable del ISR (restando exento y extranjero)
+  const getBaseGravableISR = (month: number) => {
+    const basePeriodProfit = monthlyData[month]?.periodProfit || 0;
+    // Calcular exento y extranjero acumulado hasta este mes
+    let accumulatedExento = 0;
+    let accumulatedExtranjero = 0;
+    for (let i = 0; i <= month; i++) {
+      const monthKey = (i + 1).toString();
+      accumulatedExento += monthlyExento[parseInt(monthKey)] || 0;
+      accumulatedExtranjero += monthlyExtranjero[parseInt(monthKey)] || 0;
+    }
+    return basePeriodProfit - accumulatedExento - accumulatedExtranjero;
+  };
+  
   // ISR RESICO calculation - usa tasas fijas sobre ingresos (no sobre utilidad)
   const calculateMonthISRResico = (ingresosMensuales: number) => {
     return TaxBracketsService.calculateISRResico(ingresosMensuales);
@@ -584,7 +631,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                   })}
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento (Mes)</td>
                   {months.map(month => {
                     const exentoValue = monthlyExento[month + 1] || 0;
                     return (
@@ -593,6 +640,20 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                         className={`px-2 py-1 align-middle text-center ${getCellStyle(month, exentoValue)}`}
                       >
                         {formatCurrency(exentoValue)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-600">Pagado Exento (Anual)</td>
+                  {months.map(month => {
+                    const exentoAnualValue = monthlyExentoAnual[month + 1] || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center text-purple-600 ${getCellStyle(month, exentoAnualValue)}`}
+                      >
+                        {formatCurrency(exentoAnualValue)}
                       </td>
                     );
                   })}
@@ -819,7 +880,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                   })}
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Pagado Exento (Mes)</td>
                   {months.map(month => {
                     // Calculate exento values - using calculated data from CFDIs
                     const value = monthlyExento[month + 1] || 0;
@@ -827,6 +888,20 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                       <td 
                         key={month} 
                         className={`px-2 py-1 align-middle text-center ${getCellStyle(month, value)}`}
+                      >
+                        {formatCurrency(value)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap text-purple-600">Pagado Exento (Anual)</td>
+                  {months.map(month => {
+                    const value = monthlyExentoAnual[month + 1] || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center text-purple-600 ${getCellStyle(month, value)}`}
                       >
                         {formatCurrency(value)}
                       </td>
@@ -1028,8 +1103,8 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Límite inferior</td>
                   {months.map(month => {
-                    // Use periodProfit instead of periodIncomesTotal for all ISR calculations
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    // Use base gravable (periodProfit - exento - extranjero) for ISR calculations
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1044,8 +1119,8 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Excedente del límite inferior</td>
                   {months.map(month => {
-                    // Update all ISR calculations to use periodProfit
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    // Use base gravable for ISR calculations
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1060,7 +1135,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Porcentaje sobre excedente</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1075,7 +1150,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Impuesto Marginal</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1090,7 +1165,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Cuota Fija</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1105,7 +1180,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Impuestos Art. 113</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     return (
                       <td 
@@ -1135,7 +1210,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                     // For other months, sum up the ISR charges from previous months
                     let previousPayments = 0;
                     for (let i = 0; i < month; i++) {
-                      const prevIncome = monthlyData[i]?.periodProfit || 0;
+                      const prevIncome = getBaseGravableISR(i);
                       const prevIsrCalc = calculateMonthISR(i, prevIncome);
                       const prevRetentions = getAccumulatedRetainedISR(i);
                       const prevIsrCharge = Math.max(0, prevIsrCalc.totalTax - prevRetentions);
@@ -1183,14 +1258,14 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">ISR a Cargo</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     const accRetentions = getAccumulatedRetainedISR(month);
                     
                     // Calculate previous payments for this month
                     let previousPayments = 0;
                     for (let i = 0; i < month; i++) {
-                      const prevIncome = monthlyData[i]?.periodProfit || 0;
+                      const prevIncome = getBaseGravableISR(i);
                       const prevIsrCalc = calculateMonthISR(i, prevIncome);
                       const prevRetentions = getAccumulatedRetainedISR(i);
                       const prevIsrCharge = Math.max(0, prevIsrCalc.totalTax - prevRetentions - 
@@ -1214,14 +1289,14 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Impuesto por pagar</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     const accRetentions = getAccumulatedRetainedISR(month);
                     
                     // Calculate previous payments (same as above)
                     let previousPayments = 0;
                     for (let i = 0; i < month; i++) {
-                      const prevIncome = monthlyData[i]?.periodProfit || 0;
+                      const prevIncome = getBaseGravableISR(i);
                       const prevIsrCalc = calculateMonthISR(i, prevIncome);
                       const prevRetentions = getAccumulatedRetainedISR(i);
                       const prevIsrCharge = Math.max(0, prevIsrCalc.totalTax - prevRetentions - 
@@ -1263,13 +1338,13 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                 <tr className="border-t-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800 bg-gray-100">
                   <td className="pl-7 px-2 py-1.5 font-bold whitespace-nowrap">ISR NETO A PAGAR</td>
                   {months.map(month => {
-                    const income = monthlyData[month]?.periodProfit || 0;
+                    const income = getBaseGravableISR(month);
                     const isrCalc = calculateMonthISR(month, income);
                     const accRetentions = getAccumulatedRetainedISR(month);
                     
                     let previousPayments = 0;
                     for (let i = 0; i < month; i++) {
-                      const prevIncome = monthlyData[i]?.periodProfit || 0;
+                      const prevIncome = getBaseGravableISR(i);
                       const prevIsrCalc = calculateMonthISR(i, prevIncome);
                       const prevRetentions = getAccumulatedRetainedISR(i);
                       const prevIsrCharge = Math.max(0, prevIsrCalc.totalTax - prevRetentions - 

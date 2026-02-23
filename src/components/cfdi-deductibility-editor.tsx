@@ -32,6 +32,9 @@ export function CFDIDeductibilityEditor({
     gravadoModificado: false,
     notasDeducibilidad: ""
   });
+  
+  // Track if user is inputting values in MXN or original currency
+  const [inputInMXN, setInputInMXN] = useState(true);
 
   // Calculate proper gravado values
   const calculateGravados = (inv: CFDI) => {
@@ -53,14 +56,24 @@ export function CFDIDeductibilityEditor({
       // Calculate proper gravado values
       const { gravadoISR, gravadoIVA } = calculateGravados(cfdi);
       
+      // Apply exchange rate if foreign currency
+      const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+      const existingISR = cfdi.gravadoISR || gravadoISR;
+      const existingIVA = cfdi.gravadoIVA || gravadoIVA;
+      
       setFormData({
         esDeducible: cfdi.esDeducible || false,
         mesDeduccion: cfdi.mesDeduccion?.toString() || "none",
-        gravadoISR: cfdi.gravadoISR || gravadoISR,
-        gravadoIVA: cfdi.gravadoIVA || gravadoIVA,
+        // If foreign currency and modified, values are already in MXN in DB
+        // Show them in MXN by default
+        gravadoISR: cfdi.gravadoModificado ? existingISR : existingISR * tipoCambio,
+        gravadoIVA: cfdi.gravadoModificado ? existingIVA : existingIVA * tipoCambio,
         gravadoModificado: cfdi.gravadoModificado || false,
         notasDeducibilidad: cfdi.notasDeducibilidad || ""
       });
+      
+      // Reset input mode to MXN when opening
+      setInputInMXN(true);
     }
   }, [cfdi]);
 
@@ -70,16 +83,37 @@ export function CFDIDeductibilityEditor({
     // Calculate what the values should be automatically
     const { gravadoISR: calculatedISR, gravadoIVA: calculatedIVA } = calculateGravados(cfdi);
     
-    // Check if values were modified from the calculated values
+    // Get exchange rate
+    const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+    const isForeignCurrency = cfdi.moneda && cfdi.moneda !== 'MXN';
+    
+    // Convert form values to MXN if user input is in original currency
+    let finalISR = formData.gravadoISR;
+    let finalIVA = formData.gravadoIVA;
+    
+    if (isForeignCurrency && !inputInMXN) {
+      // User entered in original currency, convert to MXN
+      finalISR = formData.gravadoISR * tipoCambio;
+      finalIVA = formData.gravadoIVA * tipoCambio;
+    }
+    
+    // Check if values were modified from the calculated values (in MXN)
+    const calculatedISRinMXN = calculatedISR * tipoCambio;
+    const calculatedIVAinMXN = calculatedIVA * tipoCambio;
+    
     const isModified = 
-      Math.abs((formData.gravadoISR || 0) - (calculatedISR || 0)) > 0.01 ||
-      Math.abs((formData.gravadoIVA || 0) - (calculatedIVA || 0)) > 0.01;
+      Math.abs((finalISR || 0) - (calculatedISRinMXN || 0)) > 0.01 ||
+      Math.abs((finalIVA || 0) - (calculatedIVAinMXN || 0)) > 0.01;
     
     console.log("Saving cfdi with modified gravado values:", {
       calculatedISR,
       calculatedIVA,
       formISR: formData.gravadoISR,
       formIVA: formData.gravadoIVA,
+      finalISR,
+      finalIVA,
+      inputInMXN,
+      tipoCambio,
       isModified
     });
     
@@ -87,8 +121,9 @@ export function CFDIDeductibilityEditor({
       ...cfdi,
       esDeducible: formData.esDeducible,
       mesDeduccion: formData.mesDeduccion === "none" ? undefined : parseInt(formData.mesDeduccion),
-      gravadoISR: formData.esDeducible ? formData.gravadoISR : 0,
-      gravadoIVA: formData.esDeducible ? formData.gravadoIVA : 0,
+      // Always save in MXN
+      gravadoISR: formData.esDeducible ? finalISR : 0,
+      gravadoIVA: formData.esDeducible ? finalIVA : 0,
       // IMPORTANT: This flag must be set explicitly to true when values differ
       gravadoModificado: isModified,
       notasDeducibilidad: formData.notasDeducibilidad
@@ -110,12 +145,36 @@ export function CFDIDeductibilityEditor({
     
     const { gravadoISR, gravadoIVA } = calculateGravados(cfdi);
     
+    // Apply exchange rate if foreign currency and showing in MXN
+    const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+    
     setFormData({
       ...formData,
-      gravadoISR,
-      gravadoIVA,
+      gravadoISR: inputInMXN ? gravadoISR * tipoCambio : gravadoISR,
+      gravadoIVA: inputInMXN ? gravadoIVA * tipoCambio : gravadoIVA,
       gravadoModificado: false // Reset the flag when values are reset
     });
+  };
+  
+  // Handle currency toggle for input
+  const handleCurrencyToggle = () => {
+    if (!cfdi) return;
+    
+    const tipoCambio = (cfdi.moneda && cfdi.moneda !== 'MXN') ? (cfdi.tipoCambio || 1) : 1;
+    const newInputInMXN = !inputInMXN;
+    
+    // Convert current values
+    setFormData({
+      ...formData,
+      gravadoISR: newInputInMXN 
+        ? formData.gravadoISR * tipoCambio  // Convert to MXN
+        : formData.gravadoISR / tipoCambio, // Convert to original currency
+      gravadoIVA: newInputInMXN 
+        ? formData.gravadoIVA * tipoCambio 
+        : formData.gravadoIVA / tipoCambio
+    });
+    
+    setInputInMXN(newInputInMXN);
   };
 
   // Function to get month abbreviations in Spanish
@@ -179,10 +238,41 @@ export function CFDIDeductibilityEditor({
           {/* Gravados Inputs */}
           {formData.esDeducible && formData.mesDeduccion !== "none" && (
             <>
+              {/* Currency toggle for foreign currency invoices */}
+              {cfdi.moneda && cfdi.moneda !== 'MXN' && (
+                <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                      Factura en {cfdi.moneda}
+                    </span>
+                    <span className="text-xs text-blue-600 dark:text-blue-400">
+                      Tipo de cambio: {cfdi.tipoCambio?.toFixed(4)}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCurrencyToggle}
+                    className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                      inputInMXN 
+                        ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/30 dark:text-green-300' 
+                        : 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-300'
+                    }`}
+                  >
+                    Ingresando en: {inputInMXN ? 'MXN' : cfdi.moneda}
+                  </button>
+                </div>
+              )}
+            
               <div className="grid grid-cols-1 gap-2">
                 {/* Add back the Reset Values button */}
                 <div className="flex justify-between items-center">
-                  <Label htmlFor="gravadoISR">Gravado ISR</Label>
+                  <Label htmlFor="gravadoISR">
+                    Gravado ISR {cfdi.moneda && cfdi.moneda !== 'MXN' && (
+                      <span className="text-xs text-gray-500">
+                        ({inputInMXN ? 'MXN' : cfdi.moneda})
+                      </span>
+                    )}
+                  </Label>
                   <span 
                     className="text-xs text-blue-600 hover:underline cursor-pointer"
                     onClick={handleReset}
@@ -213,7 +303,13 @@ export function CFDIDeductibilityEditor({
               </div>
 
               <div className="grid grid-cols-1 gap-2">
-                <Label htmlFor="gravadoIVA">Gravado IVA</Label>
+                <Label htmlFor="gravadoIVA">
+                  Gravado IVA {cfdi.moneda && cfdi.moneda !== 'MXN' && (
+                    <span className="text-xs text-gray-500">
+                      ({inputInMXN ? 'MXN' : cfdi.moneda})
+                    </span>
+                  )}
+                </Label>
                 <Input
                   id="gravadoIVA"
                   type="number"

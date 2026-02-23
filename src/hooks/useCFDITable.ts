@@ -6,6 +6,7 @@ import { cfdiService } from "@/services/cfdi-service";
 import { categoryService } from "@/services/category-service";
 import { Category } from "@/models/Category";
 import { useToast } from "@/components/ui/use-toast";
+import { parseLocalDate } from "@/lib/utils";
 
 // Types
 export type TableType = 'ingresos' | 'egresos';
@@ -225,7 +226,7 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
 
   // Date utilities
   const dateUtils: DateUtils = useMemo(() => ({
-    getMonth: (dateString: string) => new Date(dateString).getMonth() + 1,
+    getMonth: (dateString: string) => parseLocalDate(dateString).getMonth() + 1,
     getMonthName: (month: number) => {
       const months = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 
                       'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -244,7 +245,7 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
     // Filter for current year and correct type - USE MERGED INVOICES
     const filtered = mergedInvoices.filter(invoice => {
       try {
-        const invoiceYear = new Date(invoice.fecha).getFullYear();
+        const invoiceYear = parseLocalDate(invoice.fecha).getFullYear();
         const correctType = isIngreso ? invoice.esIngreso : invoice.esEgreso;
         return invoiceYear === year && correctType;
       } catch { return false; }
@@ -267,21 +268,39 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
         byMonth[month].push(invoice);
         
         // Calculate tax totals for deductible invoices
-        if (invoice.mesDeduccion && !invoice.estaCancelado && invoice.esDeducible) {
-          const isrValue = invoice.gravadoModificado ? (invoice.gravadoISR || 0) : 
-                          (isIngreso ? invoice.subTotal : (invoice.gravadoISR || 0));
-          const ivaValue = invoice.gravadoModificado ? (invoice.gravadoIVA || 0) : 
-                          (invoice.impuestoTrasladado || 0);
+        // Para egresos: solo contar si anioDeduccion coincide con el año visualizado
+        // (Una factura de 2025 pagada en 2026 no debe sumar en los totales de 2025)
+        const deductionYear = invoice.anioDeduccion || parseLocalDate(invoice.fecha).getFullYear();
+        const mesDeduccion = invoice.mesDeduccion;
+        const shouldCountInTotals = mesDeduccion && 
+          !invoice.estaCancelado && 
+          invoice.esDeducible &&
+          (isIngreso || deductionYear === year); // Para egresos, verificar año de deducción
+        
+        if (shouldCountInTotals && mesDeduccion) {
+          // Factor de conversión para moneda extranjera (solo para valores no modificados)
+          const tipoCambio = (invoice.moneda && invoice.moneda !== 'MXN') ? (invoice.tipoCambio || 1) : 1;
           
-          taxTotals[invoice.mesDeduccion].isr += isrValue;
-          taxTotals[invoice.mesDeduccion].iva += ivaValue;
-          taxTotals[invoice.mesDeduccion].ivaRetenido += invoice.ivaRetenido || 0;
-          taxTotals[invoice.mesDeduccion].ieps += invoice.iepsTrasladado || 0;
+          // Multiplicador: -1 para notas de crédito (tipo E), 1 para el resto
+          const multiplier = invoice.tipoDeComprobante === 'E' ? -1 : 1;
+          
+          // Si gravadoModificado = true, los valores ya están en MXN (no multiplicar)
+          const isrValue = invoice.gravadoModificado 
+            ? (invoice.gravadoISR || 0) * multiplier // Ya en MXN
+            : (isIngreso ? invoice.subTotal : (invoice.gravadoISR || 0)) * tipoCambio * multiplier; // Convertir a MXN
+          const ivaValue = invoice.gravadoModificado 
+            ? (invoice.gravadoIVA || 0) * multiplier // Ya en MXN
+            : (invoice.impuestoTrasladado || 0) * tipoCambio * multiplier; // Convertir a MXN
+          
+          taxTotals[mesDeduccion].isr += isrValue;
+          taxTotals[mesDeduccion].iva += ivaValue;
+          taxTotals[mesDeduccion].ivaRetenido += (invoice.ivaRetenido || 0) * tipoCambio * multiplier;
+          taxTotals[mesDeduccion].ieps += (invoice.iepsTrasladado || 0) * tipoCambio * multiplier;
           
           // Calculate exento for expenses
           if (!isIngreso) {
             const exentoAmount = Math.max(0, (invoice.total || 0) - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0));
-            taxTotals[invoice.mesDeduccion].exento += exentoAmount;
+            taxTotals[mesDeduccion].exento += exentoAmount * tipoCambio * multiplier;
           }
         }
       } catch {}
@@ -289,7 +308,7 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
     
     // Sort invoices within each month
     Object.values(byMonth).forEach(monthInvoices => {
-      monthInvoices.sort((a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime());
+      monthInvoices.sort((a, b) => parseLocalDate(a.fecha).getTime() - parseLocalDate(b.fecha).getTime());
     });
     
     const months = Object.keys(byMonth).map(Number).sort((a, b) => a - b);
@@ -344,18 +363,35 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
     } catch {}
   }, [clientId, handleUpdateInvoice]);
 
-  const handleMonthSelect = useCallback(async (invoiceUuid: string, month: string) => {
+  const handleMonthSelect = useCallback(async (invoiceUuid: string, monthValue: string) => {
     const invoice = filteredInvoices.find(inv => inv.uuid === invoiceUuid);
     if (!invoice || invoice.locked) return;
     
-    const isActive = month !== "none";
-    const numericMonth = isActive ? parseInt(month) : undefined;
+    const isActive = monthValue !== "none";
+    
+    // Parse month and year from value (can be "3" for current year or "3-2026" for specific year)
+    let numericMonth: number | undefined;
+    let numericYear: number | undefined;
+    
+    if (isActive) {
+      if (monthValue.includes('-')) {
+        // Format: "month-year" e.g., "3-2026"
+        const [monthPart, yearPart] = monthValue.split('-');
+        numericMonth = parseInt(monthPart);
+        numericYear = parseInt(yearPart);
+      } else {
+        // Format: "month" only, use current viewing year
+        numericMonth = parseInt(monthValue);
+        numericYear = year; // Use the year from the hook context
+      }
+    }
     
     if (numericMonth === 0) return;
     
     try {
       let updateData: Partial<CFDI> = {
         mesDeduccion: numericMonth,
+        anioDeduccion: numericYear,
         esDeducible: isActive
       };
       
@@ -369,7 +405,7 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
       await cfdiService.updateInvoice(clientId, invoice.uuid, updateData);
       await handleUpdateInvoice({ ...invoice, ...updateData });
     } catch {}
-  }, [filteredInvoices, helpers, clientId, handleUpdateInvoice]);
+  }, [filteredInvoices, helpers, clientId, handleUpdateInvoice, year]);
 
   const handleToggleDeductible = useCallback(async (e: React.MouseEvent, invoice: CFDI) => {
     e.stopPropagation();
@@ -387,7 +423,9 @@ export function useCFDITable({ type, year, clientId, invoices, onInvoiceUpdate }
       
       if (newDeductibleStatus) {
         const currentMonth = isAnnualType ? 13 : (invoice.mesDeduccion || dateUtils.getMonth(new Date().toISOString()));
+        const currentYear = invoice.anioDeduccion || parseLocalDate(invoice.fecha).getFullYear();
         updateData.mesDeduccion = currentMonth;
+        updateData.anioDeduccion = currentYear;
         
         if (!invoice.gravadoModificado) {
           const { gravadoISR, gravadoIVA } = helpers.calculateGravados({ ...invoice, ...updateData, mesDeduccion: currentMonth });
