@@ -9,7 +9,6 @@ import { Configuracion } from "./components/Configuracion";
 import UserManagement from "@/components/user-management";
 import Facturacion from "./components/Facturacion";
 import LegalDocuments from "./components/LegalDocuments";
-import SatLogs from "./components/SatLogs";
 import TicketsSection from "@/components/tickets-section";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
@@ -137,7 +136,6 @@ export default function DashboardPage() {
                     <TabsTrigger size="default" value="usuarios">Usuarios</TabsTrigger>
                     <TabsTrigger size="default" value="configuracion">Categorías</TabsTrigger>
                     <TabsTrigger size="default" value="legal">Legal</TabsTrigger>
-                    <TabsTrigger size="default" value="satLogs">Logs SAT</TabsTrigger>
                     <TabsTrigger size="default" value="tickets">Tickets</TabsTrigger>
                   </TabsList>
                 </Tabs>
@@ -220,10 +218,6 @@ export default function DashboardPage() {
             <LegalDocuments />
           </TabsContent>
           
-          <TabsContent value="satLogs">
-            <SatLogs />
-          </TabsContent>
-
           <TabsContent value="tickets">
             <TicketsSection />
           </TabsContent>

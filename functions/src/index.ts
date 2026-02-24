@@ -461,61 +461,6 @@ export const procesarPaquete = onCall({ timeoutSeconds: 120 }, async (req) => {
 // ============================================
 
 /**
- * Tipos de logs SAT
- */
-type SatLogType =
-  | "request_created"
-  | "request_creation_error"
-  | "verification_started"
-  | "verification_success"
-  | "verification_error"
-  | "verification_rejected"
-  | "download_started"
-  | "download_success"
-  | "download_error"
-  | "processing_started"
-  | "processing_success"
-  | "processing_error"
-  | "processing_partial"
-  | "auto_sync_started"
-  | "auto_sync_completed"
-  | "auto_sync_skipped"
-  | "fiel_validation_error"
-  | "info";
-
-type SatLogLevel = "info" | "success" | "warning" | "error";
-
-/**
- * Helper para crear logs de SAT en Firestore
- */
-async function createSatLog(params: {
-  clientId: string;
-  clientName?: string;
-  requestId?: string;
-  type: SatLogType;
-  level: SatLogLevel;
-  message: string;
-  details?: Record<string, unknown>;
-}): Promise<void> {
-  try {
-    const db = getFirestore();
-    await db.collection("satRequestLogs").add({
-      clientId: params.clientId,
-      clientName: params.clientName || params.clientId,
-      requestId: params.requestId,
-      type: params.type,
-      level: params.level,
-      message: params.message,
-      details: params.details,
-      createdAt: FieldValue.serverTimestamp(),
-      createdBy: "system",
-    });
-  } catch (e: any) {
-    logger.error("Error creating SAT log:", e.message);
-  }
-}
-
-/**
  * Helper para verificar si un cliente tiene FIEL completa y está activo
  */
 async function isClientValidForAutoSync(
@@ -683,17 +628,6 @@ export const autoVerifyPendingRequests = onSchedule({
             lastAutoVerify: new Date().toISOString()
           });
 
-          // Log success
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            requestId,
-            type: "verification_success",
-            level: "success",
-            message: `Verificación automática exitosa - ${packageIds.length} paquete(s)`,
-            details: { packageIds, source: "autoVerify" },
-          });
-
           totalReady++;
         } else if (statusReq.isTypeOf("Rejected") || statusReq.isTypeOf("Failure") || statusReq.isTypeOf("Expired")) {
           // Error del SAT
@@ -704,17 +638,6 @@ export const autoVerifyPendingRequests = onSchedule({
             error: `SAT: ${statusValue}`,
             updatedAt: FieldValue.serverTimestamp(),
             lastAutoVerify: new Date().toISOString()
-          });
-
-          // Log error
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            requestId,
-            type: "verification_rejected",
-            level: "error",
-            message: `Solicitud rechazada por SAT: ${statusValue}`,
-            details: { status: statusValue, source: "autoVerify" },
           });
 
           totalErrors++;
@@ -737,17 +660,6 @@ export const autoVerifyPendingRequests = onSchedule({
       } catch (err: any) {
         logger.error(`❌ Error verificando ${rfc}/${requestId}:`, err.message);
 
-        // Log error
-        await createSatLog({
-          clientId: rfc,
-          clientName: clientData.nombres || clientData.name || rfc,
-          requestId,
-          type: "verification_error",
-          level: "error",
-          message: `Error en verificación automática: ${err.message}`,
-          details: { error: err.message, source: "autoVerify" },
-        });
-
         totalErrors++;
       }
     }
@@ -757,11 +669,11 @@ export const autoVerifyPendingRequests = onSchedule({
 });
 
 /**
- * Crea solicitudes automáticamente cada día a las 6am
- * Solo para clientes que tienen fechas pendientes de sincronizar
+ * Crea solicitudes automáticamente cada día a las 4am (hora de México)
+ * Siempre pide exactamente 1 día: AYER. Sin catch-up ni gaps.
  */
 export const autoCreateDailyRequests = onSchedule({
-  schedule: "0 6 * * *", // Todos los días a las 6:00 AM
+  schedule: "0 4 * * *", // Todos los días a las 4:00 AM
   timeZone: "America/Mexico_City",
   timeoutSeconds: 540,
 }, async () => {
@@ -780,10 +692,11 @@ export const autoCreateDailyRequests = onSchedule({
     return;
   }
 
-  const today = new Date();
-  const yesterday = new Date(today);
+  // Calcular ayer en zona horaria de México
+  const mexicoNow = getMexicoDate();
+  const yesterday = new Date(mexicoNow);
   yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().split("T")[0];
+  const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, "0")}-${String(yesterday.getDate()).padStart(2, "0")}`;
 
   let totalCreated = 0;
   let totalSkipped = 0;
@@ -802,113 +715,59 @@ export const autoCreateDailyRequests = onSchedule({
       continue;
     }
 
-    // Verificar si ya tiene solicitudes pendientes (máximo 2 por tipo)
-    const pendingIssued = await db
-      .collection("clients").doc(rfc)
-      .collection("satRequests")
-      .where("downloadType", "==", "issued")
-      .where("completed", "==", false)
-      .get();
+    // === EMITIDAS (solo ayer) ===
+    try {
+      // Verificar si ya existe una solicitud para ayer emitidas
+      const existingIssued = await db
+        .collection("clients").doc(rfc)
+        .collection("satRequests")
+        .where("downloadType", "==", "issued")
+        .where("from", ">=", `${yesterdayStr} 00:00`)
+        .where("from", "<=", `${yesterdayStr} 23:59`)
+        .get();
 
-    const pendingReceived = await db
-      .collection("clients").doc(rfc)
-      .collection("satRequests")
-      .where("downloadType", "==", "received")
-      .where("completed", "==", false)
-      .get();
-
-    // Obtener última fecha sincronizada
-    const syncStatusDoc = await db
-      .collection("clients").doc(rfc)
-      .collection("satSync").doc("status")
-      .get();
-
-    const syncStatus = syncStatusDoc.exists ? syncStatusDoc.data() : null;
-
-    // Para emitidas
-    if (pendingIssued.size < 2) {
-      const lastIssuedSync = syncStatus?.lastIssuedSync || `${today.getFullYear()}-01-01`;
-      const lastDate = new Date(lastIssuedSync);
-
-      // Si la última sync es anterior a ayer, crear solicitud
-      if (lastDate < yesterday) {
-        try {
-          const requestId = await createRequestForClient(rfc, "issued", lastIssuedSync, yesterdayStr, bucket, db);
-          totalCreated++;
-          logger.info(`✅ Creada solicitud EMITIDAS para ${rfc}`);
-
-          // Log success
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            requestId,
-            type: "request_created",
-            level: "success",
-            message: `Solicitud automática creada (emitidas) - ${lastIssuedSync} a ${yesterdayStr}`,
-            details: { downloadType: "issued", from: lastIssuedSync, to: yesterdayStr, source: "autoCreate" },
-          });
-        } catch (err: any) {
-          logger.error(`❌ Error creando solicitud emitidas para ${rfc}:`, err.message);
-
-          // Log error
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            type: "request_creation_error",
-            level: "error",
-            message: `Error creando solicitud automática (emitidas): ${err.message}`,
-            details: { downloadType: "issued", error: err.message, source: "autoCreate" },
-          });
-        }
+      if (existingIssued.empty) {
+        const requestId = await createRequestForClient(rfc, "issued", yesterdayStr, yesterdayStr, bucket, db);
+        totalCreated++;
+        logger.info(`✅ ${rfc} emitidas ${yesterdayStr} - RequestId: ${requestId}`);
       } else {
+        logger.info(`⏭️ ${rfc} emitidas ${yesterdayStr}: ya existe solicitud`);
         totalSkipped++;
       }
+    } catch (err: any) {
+      logger.error(`❌ Error emitidas ${rfc} ${yesterdayStr}:`, err.message);
     }
 
-    // Para recibidas
-    if (pendingReceived.size < 2) {
-      const lastReceivedSync = syncStatus?.lastReceivedSync || `${today.getFullYear()}-01-01`;
-      const lastDate = new Date(lastReceivedSync);
+    // Pausa entre emitidas y recibidas
+    await new Promise((resolve) => setTimeout(resolve, 2000));
 
-      if (lastDate < yesterday) {
-        try {
-          const requestId = await createRequestForClient(rfc, "received", lastReceivedSync, yesterdayStr, bucket, db);
-          totalCreated++;
-          logger.info(`✅ Creada solicitud RECIBIDAS para ${rfc}`);
+    // === RECIBIDAS (solo ayer) ===
+    try {
+      const existingReceived = await db
+        .collection("clients").doc(rfc)
+        .collection("satRequests")
+        .where("downloadType", "==", "received")
+        .where("from", ">=", `${yesterdayStr} 00:00`)
+        .where("from", "<=", `${yesterdayStr} 23:59`)
+        .get();
 
-          // Log success
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            requestId,
-            type: "request_created",
-            level: "success",
-            message: `Solicitud automática creada (recibidas) - ${lastReceivedSync} a ${yesterdayStr}`,
-            details: { downloadType: "received", from: lastReceivedSync, to: yesterdayStr, source: "autoCreate" },
-          });
-        } catch (err: any) {
-          logger.error(`❌ Error creando solicitud recibidas para ${rfc}:`, err.message);
-
-          // Log error
-          await createSatLog({
-            clientId: rfc,
-            clientName: clientData.nombres || clientData.name || rfc,
-            type: "request_creation_error",
-            level: "error",
-            message: `Error creando solicitud automática (recibidas): ${err.message}`,
-            details: { downloadType: "received", error: err.message, source: "autoCreate" },
-          });
-        }
+      if (existingReceived.empty) {
+        const requestId = await createRequestForClient(rfc, "received", yesterdayStr, yesterdayStr, bucket, db);
+        totalCreated++;
+        logger.info(`✅ ${rfc} recibidas ${yesterdayStr} - RequestId: ${requestId}`);
       } else {
+        logger.info(`⏭️ ${rfc} recibidas ${yesterdayStr}: ya existe solicitud`);
         totalSkipped++;
       }
+    } catch (err: any) {
+      logger.error(`❌ Error recibidas ${rfc} ${yesterdayStr}:`, err.message);
     }
 
     // Pausa entre clientes
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  logger.info(`🏁 Creación automática completada: ${totalCreated} creadas, ${totalSkipped} al día`);
+  logger.info(`🏁 Creación automática completada: ${totalCreated} creadas, ${totalSkipped} saltados`);
 });
 
 /**
@@ -942,9 +801,11 @@ async function createRequestForClient(
   const requestBuilder = new FielRequestBuilder(fiel);
   const service = new Service(requestBuilder, webClient);
 
-  // Formatear fechas
-  const from = `${fromDate} 00:00:00`;
-  const to = `${toDate} 23:59:59`;
+  // Formatear fechas con segundos aleatorios para simular naturalidad
+  const startSec = String(Math.floor(Math.random() * 3)).padStart(2, "0"); // 00, 01, 02
+  const endSec = String(57 + Math.floor(Math.random() * 3)).padStart(2, "0"); // 57, 58, 59
+  const from = `${fromDate} 00:00:${startSec}`;
+  const to = `${toDate} 23:59:${endSec}`;
 
   // Crear parámetros - usar constructores como en validarFiel
   const period = DateTimePeriod.createFromValues(from, to);
