@@ -6,7 +6,46 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+
+/**
+ * Intenta extraer una explicación legible de un mensaje de error del SAT
+ */
+function parseErrorExplanation(error: string): string | null {
+  if (!error) return null;
+
+  // Nuevo formato: "SAT statusReq:5 codeReq:5001(...)"
+  const codeMatch = error.match(/codeReq:(\d+)/);
+  if (codeMatch) {
+    const code = parseInt(codeMatch[1]);
+    if (code === 5001) return "Límite máximo de solicitudes alcanzado para este RFC. Reintenta mañana.";
+    if (code === 5002) return "Solicitudes de vida útil agotadas para este período exacto. Cambia el rango de fechas por 1 segundo para reintentar.";
+    if (code === 5003) return "Solicitud duplicada — ya existe una solicitud activa para este mismo período.";
+    if (code === 5004) return "Sin facturas en este período (resultado normal).";
+    // Extraer el mensaje entre paréntesis si existe
+    const msgMatch = error.match(/codeReq:\d+\(([^)]+)\)/);
+    if (msgMatch) return msgMatch[1];
+  }
+
+  // Viejo formato: "SAT: 5 - Solicitud Aceptada" — statusReq=5 significa Rejected
+  if (error.match(/SAT:\s*5/)) {
+    return "El SAT rechazó la solicitud (código 5 = Rejected). La razón exacta no fue registrada. Posibles causas: límite de solicitudes alcanzado o período ya consultado dos veces.";
+  }
+  if (error.match(/SAT:\s*3/)) {
+    return "Fallo interno del SAT al procesar la solicitud.";
+  }
+  if (error.match(/SAT:\s*6/)) {
+    return "La solicitud expiró antes de ser procesada por el SAT.";
+  }
+
+  return null;
+}
 
 interface SatCalendarGridProps {
   requests: SatRequest[];
@@ -14,7 +53,7 @@ interface SatCalendarGridProps {
   onYearChange?: (year: number) => void;
 }
 
-type DayStatus = "processed" | "ready" | "pending" | "error" | "no-invoices" | "none";
+type DayStatus = "processed" | "partial" | "ready" | "pending" | "error" | "no-invoices" | "none";
 
 const MONTH_NAMES = [
   "Ene", "Feb", "Mar", "Abr", "May", "Jun",
@@ -49,15 +88,24 @@ function extractDate(fromOrTo: string): string {
 function getDayStatus(request: SatRequest | undefined): DayStatus {
   if (!request) return "none";
 
+  // Éxito total: procesado sin errores
   if (request.packagesProcessed && !request.processedWithErrors && !request.error) {
     return "processed";
   }
-  if (request.processedWithErrors || request.error || request.verifyError || request.downloadError) {
+  // Éxito parcial: se importaron algunos CFDIs pero hubo errores
+  if (request.processedWithErrors && (request.processedCount ?? 0) > 0) {
+    return "partial";
+  }
+  // Error real: SAT rechazó, o falló verificación/descarga, o procesó 0 con errores
+  if (request.error || request.verifyError || request.downloadError ||
+      (request.processedWithErrors && (request.processedCount ?? 0) === 0)) {
     return "error";
   }
+  // Sin facturas ese día
   if (request.completed && request.packageIds?.length === 0) {
     return "no-invoices";
   }
+  // Listo para importar (tiene paquetes pero no procesado)
   if (
     request.completed ||
     request.status === "3" ||
@@ -67,12 +115,13 @@ function getDayStatus(request: SatRequest | undefined): DayStatus {
   ) {
     return "ready";
   }
-  // pending / in_progress / requested
+  // Pendiente / en proceso
   return "pending";
 }
 
 const STATUS_COLORS: Record<DayStatus, string> = {
   processed: "bg-green-500/70",
+  partial: "bg-orange-400/70",
   ready: "bg-blue-400/70",
   pending: "bg-amber-400/70",
   error: "bg-red-400/70",
@@ -82,6 +131,7 @@ const STATUS_COLORS: Record<DayStatus, string> = {
 
 const STATUS_LABELS: Record<DayStatus, string> = {
   processed: "Procesado",
+  partial: "Parcial (con errores)",
   ready: "Listo para importar",
   pending: "Pendiente / En proceso",
   error: "Error",
@@ -95,6 +145,7 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
   onYearChange,
 }) => {
   const [viewType, setViewType] = useState<"issued" | "received" | "both">("both");
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   /**
    * Construye un mapa: "YYYY-MM-DD" -> { issued: SatRequest, received: SatRequest }
@@ -170,10 +221,10 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
     if (issuedStatus === "none" && receivedStatus === "none") return "none";
     // Si solo uno tiene datos, mostrar ese
     if (issuedStatus === "none") return receivedStatus;
-    if (receivedStatus === "none") return "none"; // Falta uno de los dos
+    if (receivedStatus === "none") return issuedStatus;
 
     // Ambos tienen datos: mostrar el peor
-    const priority: DayStatus[] = ["error", "pending", "ready", "no-invoices", "processed"];
+    const priority: DayStatus[] = ["error", "partial", "pending", "ready", "no-invoices", "processed"];
     for (const status of priority) {
       if (issuedStatus === status || receivedStatus === status) return status;
     }
@@ -223,13 +274,13 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
           }
           const worst = getCombinedStatus(dayKey);
           if (worst === "processed" || worst === "no-invoices") synced++;
-          else if (worst === "error") errors++;
+          else if (worst === "error" || worst === "partial") errors++;
           else if (worst === "pending" || worst === "ready") pending++;
           else missing++;
         } else {
           const status = getCombinedStatus(dayKey);
           if (status === "processed" || status === "no-invoices") synced++;
-          else if (status === "error") errors++;
+          else if (status === "error" || status === "partial") errors++;
           else if (status === "pending" || status === "ready") pending++;
           else missing++;
         }
@@ -358,8 +409,12 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
 
                     if (split && viewType === "both") {
                       return (
-                        <td key={day} className="border border-gray-100 dark:border-gray-700 p-0 h-6 relative overflow-hidden cursor-pointer">
-                          <TooltipProvider delayDuration={100}>
+                        <td
+                          key={day}
+                          className="border border-gray-100 dark:border-gray-700 p-0 h-6 relative overflow-hidden cursor-pointer hover:ring-1 hover:ring-inset hover:ring-blue-400"
+                          onClick={() => setSelectedDay(dayKey)}
+                        >
+                          <TooltipProvider delayDuration={200}>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <div className="w-full h-full relative">
@@ -377,6 +432,7 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
                                 <p className="font-semibold mb-1">{day} {MONTH_NAMES[monthIdx]} {year}</p>
                                 <p>▲ Emitidas: {STATUS_LABELS[split.issued]}</p>
                                 <p>▼ Recibidas: {STATUS_LABELS[split.received]}</p>
+                                <p className="text-gray-400 mt-1">Click para más detalle</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -389,9 +445,10 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
                     return (
                       <td
                         key={day}
-                        className={`border border-gray-100 dark:border-gray-700 h-6 cursor-pointer ${STATUS_COLORS[status]}`}
+                        className={`border border-gray-100 dark:border-gray-700 h-6 cursor-pointer hover:ring-1 hover:ring-inset hover:ring-blue-400 ${STATUS_COLORS[status]}`}
+                        onClick={() => setSelectedDay(dayKey)}
                       >
-                        <TooltipProvider delayDuration={100}>
+                        <TooltipProvider delayDuration={200}>
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <div className="w-full h-full" />
@@ -399,6 +456,7 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
                             <TooltipContent side="top" className="text-[10px] p-2">
                               <p className="font-semibold">{day} {MONTH_NAMES[monthIdx]} {year}</p>
                               <p>{STATUS_LABELS[status]}</p>
+                              <p className="text-gray-400 mt-1">Click para más detalle</p>
                             </TooltipContent>
                           </Tooltip>
                         </TooltipProvider>
@@ -431,6 +489,10 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
           Pendiente
         </span>
         <span className="flex items-center gap-1">
+          <span className="w-2.5 h-2.5 rounded-sm bg-orange-400 inline-block" />
+          Parcial
+        </span>
+        <span className="flex items-center gap-1">
           <span className="w-2.5 h-2.5 rounded-sm bg-red-400 inline-block" />
           Error
         </span>
@@ -452,6 +514,183 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
           </span>
         )}
       </div>
+
+      {/* Modal de detalle del día */}
+      <Dialog open={!!selectedDay} onOpenChange={(open) => !open && setSelectedDay(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-sm">
+              {selectedDay && (() => {
+                const [y, m, d] = selectedDay.split("-");
+                return `${parseInt(d)} ${MONTH_NAMES[parseInt(m) - 1]} ${y}`;
+              })()}
+            </DialogTitle>
+          </DialogHeader>
+          {selectedDay && (() => {
+            const entry = dayMap[selectedDay] ?? {};
+            const types: ("issued" | "received")[] = ["issued", "received"];
+            return (
+              <div className="space-y-4">
+                {types.map((type) => {
+                  const req = entry[type];
+                  const status = getDayStatus(req);
+                  const label = type === "issued" ? "▲ Emitidas" : "▼ Recibidas";
+                  return (
+                    <div key={type} className="border border-gray-200 dark:border-gray-700 rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</span>
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
+                          status === "processed" ? "bg-green-100 text-green-700" :
+                          status === "no-invoices" ? "bg-green-50 text-green-600 border border-green-200" :
+                          status === "ready" ? "bg-blue-100 text-blue-700" :
+                          status === "pending" ? "bg-amber-100 text-amber-700" :
+                          status === "error" ? "bg-red-100 text-red-700" :
+                          "bg-gray-100 text-gray-500"
+                        }`}>
+                          {STATUS_LABELS[status]}
+                        </span>
+                      </div>
+                      {req ? (
+                        <>
+                        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
+                          <dt className="text-gray-400">Request ID</dt>
+                          <dd className="font-mono text-gray-600 dark:text-gray-300 break-all">{req.requestId || "—"}</dd>
+
+                          <dt className="text-gray-400">Periodo</dt>
+                          <dd className="text-gray-600 dark:text-gray-300">{req.from} → {req.to}</dd>
+
+                          <dt className="text-gray-400">Estado interno</dt>
+                          <dd className="text-gray-600 dark:text-gray-300">{req.status || "—"}</dd>
+
+                          {req.packageIds !== undefined && (
+            <>
+                            <dt className="text-gray-400">Paquetes</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">{req.packageIds.length === 0 ? "0 (sin facturas)" : req.packageIds.length}</dd>
+            </>
+                          )}
+                          {req.processedCount !== undefined && (
+            <>
+                            <dt className="text-gray-400">CFDIs importados</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">{req.processedCount}</dd>
+            </>
+                          )}
+                          {req.existingCount !== undefined && req.existingCount > 0 && (
+            <>
+                            <dt className="text-gray-400">Ya existían</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">{req.existingCount}</dd>
+            </>
+                          )}
+                          {req.processedAt && (
+            <>
+                            <dt className="text-gray-400">Procesado</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">{new Date(req.processedAt).toLocaleString("es-MX")}</dd>
+            </>
+                          )}
+                          {req.createdAt && (
+            <>
+                            <dt className="text-gray-400">Creada</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">
+                              {req.createdAt?.toDate ? req.createdAt.toDate().toLocaleString("es-MX") : String(req.createdAt)}
+                            </dd>
+            </>
+                          )}
+                          {req.lastAutoVerify && (
+            <>
+                            <dt className="text-gray-400">Última verificación</dt>
+                            <dd className="text-gray-600 dark:text-gray-300">{new Date(req.lastAutoVerify).toLocaleString("es-MX")}</dd>
+            </>
+                          )}
+                          {req.error && (() => {
+                            const explanation = parseErrorExplanation(req.error!);
+                            return (
+            <>
+                            <dt className="text-gray-400 text-red-500">Error SAT</dt>
+                            <dd className="space-y-1">
+                              {explanation && (
+                                <p className="text-red-700 dark:text-red-400 font-medium text-[11px]">{explanation}</p>
+                              )}
+                              <p className="text-red-400 text-[10px] font-mono break-all">{req.error}</p>
+                            </dd>
+            </>
+                            );
+                          })()}
+                          {req.verifyError && (
+            <>
+                            <dt className="text-gray-400 text-red-500">Error verificación</dt>
+                            <dd className="text-red-600 break-all">{req.verifyError}</dd>
+            </>
+                          )}
+                          {req.downloadError && (
+            <>
+                            <dt className="text-gray-400 text-red-500">Error descarga</dt>
+                            <dd className="text-red-600 break-all">{req.downloadError}</dd>
+            </>
+                          )}
+                        </dl>
+
+                        {/* Log detallado de importación por paquete */}
+                        {req.importLog && req.importLog.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <p className="text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Log de importación</p>
+                            <div className="space-y-1">
+                              {req.importLog.map((log, i) => (
+                                <div key={i} className="text-[10px] bg-gray-50 dark:bg-gray-900 rounded px-2 py-1 font-mono">
+                                  <span className={`font-semibold ${log.stage === "done" ? "text-green-600" : log.stage?.includes("error") || log.stage?.includes("rejected") ? "text-red-500" : "text-amber-600"}`}>
+                                    {log.stage === "done" ? "✓" : log.stage?.includes("error") || log.stage?.includes("rejected") ? "✗" : "…"}
+                                  </span>
+                                  {" "}
+                                  <span className="text-gray-500">{log.packageId?.substring(0, 12)}…</span>
+                                  {log.stage === "done" && (
+                                    <span className="text-gray-600 dark:text-gray-300">
+                                      {" "}→ {log.xmlCount} XMLs, {log.saved} nuevos, {log.existing} existentes
+                                      {(log.parseErrors ?? 0) > 0 && <span className="text-red-500">, {log.parseErrors} errores</span>}
+                                    </span>
+                                  )}
+                                  {log.error && (
+                                    <span className="text-red-500"> → {log.error}</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Errores de importación (acumulativos) */}
+                        {req.importErrors && req.importErrors.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-red-200 dark:border-red-900">
+                            <p className="text-[10px] font-semibold text-red-500 mb-1">
+                              Errores ({req.importErrors.length})
+                              <span className="font-normal text-gray-400 ml-1">
+                                SAT: {req.importErrors.filter(e => e.type === "sat").length} · Procesamiento: {req.importErrors.filter(e => e.type === "processing").length}
+                              </span>
+                            </p>
+                            <div className="space-y-1 max-h-32 overflow-y-auto">
+                              {req.importErrors.map((err, i) => (
+                                <div key={i} className="text-[10px] rounded px-2 py-1 font-mono bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400">
+                                  <span className={`px-1 rounded text-[9px] font-bold ${err.type === "sat" ? "bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300" : "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300"}`}>
+                                    {err.type === "sat" ? "SAT" : "APP"}
+                                  </span>
+                                  {" "}
+                                  <span className="text-gray-500">[{err.stage}]</span>
+                                  {" "}{err.message}
+                                  {err.fileName && <span className="text-gray-400"> ({err.fileName})</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-gray-400 italic">No se generó solicitud para este tipo</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
 
       {/* Explicación del proceso */}
       <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-[11px] text-gray-500 dark:text-gray-400 space-y-1.5">
@@ -476,16 +715,19 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
           </li>
           <li className="flex items-start gap-1.5">
             <span className="shrink-0 mt-0.5">3.</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-sm bg-green-500 shrink-0 inline-block" />
-              <span><span className="font-medium text-gray-600 dark:text-gray-300">Importación</span> — Se descargan los ZIPs, se extraen los XMLs y se guardan como CFDIs en el sistema. Queda en <span className="font-medium">verde</span>.</span>
+            <span className="inline-flex items-start gap-1.5">
+              <span className="flex shrink-0 gap-0.5 mt-0.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-green-500 inline-block" />
+                <span className="w-2.5 h-2.5 rounded-sm bg-orange-400 inline-block" />
+              </span>
+              <span><span className="font-medium text-gray-600 dark:text-gray-300">Importación</span> — Se descargan los ZIPs, se extraen los XMLs y se guardan como CFDIs en el sistema. Queda en <span className="font-medium">verde</span> si todo fue exitoso, o <span className="font-medium">naranja</span> si se importaron algunos pero hubo errores parciales.</span>
             </span>
           </li>
           <li className="flex items-start gap-1.5">
             <span className="shrink-0 mt-0.5">4.</span>
             <span className="inline-flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-sm bg-red-400 shrink-0 inline-block" />
-              <span><span className="font-medium text-gray-600 dark:text-gray-300">Error</span> — Si algo falla en cualquier paso, se marca en <span className="font-medium">rojo</span>.</span>
+              <span><span className="font-medium text-gray-600 dark:text-gray-300">Error</span> — Si algo falla en cualquier paso, se marca en <span className="font-medium">rojo</span>. Click en el día para ver el detalle de los errores.</span>
             </span>
           </li>
         </ol>

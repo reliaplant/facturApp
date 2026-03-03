@@ -325,6 +325,16 @@ export interface CFDI {
   // XML ORIGINAL
   // ============================================
   contenidoXml?: string;
+
+  // ============================================
+  // TRAZABILIDAD DE IMPORTACIÓN
+  // ============================================
+  /** ID de la solicitud SAT que originó este CFDI (autoImport) */
+  satRequestId?: string;
+  /** Fecha en que el CFDI llegó por solicitud SAT */
+  satRequestFecha?: string;
+  /** Método de importación: 'autoImport' | 'manual' | 'upload' */
+  importadoPor?: string;
 }
 
 /**

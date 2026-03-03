@@ -16,6 +16,7 @@ export interface SatRequest {
   // Tracking de verificación
   verifyError?: string;
   verifyAttemptedAt?: string;
+  lastAutoVerify?: string;
   
   // Tracking de descarga
   packagesDownloaded?: boolean;
@@ -30,4 +31,33 @@ export interface SatRequest {
   processedCount?: number;
   existingCount?: number;
   totalErrors?: number; // Cantidad de errores durante el procesamiento
+
+  // Trazabilidad detallada (auto-import)
+  importedUuids?: string[];   // UUIDs de CFDIs nuevos importados
+  existingUuids?: string[];   // UUIDs de CFDIs que ya existían
+  importLog?: ImportPackageLog[];    // Log por paquete
+  importErrors?: ImportError[]; // Array acumulativo de errores (nunca se sobreescribe)
+}
+
+/** Log de procesamiento por paquete */
+export interface ImportPackageLog {
+  packageId: string;
+  stage: string;        // download | extract | parse_and_save | done | *_error
+  startedAt?: string;
+  finishedAt?: string;
+  xmlCount?: number;
+  saved?: number;
+  existing?: number;
+  parseErrors?: number;
+  error?: string;
+}
+
+/** Error individual durante importación */
+export interface ImportError {
+  type: "sat" | "processing"; // sat = error del SAT, processing = error nuestro
+  stage: string;              // download | extract | parse | save | autoImport_fatal
+  packageId?: string;
+  fileName?: string;
+  message: string;
+  timestamp: string;
 }

@@ -28,6 +28,8 @@ import {
   OpenZipFileException,
 } from "@nodecfdi/sat-ws-descarga-masiva";
 
+import { parseCFDIFromString } from "./cfdi-parser.js";
+
 initializeApp();
 
 // ============================================
@@ -506,6 +508,243 @@ async function isClientValidForAutoSync(
   return { valid: true };
 }
 
+// ============================================
+// Parser CFDI completo importado desde cfdi-parser.ts
+
+/**
+ * Elimina campos undefined de un objeto (Firestore no los acepta)
+ * @param {Record<string, any>} obj - objeto a sanitizar
+ * @return {Record<string, any>} objeto limpio
+ */
+function sanitizeForFirestore(obj: Record<string, any>): Record<string, any> {
+  const clean: Record<string, any> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value === undefined) continue;
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      clean[key] = sanitizeForFirestore(value);
+    } else if (Array.isArray(value)) {
+      clean[key] = value.map((item) =>
+        item !== null && typeof item === "object" ? sanitizeForFirestore(item) : item
+      );
+    } else {
+      clean[key] = value;
+    }
+  }
+  return clean;
+}
+
+/**
+ * Descarga, extrae, parsea e importa paquetes SAT automáticamente
+ * @param {string} rfc - RFC del cliente
+ * @param {string[]} packageIds - IDs de paquetes SAT
+ * @param {Service} service - servicio SAT
+ * @param {FirebaseFirestore.Firestore} db - instancia Firestore
+ * @param {FirebaseFirestore.DocumentReference} reqDocRef - referencia al doc
+ * @param {string} satRequestId - ID de la solicitud SAT de origen
+ * @return {Promise<{saved: number, existing: number, errors: number}>} resultado
+ */
+async function autoImportPackages(
+  rfc: string,
+  packageIds: string[],
+  service: Service,
+  db: FirebaseFirestore.Firestore,
+  reqDocRef: FirebaseFirestore.DocumentReference,
+  satRequestId: string
+): Promise<{ saved: number; existing: number; errors: number }> {
+  let totalSaved = 0;
+  let totalExisting = 0;
+  let totalErrors = 0;
+
+  // Log detallado por paquete
+  const packageLogs: Record<string, any>[] = [];
+  // Array de errores acumulativo (nunca se sobreescribe)
+  const importErrors: Record<string, any>[] = [];
+  // UUIDs importados y existentes
+  const importedUuids: string[] = [];
+  const existingUuids: string[] = [];
+
+  for (const pkgId of packageIds) {
+    const pkgLog: Record<string, any> = {
+      packageId: pkgId,
+      stage: "download",
+      startedAt: new Date().toISOString(),
+    };
+
+    try {
+      // 1. Descargar paquete del SAT
+      const dl = await service.download(pkgId);
+      if (!dl.getStatus().isAccepted()) {
+        const msg = dl.getStatus().getMessage();
+        logger.warn(`⚠️ Paquete ${pkgId} rechazado: ${msg}`);
+        pkgLog.stage = "download_rejected";
+        pkgLog.error = msg;
+        packageLogs.push(pkgLog);
+        importErrors.push({
+          type: "sat",
+          stage: "download",
+          packageId: pkgId,
+          message: msg,
+          timestamp: new Date().toISOString(),
+        });
+        totalErrors++;
+        continue;
+      }
+
+      pkgLog.stage = "extract";
+
+      // 2. Abrir ZIP y extraer XMLs
+      const zipBase64 = dl.getPackageContent();
+      let reader: CfdiPackageReader;
+      try {
+        reader = await CfdiPackageReader.createFromContents(zipBase64);
+      } catch (err: any) {
+        logger.error(`❌ Error abriendo ZIP ${pkgId}:`, err.message);
+        pkgLog.stage = "extract_error";
+        pkgLog.error = err.message;
+        packageLogs.push(pkgLog);
+        importErrors.push({
+          type: "processing",
+          stage: "extract",
+          packageId: pkgId,
+          message: err.message,
+          timestamp: new Date().toISOString(),
+        });
+        totalErrors++;
+        continue;
+      }
+
+      pkgLog.stage = "parse_and_save";
+      let pkgSaved = 0;
+      let pkgExisting = 0;
+      let pkgParseErrors = 0;
+      let pkgXmlCount = 0;
+
+      // 3. Parsear cada XML y guardar en Firestore
+      for await (const cfdiMap of reader.cfdis()) {
+        for (const [fileName, xmlContent] of cfdiMap) {
+          pkgXmlCount++;
+          try {
+            const cfdi = parseCFDIFromString(xmlContent, rfc, rfc);
+            if (!cfdi) {
+              pkgParseErrors++;
+              importErrors.push({
+                type: "processing",
+                stage: "parse",
+                packageId: pkgId,
+                fileName,
+                message: "parseCFDIFromString retornó null",
+                timestamp: new Date().toISOString(),
+              });
+              continue;
+            }
+
+            const cleanUuid = cfdi.uuid.trim().replace(/\s+/g, "-");
+            const cfdiRef = db.collection("clients").doc(rfc).collection("cfdi").doc(cleanUuid);
+            const existing = await cfdiRef.get();
+
+            if (existing.exists) {
+              // Ya existe: solo agregar trazabilidad SAT sin sobreescribir nada
+              await cfdiRef.update({
+                satRequestId,
+                satRequestFecha: new Date().toISOString(),
+                updatedAt: FieldValue.serverTimestamp(),
+              });
+              pkgExisting++;
+              existingUuids.push(cleanUuid);
+              continue;
+            }
+
+            // Eliminar campos de deducibilidad (igual que el frontend)
+            const {
+              esDeducible: _ed,
+              mesDeduccion: _md,
+              gravadoISR: _gi,
+              gravadoIVA: _gv,
+              anual: _an,
+              contenidoXml: _cx,
+              ...cleanCfdi
+            } = cfdi;
+
+            await cfdiRef.set(sanitizeForFirestore({
+              ...cleanCfdi,
+              uuid: cleanUuid,
+              clientId: rfc,
+              satRequestId,
+              importadoPor: "autoImport",
+              createdAt: FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
+            }));
+            pkgSaved++;
+            importedUuids.push(cleanUuid);
+          } catch (err: any) {
+            logger.error(`❌ Error procesando XML ${fileName}:`, err.message);
+            pkgParseErrors++;
+            importErrors.push({
+              type: "processing",
+              stage: "save",
+              packageId: pkgId,
+              fileName,
+              message: err.message,
+              timestamp: new Date().toISOString(),
+            });
+          }
+        }
+      }
+
+      pkgLog.stage = "done";
+      pkgLog.xmlCount = pkgXmlCount;
+      pkgLog.saved = pkgSaved;
+      pkgLog.existing = pkgExisting;
+      pkgLog.parseErrors = pkgParseErrors;
+      pkgLog.finishedAt = new Date().toISOString();
+      packageLogs.push(pkgLog);
+
+      totalSaved += pkgSaved;
+      totalExisting += pkgExisting;
+      totalErrors += pkgParseErrors;
+    } catch (err: any) {
+      logger.error(`❌ Error descargando paquete ${pkgId}:`, err.message);
+      pkgLog.stage = "fatal_error";
+      pkgLog.error = err.message;
+      packageLogs.push(pkgLog);
+      importErrors.push({
+        type: "processing",
+        stage: "download",
+        packageId: pkgId,
+        message: err.message,
+        timestamp: new Date().toISOString(),
+      });
+      totalErrors++;
+    }
+  }
+
+  // Actualizar el documento de la solicitud con log detallado
+  const allSuccess = totalErrors === 0;
+
+  // Leer errores previos para no sobreescribirlos
+  const currentDoc = await reqDocRef.get();
+  const currentData = currentDoc.data() || {};
+  const previousErrors: any[] = currentData.importErrors || [];
+
+  await reqDocRef.update({
+    packagesDownloaded: true,
+    downloadedAt: new Date().toISOString(),
+    packagesProcessed: allSuccess,
+    processedWithErrors: !allSuccess && totalSaved > 0,
+    processedAt: new Date().toISOString(),
+    processedCount: totalSaved,
+    existingCount: totalExisting,
+    totalErrors,
+    importedUuids: importedUuids.slice(0, 500), // limitar para Firestore
+    existingUuids: existingUuids.slice(0, 500),
+    importLog: packageLogs,
+    importErrors: [...previousErrors, ...importErrors].slice(-100),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  return { saved: totalSaved, existing: totalExisting, errors: totalErrors };
+}
+
 /**
  * Verifica automáticamente solicitudes pendientes cada 2 horas
  * Solo procesa solicitudes que NO están completadas ni tienen error
@@ -616,7 +855,7 @@ export const autoVerifyPendingRequests = onSchedule({
             lastAutoVerify: new Date().toISOString()
           });
         } else if (statusReq.isTypeOf("Finished")) {
-          // ¡Lista! Guardar packageIds
+          // ¡Lista! Guardar packageIds y auto-importar
           const packageIds = verify.getPackageIds();
           logger.info(`✅ ${rfc}/${requestId.substring(0, 8)}: Terminada con ${packageIds.length} paquetes`);
 
@@ -628,19 +867,62 @@ export const autoVerifyPendingRequests = onSchedule({
             lastAutoVerify: new Date().toISOString()
           });
 
+          // Auto-importar: descargar, parsear y guardar CFDIs
+          if (packageIds.length > 0) {
+            try {
+              logger.info(`📥 Auto-importando ${packageIds.length} paquetes para ${rfc}...`);
+              const importResult = await autoImportPackages(rfc, packageIds, service, db, reqDoc.ref, reqDoc.id);
+              logger.info(`📦 ${rfc}/${requestId.substring(0, 8)}: Importado → ${importResult.saved} nuevos, ${importResult.existing} existentes, ${importResult.errors} errores`);
+            } catch (importErr: any) {
+              logger.error(`❌ Error auto-importando ${rfc}/${requestId.substring(0, 8)}:`, importErr.message);
+              // Leer errores previos para no sobreescribirlos
+              const curDoc = await reqDoc.ref.get();
+              const curErrors: any[] = (curDoc.data() || {}).importErrors || [];
+              await reqDoc.ref.update({
+                importErrors: [...curErrors, {
+                  type: "processing",
+                  stage: "autoImport_fatal",
+                  message: importErr.message,
+                  timestamp: new Date().toISOString(),
+                }].slice(-100),
+                updatedAt: FieldValue.serverTimestamp(),
+              });
+            }
+          }
+
           totalReady++;
         } else if (statusReq.isTypeOf("Rejected") || statusReq.isTypeOf("Failure") || statusReq.isTypeOf("Expired")) {
-          // Error del SAT
           const statusValue = statusReq.getValue();
-          logger.warn(`❌ ${rfc}/${requestId.substring(0, 8)}: Rechazada/Error (${statusValue})`);
+          const verifyMsg = verify.getStatus().getMessage();
+          const codeReq = verify.getCodeRequest();
+          const codeReqValue = codeReq.getValue();
+          const codeReqMsg = codeReq.getMessage();
 
-          await reqDoc.ref.update({
-            error: `SAT: ${statusValue}`,
-            updatedAt: FieldValue.serverTimestamp(),
-            lastAutoVerify: new Date().toISOString()
-          });
+          if (codeReq.isTypeOf("EmptyResult")) {
+            // 5004: Sin facturas ese día — es un resultado válido, no un error
+            logger.info(`✅ ${rfc}/${requestId.substring(0, 8)}: Sin facturas (EmptyResult)`);
 
-          totalErrors++;
+            await reqDoc.ref.update({
+              status: "finished",
+              completed: true,
+              packageIds: [],
+              updatedAt: FieldValue.serverTimestamp(),
+              lastAutoVerify: new Date().toISOString()
+            });
+
+            totalReady++;
+          } else {
+            // Error real del SAT
+            logger.warn(`❌ ${rfc}/${requestId.substring(0, 8)}: Rechazada/Error statusReq=(${statusValue}) codeRequest=(${codeReqValue}: ${codeReqMsg}) verifyStatus=${verifyMsg}`);
+
+            await reqDoc.ref.update({
+              error: `SAT statusReq:${statusValue} codeReq:${codeReqValue}(${codeReqMsg})`,
+              updatedAt: FieldValue.serverTimestamp(),
+              lastAutoVerify: new Date().toISOString()
+            });
+
+            totalErrors++;
+          }
         } else {
           // Estado desconocido
           const statusValue = statusReq.getValue();
