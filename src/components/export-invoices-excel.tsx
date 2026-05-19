@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
+import { Download, Copy, Check } from "lucide-react";
 import { CFDI } from "@/models/CFDI";
+import { FixedAsset } from "@/models/FixedAsset";
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import * as XLSX from 'xlsx';
@@ -13,6 +14,7 @@ interface ExportInvoicesExcelProps {
   invoices?: CFDI[];
   emittedInvoices?: CFDI[];
   receivedInvoices?: CFDI[];
+  fixedAssets?: FixedAsset[];
   year: number;
   buttonLabel?: string;
   fileName?: string;
@@ -22,6 +24,7 @@ export function ExportInvoicesExcel({
   invoices,
   emittedInvoices, 
   receivedInvoices,
+  fixedAssets,
   year, 
   buttonLabel = "Exportar", 
   fileName = `Facturas_${year}.xlsx` 
@@ -38,85 +41,124 @@ export function ExportInvoicesExcel({
     const sortInvoices = (invoicesToSort: CFDI[]) => 
       [...invoicesToSort].sort((a, b) => parseLocalDate(a.fecha).getTime() - parseLocalDate(b.fecha).getTime());
       
-    const createEmittedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
-      "Fecha": format(parseLocalDate(invoice.fecha), 'dd/MM/yyyy'),
-      "Tipo Comprobante": invoice.tipoDeComprobante || "",
-      "RFC Receptor": invoice.rfcReceptor,
-      "Nombre Receptor": invoice.nombreReceptor,
-      "CP Receptor": invoice.domicilioFiscalReceptor || "",
-      "Régimen Fiscal Receptor": invoice.regimenFiscalReceptor || "",
-      "Uso CFDI": invoice.usoCFDI,
-      "RFC Emisor": invoice.rfcEmisor,
-      "Nombre Emisor": invoice.nombreEmisor,
-      "Lugar Expedición": invoice.lugarExpedicion || "",
-      "Régimen Fiscal": invoice.regimenFiscal || "",
-      "Concepto": invoice.concepto || "",
-      "Categoría": invoice.categoria || "",
-      "Serie": invoice.serie || "",
-      "Folio": invoice.folio || "",
-      "UUID": invoice.uuid,
-      "Método de Pago": invoice.metodoPago,
-      "Forma de Pago": invoice.formaPago,
-      "Moneda": invoice.moneda || "MXN",
-      "Tipo de Cambio": invoice.tipoCambio || 1,
-      "Total MXN": invoice.totalMXN || invoice.total,
-      "Subtotal": invoice.subTotal,
-      "Impuestos Trasladados": invoice.impuestosTrasladados || 0,
-      "IVA Trasladado": invoice.impuestoTrasladado || 0,
-      "Base IVA 16%": invoice.baseIva16 || 0,
-      "Base IVA 8%": invoice.baseIva8 || 0,
-      "IEPS Trasladado": invoice.iepsTrasladado || 0,
-      "Impuesto Retenido": invoice.impuestoRetenido || 0,
-      "IVA Retenido": invoice.ivaRetenido || 0,
-      "ISR Retenido": invoice.isrRetenido || 0,
-      "Descuento": invoice.descuento || 0,
-      "Total": invoice.total,
-      "Cancelado": invoice.estaCancelado ? "Sí" : "No",
-      "Cobrado": invoice.esDeducible ? "Sí" : "No",
-      "Mes Cobro": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
-      "Deducción Anual": invoice.anual ? "Sí" : "No",
-      "Gravado ISR": invoice.gravadoISR || 0,
-      "Gravado IVA": invoice.gravadoIVA || 0,
-      "Tasa 0%": invoice.ivaTasa0 || 0,
-      "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
-      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
-      "Bloqueado": invoice.locked ? "Sí" : "No"
-    }));
+    const createEmittedData = (items: CFDI[]) => sortInvoices(items).map(invoice => {
+      const tipoCambio = invoice.tipoCambio || 1;
+      return {
+        "Fecha": format(parseLocalDate(invoice.fecha), 'dd/MM/yyyy'),
+        "UUID": invoice.uuid,
+        "Receptor": invoice.nombreReceptor,
+        "Régimen Fiscal Receptor": invoice.regimenFiscalReceptor || "",
+        "Uso CFDI": invoice.usoCFDI,
+        "Tipo Comprobante": invoice.tipoDeComprobante || "",
+        "Forma Pago": invoice.formaPago,
+        "Método Pago": invoice.metodoPago,
+        "Categoría": invoice.categoria || "",
+        "Subtotal": invoice.subTotal,
+        "+IVA": invoice.impuestoTrasladado || 0,
+        "-IVA Ret": invoice.ivaRetenido || 0,
+        "-ISR Ret": invoice.isrRetenido || 0,
+        "Total": invoice.total,
+        "Moneda": invoice.moneda || "MXN",
+        "Tipo Cambio": tipoCambio,
+        "Mes Cobro": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
+        "¿Es Ingreso?": invoice.esDeducible ? "Sí" : "No",
+        "Gravado ISR": invoice.gravadoISR || 0,
+        "Gravado IVA": invoice.gravadoIVA || 0,
+        "IVA Retenido MXN": (invoice.ivaRetenido || 0) * tipoCambio,
+      };
+    });
     
     const createReceivedData = (items: CFDI[]) => sortInvoices(items).map(invoice => ({
       "Fecha": format(parseLocalDate(invoice.fecha), 'dd/MM/yyyy'),
-      "RFC Emisor": invoice.rfcEmisor,
-      "Nombre Emisor": invoice.nombreEmisor,
-      "RFC Receptor": invoice.rfcReceptor, 
-      "Nombre Receptor": invoice.nombreReceptor,
       "UUID": invoice.uuid,
-      "Tipo Comprobante": invoice.tipoDeComprobante || "",
+      "Emisor": invoice.nombreEmisor,
+      "Régimen Fiscal": invoice.regimenFiscal || "",
       "Uso CFDI": invoice.usoCFDI,
-      "Concepto": invoice.concepto || "",
+      "Tipo Comprobante": invoice.tipoDeComprobante || "",
+      "Forma Pago": invoice.formaPago,
+      "Método Pago": invoice.metodoPago,
       "Categoría": invoice.categoria || "",
-      "Método de Pago": invoice.metodoPago,
-      "Forma de Pago": invoice.formaPago,
       "Subtotal": invoice.subTotal,
-      "IVA Trasladado": invoice.impuestoTrasladado || 0,
-      "IVA Retenido": invoice.ivaRetenido || 0,
-      "ISR Retenido": invoice.isrRetenido || 0,
+      "+IVA": invoice.impuestoTrasladado || 0,
+      "+IEPS": invoice.iepsTrasladado || 0,
+      "-IVA Ret": invoice.ivaRetenido || 0,
+      "-ISR Ret": invoice.isrRetenido || 0,
       "Total": invoice.total,
-      "Es Deducible": invoice.esDeducible ? "Sí" : "No",
-      "Mes Deducción": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
-      "Deducción Anual": invoice.anual ? "Sí" : "No",
+      "Moneda": invoice.moneda || "MXN",
+      "Tipo Cambio": invoice.tipoCambio || 1,
+      "Mes Pago": invoice.mesDeduccion ? getMonthName(invoice.mesDeduccion) : "",
+      "¿Es Deducible?": invoice.esDeducible ? (invoice.anual ? "Sí | Anual" : "Sí") : "No",
       "Gravado ISR": invoice.gravadoISR || 0,
       "Gravado IVA": invoice.gravadoIVA || 0,
-      "Tasa 0%": invoice.ivaTasa0 || 0,
-      "Exento": invoice.exento || 0,
-      "Cancelado": invoice.estaCancelado ? "Sí" : "No",
-      "Tiene Complemento Pago": invoice.docsRelacionadoComplementoPago?.length > 0 ? "Sí" : "No",
-      "UUIDs Complementos Pago": invoice.docsRelacionadoComplementoPago?.join(", ") || "",
-      "Bloqueado": invoice.locked ? "Sí" : "No",
-      "Notas de Deducibilidad": invoice.notasDeducibilidad || ""
+      "Exento": invoice.total - (invoice.gravadoIVA || 0) - (invoice.gravadoISR || 0),
     }));
 
-    return { createEmittedData, createReceivedData };
+    const createFixedAssetsData = (items: FixedAsset[]) => 
+      [...items]
+        .sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime())
+        .map(asset => {
+          const depreciableAmount = asset.cost - asset.residualValue;
+          const monthlyDep = asset.usefulLifeMonths > 0 ? depreciableAmount / asset.usefulLifeMonths : 0;
+          return {
+            "Nombre": asset.name,
+            "Tipo": asset.type,
+            "Estado": asset.status === 'active' ? 'Activo' : asset.status === 'fullyDepreciated' ? 'Totalmente Depreciado' : asset.status === 'disposed' ? 'Dado de Baja' : asset.status === 'sold' ? 'Vendido' : asset.status,
+            "Fecha Compra": asset.purchaseDate ? format(parseLocalDate(asset.purchaseDate), 'dd/MM/yyyy') : "",
+            "Inicio Depreciación": asset.depreciationStartDate ? format(parseLocalDate(asset.depreciationStartDate), 'dd/MM/yyyy') : "",
+            "Valor Compra": asset.cost,
+            "Valor Deducible": asset.deductibleValue ?? asset.cost,
+            "Vida Útil (meses)": asset.usefulLifeMonths,
+            "% Dep. Anual": asset.usefulLifeMonths > 0 ? Number(((12 / asset.usefulLifeMonths) * 100).toFixed(2)) : 0,
+            "Dep. Mensual": Number(monthlyDep.toFixed(2)),
+            "Dep. Acumulada": asset.accumulatedDepreciation,
+            "Valor Actual": asset.currentValue,
+            "Valor Residual": asset.residualValue,
+            "N° Factura": asset.invoiceNumber || "",
+            "Notas": asset.notes || "",
+          };
+        });
+
+    return { createEmittedData, createReceivedData, createFixedAssetsData };
   }, [getMonthName]);
+
+  // Copy JSON feedback state
+  const [copied, setCopied] = useState(false);
+
+  // Build the JSON data object
+  const buildJsonData = () => {
+    const data: Record<string, unknown> = {};
+
+    if (emittedInvoices || receivedInvoices) {
+      if (emittedInvoices && emittedInvoices.length > 0) {
+        data.facturasEmitidas = processInvoices.createEmittedData(emittedInvoices);
+      }
+      if (receivedInvoices && receivedInvoices.length > 0) {
+        data.facturasRecibidas = processInvoices.createReceivedData(receivedInvoices);
+      }
+    } else if (invoices && invoices.length > 0) {
+      const emittedOnes = invoices.filter(inv => inv.esIngreso);
+      const receivedOnes = invoices.filter(inv => inv.esEgreso);
+      if (emittedOnes.length > 0) data.facturasEmitidas = processInvoices.createEmittedData(emittedOnes);
+      if (receivedOnes.length > 0) data.facturasRecibidas = processInvoices.createReceivedData(receivedOnes);
+    }
+
+    if (fixedAssets && fixedAssets.length > 0) {
+      data.activosFijos = processInvoices.createFixedAssetsData(fixedAssets);
+    }
+
+    return data;
+  };
+
+  const handleCopyJson = async () => {
+    try {
+      const data = buildJsonData();
+      await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (error) {
+      console.error("Error copying JSON:", error);
+    }
+  };
 
   // Function to handle Excel export
   const handleExport = () => {
@@ -162,6 +204,13 @@ export function ExportInvoicesExcel({
         XLSX.utils.book_append_sheet(workbook, worksheet, `Facturas ${year}`);
       }
 
+      // Add fixed assets sheet if available
+      if (fixedAssets && fixedAssets.length > 0) {
+        const fixedAssetsData = processInvoices.createFixedAssetsData(fixedAssets);
+        const fixedAssetsWorksheet = XLSX.utils.json_to_sheet(fixedAssetsData);
+        XLSX.utils.book_append_sheet(workbook, fixedAssetsWorksheet, `Activos Fijos ${year}`);
+      }
+
       // Generate Excel file and trigger download
       XLSX.writeFile(workbook, fileName);
     } catch (error) {
@@ -170,13 +219,23 @@ export function ExportInvoicesExcel({
   };
 
   return (
-    <Button
-      variant="outline"
-      size="xs"
-      onClick={handleExport}
-    >
-      <Download className="h-3 w-3 mr-1" />
-      <span>{buttonLabel}</span>
-    </Button>
+    <>
+      <Button
+        variant="outline"
+        size="xs"
+        onClick={handleExport}
+      >
+        <Download className="h-3 w-3 mr-1" />
+        <span>{buttonLabel}</span>
+      </Button>
+      <Button
+        variant="outline"
+        size="xs"
+        onClick={handleCopyJson}
+      >
+        {copied ? <Check className="h-3 w-3 mr-1 text-green-500" /> : <Copy className="h-3 w-3 mr-1" />}
+        <span>{copied ? "Copiado" : "JSON"}</span>
+      </Button>
+    </>
   );
 }

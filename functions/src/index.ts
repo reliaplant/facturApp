@@ -428,11 +428,11 @@ export const procesarPaquete = onCall({ timeoutSeconds: 120 }, async (req) => {
     throw new HttpsError("not-found", "No se encontró el paquete ZIP");
   }
 
-  // 2️⃣ Crear reader en memoria — ¡pasa Base64, no Buffer!
+  // 2️⃣ Crear reader en memoria — pasa binary string (latin1), no base64
   let reader: CfdiPackageReader;
   try {
-    const zipBase64 = zipBuf.toString("base64");
-    reader = await CfdiPackageReader.createFromContents(zipBase64);
+    const zipBinary = zipBuf.toString("binary");
+    reader = await CfdiPackageReader.createFromContents(zipBinary);
   } catch (err: any) {
     const msg = (err as OpenZipFileException).message || err.message;
     logger.error("❌ No se pudo abrir el paquete como ZIP:", msg);
@@ -543,6 +543,166 @@ function sanitizeForFirestore(obj: Record<string, any>): Record<string, any> {
  * @param {string} satRequestId - ID de la solicitud SAT de origen
  * @return {Promise<{saved: number, existing: number, errors: number}>} resultado
  */
+/**
+ * Procesa un ZIP de CFDIs: extrae XMLs, parsea y guarda en Firestore.
+ * Función compartida entre autoImport y retryImport.
+ */
+async function processZipPackage(params: {
+  zipBuffer: Buffer;
+  pkgId: string;
+  rfc: string;
+  satRequestId: string;
+  db: FirebaseFirestore.Firestore;
+}): Promise<{
+  saved: number;
+  existing: number;
+  parseErrors: number;
+  xmlCount: number;
+  importedUuids: string[];
+  existingUuids: string[];
+  errors: Record<string, any>[];
+}> {
+  const { zipBuffer, pkgId, rfc, satRequestId, db } = params;
+  const importErrors: Record<string, any>[] = [];
+  const importedUuids: string[] = [];
+  const existingUuids: string[] = [];
+
+  // createFromContents espera binary string (latin1)
+  const zipBinary = zipBuffer.toString("binary");
+  const reader = await CfdiPackageReader.createFromContents(zipBinary);
+
+  let pkgSaved = 0;
+  let pkgExisting = 0;
+  let pkgParseErrors = 0;
+  let pkgXmlCount = 0;
+
+  for await (const cfdiMap of reader.cfdis()) {
+    for (const [fileName, xmlContent] of cfdiMap) {
+      pkgXmlCount++;
+      try {
+        const cfdi = parseCFDIFromString(xmlContent, rfc, rfc);
+        if (!cfdi) {
+          pkgParseErrors++;
+          importErrors.push({
+            type: "processing",
+            stage: "parse",
+            packageId: pkgId,
+            fileName,
+            message: "parseCFDIFromString retornó null",
+            timestamp: new Date().toISOString(),
+          });
+          continue;
+        }
+
+        const cleanUuid = cfdi.uuid.trim().replace(/\s+/g, "-");
+        const cfdiRef = db.collection("clients").doc(rfc).collection("cfdi").doc(cleanUuid);
+        const existing = await cfdiRef.get();
+
+        if (existing.exists) {
+          await cfdiRef.update({
+            satRequestId,
+            satRequestFecha: new Date().toISOString(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          pkgExisting++;
+          existingUuids.push(cleanUuid);
+          continue;
+        }
+
+        const {
+          esDeducible: _ed,
+          mesDeduccion: _md,
+          gravadoISR: _gi,
+          gravadoIVA: _gv,
+          anual: _an,
+          contenidoXml: _cx,
+          ...cleanCfdi
+        } = cfdi;
+
+        await cfdiRef.set(sanitizeForFirestore({
+          ...cleanCfdi,
+          uuid: cleanUuid,
+          clientId: rfc,
+          satRequestId,
+          importadoPor: "autoImport",
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }));
+        pkgSaved++;
+        importedUuids.push(cleanUuid);
+      } catch (err: any) {
+        logger.error(`❌ Error procesando XML ${fileName}:`, err.message);
+        pkgParseErrors++;
+        importErrors.push({
+          type: "processing",
+          stage: "save",
+          packageId: pkgId,
+          fileName,
+          message: err.message,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  return {
+    saved: pkgSaved,
+    existing: pkgExisting,
+    parseErrors: pkgParseErrors,
+    xmlCount: pkgXmlCount,
+    importedUuids,
+    existingUuids,
+    errors: importErrors,
+  };
+}
+
+/**
+ * Actualiza el documento satRequest con los resultados de importación
+ */
+async function updateImportResults(
+  reqDocRef: FirebaseFirestore.DocumentReference,
+  packageLogs: Record<string, any>[],
+  importErrors: Record<string, any>[],
+  importedUuids: string[],
+  existingUuids: string[],
+  totalSaved: number,
+  totalExisting: number,
+  totalErrors: number,
+  storagePaths?: string[]
+): Promise<void> {
+  const allSuccess = totalErrors === 0;
+
+  const currentDoc = await reqDocRef.get();
+  const currentData = currentDoc.data() || {};
+  const previousErrors: any[] = currentData.importErrors || [];
+
+  const updateData: Record<string, any> = {
+    packagesDownloaded: true,
+    downloadedAt: new Date().toISOString(),
+    packagesProcessed: allSuccess,
+    processedWithErrors: !allSuccess && totalSaved > 0,
+    processedAt: new Date().toISOString(),
+    processedCount: totalSaved,
+    existingCount: totalExisting,
+    totalErrors,
+    importedUuids: importedUuids.slice(0, 500),
+    existingUuids: existingUuids.slice(0, 500),
+    importLog: packageLogs,
+    importErrors: [...previousErrors, ...importErrors].slice(-100),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  if (storagePaths && storagePaths.length > 0) {
+    updateData.storagePaths = storagePaths;
+  }
+
+  await reqDocRef.update(updateData);
+}
+
+/**
+ * Descarga paquetes del SAT, guarda ZIP en Storage, y procesa los CFDIs.
+ * Llamada automáticamente al completar la verificación.
+ */
 async function autoImportPackages(
   rfc: string,
   packageIds: string[],
@@ -551,17 +711,16 @@ async function autoImportPackages(
   reqDocRef: FirebaseFirestore.DocumentReference,
   satRequestId: string
 ): Promise<{ saved: number; existing: number; errors: number }> {
+  const bucket = getStorage().bucket();
   let totalSaved = 0;
   let totalExisting = 0;
   let totalErrors = 0;
 
-  // Log detallado por paquete
   const packageLogs: Record<string, any>[] = [];
-  // Array de errores acumulativo (nunca se sobreescribe)
-  const importErrors: Record<string, any>[] = [];
-  // UUIDs importados y existentes
-  const importedUuids: string[] = [];
-  const existingUuids: string[] = [];
+  const allImportErrors: Record<string, any>[] = [];
+  const allImportedUuids: string[] = [];
+  const allExistingUuids: string[] = [];
+  const allStoragePaths: string[] = [];
 
   for (const pkgId of packageIds) {
     const pkgLog: Record<string, any> = {
@@ -579,7 +738,7 @@ async function autoImportPackages(
         pkgLog.stage = "download_rejected";
         pkgLog.error = msg;
         packageLogs.push(pkgLog);
-        importErrors.push({
+        allImportErrors.push({
           type: "sat",
           stage: "download",
           packageId: pkgId,
@@ -590,19 +749,46 @@ async function autoImportPackages(
         continue;
       }
 
-      pkgLog.stage = "extract";
-
-      // 2. Abrir ZIP y extraer XMLs
+      // 2. Guardar ZIP en Storage como respaldo
+      pkgLog.stage = "save_zip";
       const zipBase64 = dl.getPackageContent();
-      let reader: CfdiPackageReader;
+      const zipBuffer = Buffer.from(zipBase64, "base64");
+      const zipPath = `clients/${rfc}/packages/${pkgId}.zip`;
+      await bucket.file(zipPath).save(zipBuffer);
+      allStoragePaths.push(zipPath);
+      logger.info(`💾 ZIP ${pkgId} guardado en ${zipPath}`);
+
+      // 3. Procesar: extraer XMLs y guardar CFDIs
+      pkgLog.stage = "extract";
       try {
-        reader = await CfdiPackageReader.createFromContents(zipBase64);
+        const result = await processZipPackage({
+          zipBuffer,
+          pkgId,
+          rfc,
+          satRequestId,
+          db,
+        });
+
+        pkgLog.stage = "done";
+        pkgLog.xmlCount = result.xmlCount;
+        pkgLog.saved = result.saved;
+        pkgLog.existing = result.existing;
+        pkgLog.parseErrors = result.parseErrors;
+        pkgLog.finishedAt = new Date().toISOString();
+        packageLogs.push(pkgLog);
+
+        totalSaved += result.saved;
+        totalExisting += result.existing;
+        totalErrors += result.parseErrors;
+        allImportErrors.push(...result.errors);
+        allImportedUuids.push(...result.importedUuids);
+        allExistingUuids.push(...result.existingUuids);
       } catch (err: any) {
-        logger.error(`❌ Error abriendo ZIP ${pkgId}:`, err.message);
+        logger.error(`❌ Error procesando ZIP ${pkgId}:`, err.message);
         pkgLog.stage = "extract_error";
         pkgLog.error = err.message;
         packageLogs.push(pkgLog);
-        importErrors.push({
+        allImportErrors.push({
           type: "processing",
           stage: "extract",
           packageId: pkgId,
@@ -610,104 +796,13 @@ async function autoImportPackages(
           timestamp: new Date().toISOString(),
         });
         totalErrors++;
-        continue;
       }
-
-      pkgLog.stage = "parse_and_save";
-      let pkgSaved = 0;
-      let pkgExisting = 0;
-      let pkgParseErrors = 0;
-      let pkgXmlCount = 0;
-
-      // 3. Parsear cada XML y guardar en Firestore
-      for await (const cfdiMap of reader.cfdis()) {
-        for (const [fileName, xmlContent] of cfdiMap) {
-          pkgXmlCount++;
-          try {
-            const cfdi = parseCFDIFromString(xmlContent, rfc, rfc);
-            if (!cfdi) {
-              pkgParseErrors++;
-              importErrors.push({
-                type: "processing",
-                stage: "parse",
-                packageId: pkgId,
-                fileName,
-                message: "parseCFDIFromString retornó null",
-                timestamp: new Date().toISOString(),
-              });
-              continue;
-            }
-
-            const cleanUuid = cfdi.uuid.trim().replace(/\s+/g, "-");
-            const cfdiRef = db.collection("clients").doc(rfc).collection("cfdi").doc(cleanUuid);
-            const existing = await cfdiRef.get();
-
-            if (existing.exists) {
-              // Ya existe: solo agregar trazabilidad SAT sin sobreescribir nada
-              await cfdiRef.update({
-                satRequestId,
-                satRequestFecha: new Date().toISOString(),
-                updatedAt: FieldValue.serverTimestamp(),
-              });
-              pkgExisting++;
-              existingUuids.push(cleanUuid);
-              continue;
-            }
-
-            // Eliminar campos de deducibilidad (igual que el frontend)
-            const {
-              esDeducible: _ed,
-              mesDeduccion: _md,
-              gravadoISR: _gi,
-              gravadoIVA: _gv,
-              anual: _an,
-              contenidoXml: _cx,
-              ...cleanCfdi
-            } = cfdi;
-
-            await cfdiRef.set(sanitizeForFirestore({
-              ...cleanCfdi,
-              uuid: cleanUuid,
-              clientId: rfc,
-              satRequestId,
-              importadoPor: "autoImport",
-              createdAt: FieldValue.serverTimestamp(),
-              updatedAt: FieldValue.serverTimestamp(),
-            }));
-            pkgSaved++;
-            importedUuids.push(cleanUuid);
-          } catch (err: any) {
-            logger.error(`❌ Error procesando XML ${fileName}:`, err.message);
-            pkgParseErrors++;
-            importErrors.push({
-              type: "processing",
-              stage: "save",
-              packageId: pkgId,
-              fileName,
-              message: err.message,
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      }
-
-      pkgLog.stage = "done";
-      pkgLog.xmlCount = pkgXmlCount;
-      pkgLog.saved = pkgSaved;
-      pkgLog.existing = pkgExisting;
-      pkgLog.parseErrors = pkgParseErrors;
-      pkgLog.finishedAt = new Date().toISOString();
-      packageLogs.push(pkgLog);
-
-      totalSaved += pkgSaved;
-      totalExisting += pkgExisting;
-      totalErrors += pkgParseErrors;
     } catch (err: any) {
       logger.error(`❌ Error descargando paquete ${pkgId}:`, err.message);
       pkgLog.stage = "fatal_error";
       pkgLog.error = err.message;
       packageLogs.push(pkgLog);
-      importErrors.push({
+      allImportErrors.push({
         type: "processing",
         stage: "download",
         packageId: pkgId,
@@ -718,32 +813,138 @@ async function autoImportPackages(
     }
   }
 
-  // Actualizar el documento de la solicitud con log detallado
-  const allSuccess = totalErrors === 0;
-
-  // Leer errores previos para no sobreescribirlos
-  const currentDoc = await reqDocRef.get();
-  const currentData = currentDoc.data() || {};
-  const previousErrors: any[] = currentData.importErrors || [];
-
-  await reqDocRef.update({
-    packagesDownloaded: true,
-    downloadedAt: new Date().toISOString(),
-    packagesProcessed: allSuccess,
-    processedWithErrors: !allSuccess && totalSaved > 0,
-    processedAt: new Date().toISOString(),
-    processedCount: totalSaved,
-    existingCount: totalExisting,
-    totalErrors,
-    importedUuids: importedUuids.slice(0, 500), // limitar para Firestore
-    existingUuids: existingUuids.slice(0, 500),
-    importLog: packageLogs,
-    importErrors: [...previousErrors, ...importErrors].slice(-100),
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  await updateImportResults(
+    reqDocRef, packageLogs, allImportErrors,
+    allImportedUuids, allExistingUuids,
+    totalSaved, totalExisting, totalErrors,
+    allStoragePaths
+  );
 
   return { saved: totalSaved, existing: totalExisting, errors: totalErrors };
 }
+
+/**
+ * Reprocesa paquetes de una solicitud SAT usando los ZIPs ya guardados en Storage.
+ * No necesita FIEL — lee los ZIPs del respaldo.
+ */
+export const retryImportPackage = onCall({
+  region: "us-central1",
+  timeoutSeconds: 300,
+}, async (request) => {
+  const { rfc, satRequestId } = request.data || {};
+
+  if (!rfc || !satRequestId) {
+    throw new HttpsError("invalid-argument", "Debes enviar rfc y satRequestId");
+  }
+
+  const db = getFirestore();
+  const bucket = getStorage().bucket();
+
+  // Buscar el documento de la solicitud
+  const reqDocRef = db.collection("clients").doc(rfc).collection("satRequests").doc(satRequestId);
+  const reqDoc = await reqDocRef.get();
+  if (!reqDoc.exists) {
+    throw new HttpsError("not-found", "No se encontró la solicitud SAT");
+  }
+
+  const reqData = reqDoc.data()!;
+  const packageIds: string[] = reqData.packageIds || [];
+
+  if (packageIds.length === 0) {
+    throw new HttpsError("failed-precondition", "La solicitud no tiene paquetes");
+  }
+
+  logger.info(`🔄 Retry import: ${rfc}/${satRequestId} con ${packageIds.length} paquetes`);
+
+  let totalSaved = 0;
+  let totalExisting = 0;
+  let totalErrors = 0;
+  const packageLogs: Record<string, any>[] = [];
+  const allImportErrors: Record<string, any>[] = [];
+  const allImportedUuids: string[] = [];
+  const allExistingUuids: string[] = [];
+
+  for (const pkgId of packageIds) {
+    const pkgLog: Record<string, any> = {
+      packageId: pkgId,
+      stage: "read_storage",
+      startedAt: new Date().toISOString(),
+    };
+
+    try {
+      // 1. Leer ZIP desde Storage
+      const zipPath = `clients/${rfc}/packages/${pkgId}.zip`;
+      const [exists] = await bucket.file(zipPath).exists();
+      if (!exists) {
+        pkgLog.stage = "zip_not_found";
+        pkgLog.error = `No se encontró ${zipPath} en Storage`;
+        packageLogs.push(pkgLog);
+        allImportErrors.push({
+          type: "processing",
+          stage: "read_storage",
+          packageId: pkgId,
+          message: `ZIP no encontrado en Storage: ${zipPath}`,
+          timestamp: new Date().toISOString(),
+        });
+        totalErrors++;
+        continue;
+      }
+
+      const [zipBuffer] = await bucket.file(zipPath).download();
+
+      // 2. Procesar: extraer XMLs y guardar CFDIs
+      pkgLog.stage = "extract";
+      const result = await processZipPackage({
+        zipBuffer,
+        pkgId,
+        rfc,
+        satRequestId,
+        db,
+      });
+
+      pkgLog.stage = "done";
+      pkgLog.xmlCount = result.xmlCount;
+      pkgLog.saved = result.saved;
+      pkgLog.existing = result.existing;
+      pkgLog.parseErrors = result.parseErrors;
+      pkgLog.finishedAt = new Date().toISOString();
+      packageLogs.push(pkgLog);
+
+      totalSaved += result.saved;
+      totalExisting += result.existing;
+      totalErrors += result.parseErrors;
+      allImportErrors.push(...result.errors);
+      allImportedUuids.push(...result.importedUuids);
+      allExistingUuids.push(...result.existingUuids);
+    } catch (err: any) {
+      logger.error(`❌ Error reprocesando paquete ${pkgId}:`, err.message);
+      pkgLog.stage = "fatal_error";
+      pkgLog.error = err.message;
+      packageLogs.push(pkgLog);
+      allImportErrors.push({
+        type: "processing",
+        stage: "extract",
+        packageId: pkgId,
+        message: err.message,
+        timestamp: new Date().toISOString(),
+      });
+      totalErrors++;
+    }
+  }
+
+  await updateImportResults(
+    reqDocRef, packageLogs, allImportErrors,
+    allImportedUuids, allExistingUuids,
+    totalSaved, totalExisting, totalErrors
+  );
+
+  return {
+    success: totalErrors === 0,
+    saved: totalSaved,
+    existing: totalExisting,
+    errors: totalErrors,
+  };
+});
 
 /**
  * Verifica automáticamente solicitudes pendientes cada 2 horas

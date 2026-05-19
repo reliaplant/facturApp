@@ -11,6 +11,7 @@ export interface FixedAsset {
   description?: string;     // Descripción adicional del activo
   purchaseDate: string;     // Fecha de compra
   cost: number;             // Valor de compra
+  iva?: number;              // IVA de la compra
   deductibleValue?: number; // Valor deducible para impuestos (si es distinto al costo)
   monthlyDepreciation?: number; // Depreciación mensual (calculada)
   
@@ -78,6 +79,7 @@ export interface CreateFixedAssetData {
   type: string;
   purchaseDate: string;
   cost: number;
+  iva?: number;
   deductibleValue?: number;
   usefulLifeMonths: number;
   depreciationMethod: 'straightLine';

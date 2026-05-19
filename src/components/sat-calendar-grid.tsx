@@ -12,7 +12,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCw } from "lucide-react";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 /**
  * Intenta extraer una explicación legible de un mensaje de error del SAT
@@ -146,6 +147,8 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
 }) => {
   const [viewType, setViewType] = useState<"issued" | "received" | "both">("both");
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null); // satRequestId being retried
+  const [retryResult, setRetryResult] = useState<{ id: string; msg: string; ok: boolean } | null>(null);
 
   /**
    * Construye un mapa: "YYYY-MM-DD" -> { issued: SatRequest, received: SatRequest }
@@ -677,6 +680,50 @@ const SatCalendarGrid: React.FC<SatCalendarGridProps> = ({
                                 </div>
                               ))}
                             </div>
+                          </div>
+                        )}
+
+                        {/* Botón de retry: solo si hay ZIPs en Storage y hubo error en procesamiento */}
+                        {req.storagePaths && req.storagePaths.length > 0 && (!req.packagesProcessed || req.processedWithErrors || (req.importErrors && req.importErrors.length > 0)) && (
+                          <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <button
+                              disabled={retrying === req.id}
+                              onClick={async () => {
+                                setRetrying(req.id);
+                                setRetryResult(null);
+                                try {
+                                  const functions = getFunctions(undefined, "us-central1");
+                                  const retryFn = httpsCallable<
+                                    { rfc: string; satRequestId: string },
+                                    { success: boolean; saved: number; existing: number; errors: number }
+                                  >(functions, "retryImportPackage");
+                                  const res = await retryFn({ rfc: req.rfc, satRequestId: req.id });
+                                  const d = res.data;
+                                  setRetryResult({
+                                    id: req.id,
+                                    ok: d.success,
+                                    msg: `${d.saved} nuevos, ${d.existing} existentes, ${d.errors} errores`,
+                                  });
+                                } catch (e: any) {
+                                  setRetryResult({
+                                    id: req.id,
+                                    ok: false,
+                                    msg: e.message || "Error desconocido",
+                                  });
+                                } finally {
+                                  setRetrying(null);
+                                }
+                              }}
+                              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-medium rounded-md bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 dark:hover:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                            >
+                              <RotateCw className={`w-3 h-3 ${retrying === req.id ? "animate-spin" : ""}`} />
+                              {retrying === req.id ? "Reprocesando…" : "Reintentar procesamiento"}
+                            </button>
+                            {retryResult && retryResult.id === req.id && (
+                              <p className={`mt-1 text-[10px] text-center ${retryResult.ok ? "text-green-600" : "text-red-500"}`}>
+                                {retryResult.ok ? "✓" : "✗"} {retryResult.msg}
+                              </p>
+                            )}
                           </div>
                         )}
                         </>

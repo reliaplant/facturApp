@@ -132,7 +132,9 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
   // Calculate current depreciation percent for display
   const usefulLifeMonths = formData.usefulLifeMonths || 60;
   const usefulLifeYears = usefulLifeMonths / 12;
-  const currentDepreciationPercent = Math.round(100 / usefulLifeYears);
+  const rawPercent = 100 / usefulLifeYears;
+  const depOptions = [100, 50, 33, 30, 25, 20, 16.67, 14.29, 12.5, 11.11, 10, 5];
+  const currentDepreciationPercent = depOptions.reduce((prev, curr) => Math.abs(curr - rawPercent) < Math.abs(prev - rawPercent) ? curr : prev);
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -233,13 +235,18 @@ export const AddFixedAssetDialog = ({ clientId, onAssetAdded }: { clientId: stri
                   <SelectValue placeholder="% de depreciación anual" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="5">5% (Edificios - 20 años)</SelectItem>
-                  <SelectItem value="10">10% (Mobiliario - 10 años)</SelectItem>
-                  <SelectItem value="25">25% (Vehículos - 4 años)</SelectItem>
-                  <SelectItem value="30">30% (Computación - 3.3 años)</SelectItem>
-                  <SelectItem value="33">33% (3 años)</SelectItem>
-                  <SelectItem value="50">50% (2 años)</SelectItem>
-                  <SelectItem value="100">100% (1 año)</SelectItem>
+                  <SelectItem value="100">1 año (100%)</SelectItem>
+                  <SelectItem value="50">2 años (50%)</SelectItem>
+                  <SelectItem value="33">3 años (33%)</SelectItem>
+                  <SelectItem value="30">3.3 años (30%)</SelectItem>
+                  <SelectItem value="25">4 años (25%)</SelectItem>
+                  <SelectItem value="20">5 años (20%)</SelectItem>
+                  <SelectItem value="16.67">6 años (16.6%)</SelectItem>
+                  <SelectItem value="14.29">7 años (14.3%)</SelectItem>
+                  <SelectItem value="12.5">8 años (12.5%)</SelectItem>
+                  <SelectItem value="11.11">9 años (11.1%)</SelectItem>
+                  <SelectItem value="10">10 años (10%)</SelectItem>
+                  <SelectItem value="5">20 años (5%)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

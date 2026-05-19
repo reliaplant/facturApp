@@ -19,6 +19,8 @@ import { clientService } from "@/services/client-service";
 import InfoClientePF from "./components/infoClientePF";
 import DeclaracionMensualPF from "@/components/declaracionMensualPF";
 import { FixedAssetsTable } from "@/components/fixed-assets-table";
+import { FixedAssetService } from "@/services/fixed-asset-service";
+import { FixedAsset } from "@/models/FixedAsset";
 import { Download } from "lucide-react"; // Add this import
 import { ExportInvoicesExcel } from "@/components/export-invoices-excel"; // Make sure this is imported
 import { cfdiService } from "@/services/cfdi-service";
@@ -77,6 +79,9 @@ export default function ClientDashboard() {
   // Add a visible status message to make it clear when data is clean
   const [uploadStatus, setUploadStatus] = useState("");
 
+  // Fixed assets state
+  const [fixedAssets, setFixedAssets] = useState<FixedAsset[]>([]);
+
   // Verificar si el perfil está completo (todos los 9 campos obligatorios)
   const perfilCompleto = !!(
     client?.rfc?.trim() &&
@@ -114,6 +119,11 @@ export default function ClientDashboard() {
           // Also fetch the client's invoices - now using cfdiService
           const clientInvoices = await cfdiService.getInvoices(clientId);
           setInvoices(clientInvoices);
+
+          // Fetch fixed assets for export
+          const fixedAssetService = new FixedAssetService();
+          const assets = await fixedAssetService.getFixedAssetsByClient(clientId);
+          setFixedAssets(assets);
         } else {
           toast({
             title: "Error",
@@ -163,6 +173,11 @@ export default function ClientDashboard() {
           const clientInvoices = await cfdiService.getInvoices(clientId);
           setInvoices(clientInvoices);
           setLastInvoiceRefresh(Date.now());
+
+          // Also refresh fixed assets
+          const fixedAssetService = new FixedAssetService();
+          const assets = await fixedAssetService.getFixedAssetsByClient(clientId);
+          setFixedAssets(assets);
         }
       } catch (error) {
         console.error("Error fetching data:", error);
@@ -436,6 +451,7 @@ export default function ClientDashboard() {
               <ExportInvoicesExcel
                 emittedInvoices={emittedInvoices}
                 receivedInvoices={receivedInvoices}
+                fixedAssets={fixedAssets}
                 year={selectedYear}
                 fileName={`${client?.name || 'Cliente'}_Facturas_${selectedYear}.xlsx`}
                 buttonLabel="Exportar"

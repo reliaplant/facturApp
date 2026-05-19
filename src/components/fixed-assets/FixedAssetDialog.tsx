@@ -45,6 +45,7 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
         type: asset.type,
         purchaseDate: asset.purchaseDate ? asset.purchaseDate.split("T")[0] : new Date().toISOString().split('T')[0],
         cost: asset.cost,
+        iva: asset.iva || 0,
         usefulLifeMonths: asset.usefulLifeMonths,
         deductibleValue: asset.deductibleValue || asset.cost,
         invoiceNumber: asset.invoiceNumber || '',
@@ -59,6 +60,7 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
       type: '',
       purchaseDate: new Date().toISOString().split('T')[0],
       cost: 0,
+      iva: 0,
       usefulLifeMonths: 120, // 10% anual por defecto
       deductibleValue: 0,
       invoiceNumber: '',
@@ -109,7 +111,7 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
     }
     
     // Handle numeric fields properly
-    if (name === 'cost' || name === 'deductibleValue' || name === 'usefulLifeMonths') {
+    if (name === 'cost' || name === 'deductibleValue' || name === 'usefulLifeMonths' || name === 'iva') {
       setFormData(prev => ({
         ...prev,
         [name]: parseFloat(value) || 0 // Ensure it's always a number, default to 0 if invalid
@@ -175,6 +177,7 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
       const assetData = {
         ...formData,
         cost: Number(formData.cost),
+        iva: Number(formData.iva || 0),
         usefulLifeMonths: Number(formData.usefulLifeMonths),
         residualValue: 0,
         depreciationMethod: 'straightLine',
@@ -208,7 +211,10 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
   // Calculate current depreciation percent for display
   const usefulLifeMonths = formData.usefulLifeMonths || 120;
   const usefulLifeYears = usefulLifeMonths / 12;
-  const currentDepreciationPercent = Math.round(100 / usefulLifeYears);
+  const rawPercent = 100 / usefulLifeYears;
+  // Snap to nearest known option to handle floating point (e.g. 3.3%)
+  const depOptions = [100, 50, 33, 30, 25, 20, 16.67, 14.29, 12.5, 11.11, 10, 5];
+  const currentDepreciationPercent = depOptions.reduce((prev, curr) => Math.abs(curr - rawPercent) < Math.abs(prev - rawPercent) ? curr : prev);
   
   // If controlled externally (from row click), don't show trigger button
   const showTrigger = controlledOpen === undefined;
@@ -307,8 +313,8 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
               </div>
             </div>
 
-            {/* Row 3: Valor + Valor Deducible */}
-            <div className="grid grid-cols-2 gap-3">
+            {/* Row 3: Valor + IVA + Valor Deducible */}
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1">
                 <Label htmlFor="cost" className="text-xs text-gray-500">Valor Compra *</Label>
                 <Input
@@ -324,6 +330,19 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
                 {validationErrors.cost && (
                   <p className="text-red-500 text-xs">{validationErrors.cost}</p>
                 )}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="iva" className="text-xs text-gray-500">IVA</Label>
+                <Input
+                  id="iva"
+                  name="iva"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="h-9 text-sm"
+                  value={formData.iva || ''}
+                  onChange={handleInputChange}
+                />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="deductibleValue" className="text-xs text-gray-500">Valor Deducible</Label>
@@ -357,13 +376,18 @@ export const FixedAssetDialog = ({ clientId, asset, onSuccess, onDelete, open: c
                     <SelectValue placeholder="%" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="5">5% (20 años)</SelectItem>
-                    <SelectItem value="10">10% (10 años)</SelectItem>
-                    <SelectItem value="25">25% (4 años)</SelectItem>
-                    <SelectItem value="30">30% (3.3 años)</SelectItem>
-                    <SelectItem value="33">33% (3 años)</SelectItem>
-                    <SelectItem value="50">50% (2 años)</SelectItem>
-                    <SelectItem value="100">100% (1 año)</SelectItem>
+                    <SelectItem value="100">1 año (100%)</SelectItem>
+                    <SelectItem value="50">2 años (50%)</SelectItem>
+                    <SelectItem value="33">3 años (33%)</SelectItem>
+                    <SelectItem value="30">3.3 años (30%)</SelectItem>
+                    <SelectItem value="25">4 años (25%)</SelectItem>
+                    <SelectItem value="20">5 años (20%)</SelectItem>
+                    <SelectItem value="16.67">6 años (16.6%)</SelectItem>
+                    <SelectItem value="14.29">7 años (14.3%)</SelectItem>
+                    <SelectItem value="12.5">8 años (12.5%)</SelectItem>
+                    <SelectItem value="11.11">9 años (11.1%)</SelectItem>
+                    <SelectItem value="10">10 años (10%)</SelectItem>
+                    <SelectItem value="5">20 años (5%)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

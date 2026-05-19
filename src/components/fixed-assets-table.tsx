@@ -125,6 +125,7 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Nombre</th>
                   <th className="px-2 py-1.5 font-medium bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600 text-left">Tipo</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Valor compra</th>
+                  <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">IVA</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Valor deducible</th>
                   <th className="px-2 py-1.5 font-medium text-center bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Meses</th>
                   <th className="px-2 py-1.5 font-medium text-right bg-gray-100 dark:bg-gray-800 border-b-2 border-gray-300 dark:border-gray-600">Dep. Mensual</th>
@@ -134,13 +135,13 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
               <tbody className="mt-1">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Cargando activos fijos...
                     </td>
                   </tr>
                 ) : assets.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-2 py-4 text-center text-gray-500 text-xs">
+                    <td colSpan={9} className="px-2 py-4 text-center text-gray-500 text-xs">
                       Este cliente no tiene activos fijos registrados
                     </td>
                   </tr>
@@ -187,13 +188,17 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                         <td className="px-2 py-1 align-middle text-right">
                           <span className="text-xs">${asset.cost.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
                         </td>
+                        {/* IVA */}
+                        <td className="px-2 py-1 align-middle text-right">
+                          <span className="text-xs">${(asset.iva || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
+                        </td>
                         {/* Valor deducible */}
                         <td className="px-2 py-1 align-middle text-right">
                           <span className="text-xs">${deductibleValue.toLocaleString('es-MX', { minimumFractionDigits: 2 })}</span>
                         </td>
                         {/* Meses */}
                         <td className="px-2 py-1 align-middle text-center">
-                          <span className="text-xs"><span className="font-medium">{totalMonths}</span> / {elapsedMonths}</span>
+                          <span className={`text-xs ${elapsedMonths >= totalMonths ? "text-green-600 font-medium" : ""}`}>{Math.min(elapsedMonths, totalMonths)} / {totalMonths}</span>
                         </td>
                         {/* Dep. Mensual */}
                         <td className="px-2 py-1 align-middle text-right">
@@ -213,6 +218,9 @@ export function FixedAssetsTable({ clientId, selectedYear }: { clientId: string,
                   <td colSpan={3} className="pl-7 px-2 py-1.5 text-left text-xs">Totales</td>
                   <td className="px-2 py-1.5 text-right text-xs">
                     ${totalCost.toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs">
+                    ${assets.reduce((sum, asset) => sum + (asset.iva || 0), 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
                   </td>
                   <td className="px-2 py-1.5 text-right text-xs">
                     ${totalDeductible.toLocaleString('es-MX', { minimumFractionDigits: 2 })}

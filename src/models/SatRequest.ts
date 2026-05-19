@@ -37,6 +37,7 @@ export interface SatRequest {
   existingUuids?: string[];   // UUIDs de CFDIs que ya existían
   importLog?: ImportPackageLog[];    // Log por paquete
   importErrors?: ImportError[]; // Array acumulativo de errores (nunca se sobreescribe)
+  storagePaths?: string[];      // Rutas de ZIPs guardados en Storage (permite retry sin FIEL)
 }
 
 /** Log de procesamiento por paquete */

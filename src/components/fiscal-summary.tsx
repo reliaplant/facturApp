@@ -9,6 +9,7 @@ import { fiscalCalculator, AnnualFiscalSummary } from "@/services/fiscal-calcula
 import { useToast } from "@/components/ui/use-toast";
 import { TaxBracketsService, REGIMEN_CODES, RegimenFiscalPF } from "@/services/tax-brackets-service";
 import { FixedAssetService } from "@/services/fixed-asset-service";
+import { FixedAsset } from "@/models/FixedAsset";
 import { facturasExtranjerasService } from "@/services/facturas-extranjeras-service";
 import { FacturaExtranjera } from "@/models/facturaManual";
 import DeclaracionModal from "@/components/declaracion-modal";
@@ -140,6 +141,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
   
   const [loading, setLoading] = useState(false);
   const [monthlyDepreciations, setMonthlyDepreciations] = useState<Record<number, number>>({});
+  const [monthlyIvaInversiones, setMonthlyIvaInversiones] = useState<Record<number, number>>({});
   const [taxBracketsByMonth, setTaxBracketsByMonth] = useState<Record<number, any[]>>({});
   const [declaracionModalOpen, setDeclaracionModalOpen] = useState(false);
   const { toast } = useToast();
@@ -232,6 +234,21 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
         
         console.log("Fixed asset depreciation data loaded:", depreciations);
         setMonthlyDepreciations(depreciations);
+
+        // Also load IVA from fixed assets by purchase month
+        const assets = await fixedAssetService.getFixedAssetsByClient(clientId);
+        const ivaByMonth: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) ivaByMonth[i] = 0;
+        for (const asset of assets) {
+          if (asset.iva && asset.iva > 0 && asset.purchaseDate) {
+            const purchaseDate = new Date(asset.purchaseDate);
+            if (purchaseDate.getFullYear() === year) {
+              const m = purchaseDate.getMonth();
+              ivaByMonth[m] += asset.iva;
+            }
+          }
+        }
+        setMonthlyIvaInversiones(ivaByMonth);
       } catch (error) {
         console.error("Error loading depreciation data:", error);
         // Set all to zero if there's an error
@@ -240,6 +257,9 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
           emptyDepreciations[i] = 0;
         }
         setMonthlyDepreciations(emptyDepreciations);
+        const emptyIva: Record<number, number> = {};
+        for (let i = 0; i < 12; i++) emptyIva[i] = 0;
+        setMonthlyIvaInversiones(emptyIva);
       }
     };
     
@@ -337,7 +357,8 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
       const collected = monthlyData[m]?.ivaCollected || 0;
       const paid = monthlyData[m]?.ivaPaid || 0;
       const retenido = monthlyData[m]?.ivaRetenido || 0;
-      const ivaDiff = collected - paid - retenido;
+      const ivaInversiones = monthlyIvaInversiones[m] || 0;
+      const ivaDiff = collected - paid - retenido - ivaInversiones;
       
       const ivaFavorMes = Math.max(0, -ivaDiff);
       const ivaPorPagar = Math.max(0, ivaDiff);
@@ -362,7 +383,7 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
     }
     
     return result;
-  }, [monthlyData, saldosFavorPorMes]);
+  }, [monthlyData, saldosFavorPorMes, monthlyIvaInversiones]);
 
   // ISR calculation functions - usando datos calculados dinámicamente
   const calculateMonthISR = (month: number, amount: number) => {
@@ -731,6 +752,28 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                   })}
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Total deducciones del periodo</td>
+                  {months.map(month => {
+                    const expenseValue = monthlyData[month]?.expenseAmount || 0;
+                    const exentoValue = monthlyExento[month + 1] || 0;
+                    const extranjeroValue = monthlyExtranjero[month + 1] || 0;
+                    const totalValue = expenseValue + exentoValue + extranjeroValue;
+                    // Accumulate from month 0 up to current month
+                    let accumulated = 0;
+                    for (let i = 0; i <= month; i++) {
+                      accumulated += (monthlyData[i]?.expenseAmount || 0) + (monthlyExento[i + 1] || 0) + (monthlyExtranjero[i + 1] || 0);
+                    }
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${getCellStyle(month, accumulated)}`}
+                      >
+                        {formatCurrency(accumulated)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Depreciación mensual</td>
                   {months.map(month => {
                     const value = monthlyDepreciations[month] || 0;
@@ -745,7 +788,24 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                   })}
                 </tr>
                 <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
-                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Total deducciones del periodo</td>
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Deducción de inversiones del periodo</td>
+                  {months.map(month => {
+                    let accumulated = 0;
+                    for (let i = 0; i <= month; i++) {
+                      accumulated += monthlyDepreciations[i] || 0;
+                    }
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${getCellStyle(month, accumulated)}`}
+                      >
+                        {formatCurrency(accumulated)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">Total deducciones + inversiones</td>
                   {months.map(month => {
                     const expenseValue = monthlyData[month]?.expenseAmount || 0;
                     const depreciationValue = monthlyDepreciations[month] || 0;
@@ -853,6 +913,20 @@ export function FiscalSummary({ year, clientId, cfdis, regimenFiscal }: FiscalSu
                   <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA Pagado</td>
                   {months.map(month => {
                     const value = monthlyData[month]?.ivaPaid || 0;
+                    return (
+                      <td 
+                        key={month} 
+                        className={`px-2 py-1 align-middle text-center ${getCellStyle(month, value)}`}
+                      >
+                        {formatCurrency(value)}
+                      </td>
+                    );
+                  })}
+                </tr>
+                <tr className="border-t border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="pl-7 px-2 py-1 font-medium whitespace-nowrap">IVA Acreditable Inversiones</td>
+                  {months.map(month => {
+                    const value = monthlyIvaInversiones[month] || 0;
                     return (
                       <td 
                         key={month} 
